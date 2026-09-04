@@ -64,7 +64,7 @@ Not configurable but relevant: the cup bottom must sit in the middle 60 % of the
 | `IHS_SHOULDER_SYM` | 0.50 | shoulder gap as a fraction of the shallower shoulder depth | |
 | `IHS_TIME_SYM` | 2.5 | max ratio of left-half to right-half duration | |
 | `IHS_MAX_NECK_SLOPE` | 0.15 | neckline change over the width, as a fraction of the head price | beyond this it is a trend line |
-| `IHS_PRIOR_DECLINE` | 0.10 | required decline into the left shoulder (60-bar look-back) | |
+| `IHS_PRIOR_DECLINE` | 0.10 | required decline into the left shoulder as a share of the 60-bar high | |
 
 ## Bullish Wolfe Wave
 

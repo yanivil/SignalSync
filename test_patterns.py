@@ -192,7 +192,10 @@ def test_cup_levels_follow_documented_formulas(cup_df):
     assert scan.CUP_MIN_LEN <= b - a <= scan.CUP_MAX_LEN
     assert abs(rim_b - rim_a) / rim_a <= scan.CUP_RIM_TOL
     assert scan.CUP_MIN_DEPTH <= (rim_a - bottom) / rim_a <= scan.CUP_MAX_DEPTH
-    assert trigger <= round(rim_b, 2) + TOL and handle_low < trigger
+    assert handle_low < trigger
+    # Prior advance is a *rise* from the 120-bar low to rim A (not "low 25 % below rim").
+    pre_low = low[max(0, a - 120):a + 1].min()
+    assert (rim_a - pre_low) / pre_low >= scan.CUP_PRIOR_ADVANCE
     # Trigger = handle high; first close above it after the handle is the break.
     assert high[b + 1:h + 1].max() <= trigger + TOL
     first_break = next(i for i in range(h + 1, len(close)) if close[i] > trigger)
@@ -227,6 +230,9 @@ def test_ihs_levels_follow_documented_formulas(ihs_df):
     slope = (high[n2] - high[n1]) / (n2 - n1)
     assert (float(m[7]), float(m[8])) == (round(high[n1], 2), round(high[n2], 2))
     assert abs(slope * (rs - ls)) / close[h] <= scan.IHS_MAX_NECK_SLOPE
+    # Prior decline is measured as a share of the 60-bar high before LS.
+    look = high[max(0, ls - 60):ls + 1]
+    assert (look.max() - ls_v) / look.max() >= scan.IHS_PRIOR_DECLINE
     neck = lambda i: high[n1] + slope * (i - n1)  # noqa: E731
     assert float(m[9]) == pytest.approx(neck(n - 1), abs=TOL)
     first_break = next(j for j in range(rs + 1, n) if close[j] > neck(j))
@@ -321,6 +327,33 @@ def cup_variant(pre=None, cup=None, handle=None, brk=None) -> pd.DataFrame:
 ])
 def test_cup_single_rule_violations_are_rejected(label, kwargs):
     assert scan.detect_cup_and_handle(cup_variant(**kwargs), "CUP") == [], label
+
+
+def test_cup_prior_advance_is_a_rise_from_the_low():
+    """The rule is a >= 25 % rise from the 120-bar low into rim A.
+
+    A low 20.6 % below the rim (a 25.9 % rise) passes, which a "low must be
+    25 % below the rim" reading would reject; a 19.9 % rise fails.  The low
+    sits inside the 120-bar look-back window before the rim.
+    """
+    def prefix(low):
+        return np.concatenate([np.full(100, low), np.linspace(low, 100, 120)])
+    assert scan.detect_cup_and_handle(cup_variant(pre=prefix(100 / 1.259)), "CUP")
+    assert scan.detect_cup_and_handle(cup_variant(pre=prefix(100 / 1.199)), "CUP") == []
+
+
+def test_wick_above_rim_b_inside_the_handle_raises_the_trigger(cup_df):
+    """The trigger is the handle high, which is not bounded by rim B."""
+    (base,) = scan.detect_cup_and_handle(cup_df, "CUP")
+    m = re.search(r"right rim (\S+) @([\d.]+)", base.notes)
+    rim_b = float(m[2])
+    spiked = cup_df.copy()
+    i = spiked.index[-8]                                   # inside the handle, close stays low
+    spiked.loc[i, "High"] = rim_b * 1.03
+    (s,) = scan.detect_cup_and_handle(spiked, "CUP")
+    assert base.status == "CONFIRMED" and s.status == "WATCHLIST"   # the 102 close no longer clears it
+    assert s.entry == pytest.approx(rim_b * 1.03, abs=TOL) and s.entry > rim_b
+    assert f"trigger {s.entry:.2f}" in s.notes
 
 
 def test_cup_unbroken_within_three_percent_is_watchlisted():

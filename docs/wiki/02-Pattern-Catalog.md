@@ -13,7 +13,7 @@ Every detector works on positional daily bars (`High`, `Low`, `Close` as numpy a
 | Volume ratio | volume on the breakout bar / mean of the 50 bars before it | `None` before bar 20 or when the base is zero; adds +5 score when ≥ 1.3 |
 | Risk filter | `risk_pct = (entry − stop) / entry × 100`; rejected if > 15 or if `stop ≥ entry` | applies to every pattern |
 
-Entry is the breakout close when it is above the trigger (and within 5 % of it), otherwise the trigger itself (watchlist rows).
+Entry is the breakout close when it is above the trigger (and within 5 % of it), otherwise the trigger itself (watchlist rows). Either way it is the previous session's close: a trade placed after the morning report fills at the next US open, so the reported risk % and target are estimates, and a gap-up past 5 % over the trigger is the same "runaway" condition that would have filtered the setup.
 
 ## Summary table
 
@@ -29,11 +29,11 @@ Entry is the breakout close when it is above the trigger (and within 5 % of it),
 
 1. Rims: `|high[B] − high[A]| / high[A] ≤ CUP_RIM_TOL` (0.05).
 2. Bottom: lowest low in `[A, B]`; `depth = (high[A] − bottom) / high[A]` must be in `[0.12, 0.50]`; bottom position `(idx − A) / (B − A)` in `[0.20, 0.80]`.
-3. Prior advance: lowest low in the 120 bars before A must be ≥ 25 % below `high[A]`.
+3. Prior advance: the rise from the lowest low of the 120 bars before A to `high[A]` must be ≥ 25 % (`(high[A] − low) / low ≥ 0.25`, i.e. the low is at most 20 % below the rim). It is a rise test, not a "25 % below the rim" test, which would demand a 33 % rise.
 4. Roundness: `R²` of a convex (a > 0) quadratic least-squares fit of the lows over `[A, B]` must be ≥ 0.60. An arch (a ≤ 0) scores 0.
 5. U versus V: the best two-legged fit `a + b·|x − c|` (b > 0, vertex `c` searched within ±10 % of the width around the lowest low) may not beat the parabola's R² by more than `CUP_MAX_V_ADVANTAGE` (0). On reference shapes the parabola wins by +0.04 on a half-sine, +0.37 on a flat dish and +0.01 on a lopsided sine, and loses by 0.06 on a clean V, so a sharp reversal is rejected while any rounded or flat base passes.
 6. Handle (`_find_handle`): runs from `B+1` to the bar before the first close above the handle's running high, capped at 40 bars or the end of data, and must last ≥ 5 bars (a close above the running high within the first 5 bars is still "the handle forming"). Handle depth `(high[B] − handle_low) / high[B]` ≤ 0.12, ≤ 0.50 × cup depth, and the handle low must stay above `bottom + 0.5 × (high[B] − bottom)`.
-7. Trigger = handle high (≤ rim B by construction). Confirmation is scanned from the bar after the handle ends.
+7. Trigger = the handle's highest high. Confirmation is scanned from the bar after the handle ends. Rim B is a swing high, so no bar within 5 of it can exceed it, but a wick above B later in the handle (a bar whose high spikes but whose close stays below the running handle high) raises the trigger above the rim; the setup then needs a close above that wick, which is conservative and usually leaves it on the watchlist.
 
 **Levels.** `stop = handle_low − 0.25 × ATR[handle_low]`; `target = entry + (high[A] − bottom)` (measured move).
 
@@ -55,7 +55,7 @@ Entry is the breakout close when it is above the trigger (and within 5 % of it),
 2. Shoulder price symmetry: `|low[LS] − low[RS]| ≤ 0.50 × min(low[LS] − low[H], low[RS] − low[H])`.
 3. Time symmetry: `(H − LS) / (RS − H)` within `[1/2.5, 2.5]`.
 4. Neckline: anchors `n1 = argmax(high[LS..H])`, `n2 = argmax(high[H..RS])`; `slope = (high[n2] − high[n1]) / (n2 − n1)`; `neck(i) = high[n1] + slope × (i − n1)`. Tilt test: `|slope × (RS − LS)| / close[H] ≤ 0.15`.
-5. Prior decline: highest high in the 60 bars before LS must be ≥ 10 % above `low[LS]`.
+5. Prior decline: from the highest high of the 60 bars before LS down to `low[LS]` must be ≥ 10 % **of that high** (`(high − low[LS]) / high ≥ 0.10`), which is slightly stricter than "10 % above the shoulder low".
 6. Confirmation: first bar `j > RS` with `close[j] > neck(j)`; trigger = `neck(j)`. Confirmed if `age ≤ MAX_BREAKOUT_AGE + 5`, the last close is still above `neck(n−1)` and not more than 5 % above the trigger. Watchlist if unbroken, last close ≥ 97 % of `neck(n−1)` and above `low[RS]`.
 
 **Levels.** `stop = low[RS] − 0.25 × ATR[RS]`; `target = entry + (trigger − low[H])`.

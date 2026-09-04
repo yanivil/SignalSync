@@ -5,6 +5,15 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed (docs)
+- Pattern catalog stated two gating rules with the wrong denominator: the
+  cup prior-advance is a >= 25 % *rise* from the 120-bar low (not "low 25 %
+  below the rim"), and the H&S prior-decline is >= 10 % *of the prior high*.
+  It also claimed the cup trigger is <= rim B "by construction"; a wick above
+  B later in the handle raises it. Tests now pin all three.
+- Report footer and the catalog state that entry is the previous close and
+  a trade fills at the next open.
+
 ### Added
 - `LICENSE` (MIT) and a license badge / section in the README.
 
