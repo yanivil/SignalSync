@@ -1,0 +1,35 @@
+# Manual: replay every CONFIRMED signal ever committed in output/signals.json
+# against the prices that followed (needs the runner's open internet).  The
+# Markdown table lands in the job summary.  Trigger with
+#   gh workflow run evaluate-signals.yml [-f horizon=60]
+name: evaluate-signals
+
+on:
+  workflow_dispatch:
+    inputs:
+      horizon:
+        description: "bars to wait before an unresolved signal counts as open"
+        required: false
+        default: "60"
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0       # the whole history of output/signals.json is the signal log
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Evaluate
+        run: |
+          python tools/evaluate_signals.py --horizon "${{ github.event.inputs.horizon || '60' }}" \
+            --json evaluation.json | tee -a "$GITHUB_STEP_SUMMARY"

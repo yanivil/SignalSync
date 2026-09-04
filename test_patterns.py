@@ -68,11 +68,31 @@ def test_u_shape_r2_parabola_arch_v_and_degenerate():
     assert scan._u_shape_r2(-((x - 10) ** 2) + 500) == 0.0          # arch: convexity sign
     assert scan._u_shape_r2(np.ones(20)) == 0.0                     # zero variance
     assert scan._u_shape_r2(np.array([1.0, 2.0, 1.0])) == 0.0       # fewer than 5 points
-    # Known limitation, documented in the pattern catalog: a parabola explains
-    # a symmetric V well, so the roundness test alone does not reject a V.
-    # If the test is tightened, update docs/wiki/02-Pattern-Catalog.md too.
+    # A parabola explains a symmetric V well, so this test alone would pass a
+    # V; the detector pairs it with _v_shape_r2 (next test) to reject Vs.
     v = scan._u_shape_r2(np.abs(x - 10) + 5)
     assert 0.90 < v < 0.95 and v >= scan.CUP_MIN_ROUNDNESS
+
+
+def test_v_shape_r2_separates_rounded_bases_from_sharp_reversals():
+    x = np.arange(100, dtype=float)
+    shapes = {
+        "parabola": (x - 50) ** 2 / 25 + 75,
+        "half-sine": 100 - 25 * np.sin(np.linspace(0, np.pi, 100)),
+        "flat dish": np.clip(np.abs(x - 50) - 20, 0, None) + 75,
+        "asymmetric sine": 100 - 25 * np.sin(np.pi * (x / 100) ** 0.7),
+    }
+    for label, y in shapes.items():                 # rounded: the U fit wins
+        u, v = scan._u_shape_r2(y), scan._v_shape_r2(y, int(np.argmin(y)))
+        assert u - v > scan.CUP_MAX_V_ADVANTAGE, (label, u, v)
+    v_shape = np.abs(x - 50) / 2 + 75
+    u, v = scan._u_shape_r2(v_shape), scan._v_shape_r2(v_shape, 50)
+    assert v == pytest.approx(1.0) and v - u > 0.05  # V: the two legs win outright
+    noisy_v = v_shape + np.random.default_rng(1).normal(0, 1.5, 100)
+    assert scan._v_shape_r2(noisy_v, int(np.argmin(noisy_v))) > scan._u_shape_r2(noisy_v)
+    assert scan._v_shape_r2(np.ones(20), 10) == 0.0                  # zero variance
+    assert scan._v_shape_r2(-np.abs(x - 50), 50) == 0.0             # legs open downward
+    assert scan._v_shape_r2(np.array([1.0, 0.0, 1.0]), 1) == 0.0    # fewer than 5 points
 
 
 @pytest.mark.parametrize("close, start, lag, expected", [
@@ -98,6 +118,9 @@ def test_trend_context_states(cup_df, flat_df):
     down = _ohlc_from_path(np.linspace(300, 100, 400), seed=1)
     desc, up, strong_down = scan.trend_context(down)
     assert strong_down and not up and "SMA200 falling" in desc
+    with pytest.MonkeyPatch.context() as mp:            # the veto reads its constant
+        mp.setattr(scan, "TREND_STRONG_DOWN", 0.0)
+        assert not scan.trend_context(down)[2]
     # Fewer than 200 bars: falls back to SMA50 and says so.
     desc, up, _ = scan.trend_context(_ohlc_from_path(np.linspace(50, 100, 120), seed=1))
     assert up and "SMA200 n/a" in desc
@@ -293,6 +316,8 @@ def cup_variant(pre=None, cup=None, handle=None, brk=None) -> pd.DataFrame:
     ("breakout stale (6 bars > MAX_BREAKOUT_AGE)",
      dict(brk=np.array([101.5, 102.0, 102.1, 102.2, 102.3, 102.4, 102.5]))),
     ("below SMA200 (continuation needs an up-trend)", dict(pre=np.linspace(200, 100, 220))),
+    ("symmetric V bottom (two legs fit better than a U)",
+     dict(cup=100 - 25 * (1 - np.abs(np.linspace(-1, 1, 100))))),
 ])
 def test_cup_single_rule_violations_are_rejected(label, kwargs):
     assert scan.detect_cup_and_handle(cup_variant(**kwargs), "CUP") == [], label

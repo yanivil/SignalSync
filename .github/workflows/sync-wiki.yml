@@ -1,0 +1,41 @@
+# Mirror docs/wiki/ into the GitHub wiki (a separate git repository,
+# <repo>.wiki.git) whenever those files change on main.  docs/wiki/ is the
+# source of truth; edits made in the wiki UI are overwritten on the next sync.
+# Relative links between pages are written as "02-Pattern-Catalog.md" in the
+# repo (so they work on github.com) and become "02-Pattern-Catalog" in the
+# wiki, which links pages by name.
+name: sync-wiki
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/wiki/**"
+      - ".github/workflows/sync-wiki.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Push docs/wiki to the wiki repository
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git clone --depth 1 "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.wiki.git" wiki
+          rm -f wiki/*.md
+          for f in docs/wiki/*.md; do
+            sed -E 's/\]\(([0-9]{2}-[A-Za-z-]+)\.md\)/](\1)/g' "$f" > "wiki/$(basename "$f")"
+          done
+          cd wiki
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then echo "wiki already up to date"; exit 0; fi
+          git commit -m "docs: sync from ${GITHUB_SHA::7}"
+          git push

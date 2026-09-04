@@ -66,12 +66,13 @@ def test_load_symbols_from_csv_handles_header_variants_and_junk(tmp_path):
     assert scan.load_sp500_symbols(str(p)) == ["AAPL", "brk-b"]   # first column when no 'Symbol'
 
 
-def test_load_symbols_without_any_source_raises(monkeypatch, tmp_path):
+def test_load_symbols_without_any_source_raises_and_warns_about_missing_csv(monkeypatch, tmp_path, caplog):
     def blocked(*a, **k):
         raise urllib.error.URLError("network policy")
     monkeypatch.setattr(scan.urllib.request, "urlopen", blocked)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError), caplog.at_level("WARNING", logger="sp500scan"):
         scan.load_sp500_symbols(str(tmp_path / "missing.csv"))
+    assert "missing.csv not found" in caplog.text            # a wrong path never scans silently
 
 
 # --------------------------------------------------------------------------- #

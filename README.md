@@ -1,8 +1,7 @@
 # SignalSync
 
-[![build](https://img.shields.io/badge/build-placeholder-lightgrey)](#)
-[![tests](https://img.shields.io/badge/tests-placeholder-lightgrey)](#)
-[![coverage](https://img.shields.io/badge/coverage-placeholder-lightgrey)](#)
+[![tests](https://github.com/yanivil/SignalSync/actions/workflows/tests.yml/badge.svg)](https://github.com/yanivil/SignalSync/actions/workflows/tests.yml)
+[![daily scan](https://github.com/yanivil/SignalSync/actions/workflows/daily-scan.yml/badge.svg)](https://github.com/yanivil/SignalSync/actions/workflows/daily-scan.yml)
 [![python](https://img.shields.io/badge/python-3.12%2B-blue)](#)
 
 **SignalSync scans every S&P 500 constituent on daily bars for three bullish chart patterns and reports only confirmed, risk-defined setups with an entry, a structural stop and a reference target.**
@@ -111,7 +110,7 @@ Data errors: 1
 | [Configuration and Tuning](docs/wiki/03-Configuration-and-Tuning.md) | every threshold, what loosening or tightening it does, false-positive filters |
 | [Testing and Contributing](docs/wiki/04-Testing-and-Contributing.md) | running the suite, fixtures, adding a pattern, code style |
 
-The `docs/wiki/` files are written to be copied verbatim into the GitHub wiki.
+`docs/wiki/` is the source of truth for the [GitHub wiki](https://github.com/yanivil/SignalSync/wiki); the `sync-wiki` workflow mirrors it there on every change to `main`. Coverage is printed in the `tests` workflow log rather than published as a badge, which would need an external service.
 
 ## Layout
 
@@ -120,18 +119,23 @@ scan.py                              detectors, data loading, reporting, CLI (si
 test_scan.py                         original suite: textbook fixtures, random-walk sweep, last-bar handling
 test_patterns.py                     primitive precision, formula verification, negative controls, boundaries
 test_pipeline.py                     retry policy, universe loading, end-to-end mini universe
+test_evaluate.py                     outcome classification and the git signal log
 conftest.py                          shared fixtures and the offline yfinance stand-in
 tools/debug_last_bar.py              per-symbol last-bar diagnostics (also a manual GitHub workflow)
+tools/evaluate_signals.py            replay past CONFIRMED signals against later prices (manual workflow)
 .github/workflows/daily-scan.yml     02:00 UTC daily: tests, scan, commit output/
+.github/workflows/tests.yml          lint + tests + coverage on pull requests and pushes to main
+.github/workflows/sync-wiki.yml      mirrors docs/wiki/ into the GitHub wiki
 run_daily.sh                         local wrapper (venv, dependency checksum, dated logs)
 output/                              latest signals.json + report.md, committed by CI
-docs/wiki/                           GitHub-wiki-ready documentation
+docs/wiki/                           documentation, mirrored into the GitHub wiki
 ```
 
 ## Known limitations
 
 * Pattern recognition is heuristic. Thresholds follow common practice (O'Neil, Bulkowski, Wolfe) but there is no industry standard; expect some false positives and misses.
 * Swing points are only recognised 5 bars after they print, so Inverse H&S and Wolfe confirmations can be reported up to 5 bars late.
-* The cup roundness test does not reject a clean symmetric V (see the pattern catalog).
+* Cup bases must be explained at least as well by a parabola as by a two-legged V; the rule is calibrated on reference shapes, not on market data (see the pattern catalog).
+* Signal outcomes have not been measured yet. `tools/evaluate_signals.py` (the `evaluate-signals` workflow) replays every committed `CONFIRMED` signal against later prices; run it once enough history has accumulated.
 * Yahoo Finance data is unofficial. Symbols with fewer than 60 bars are skipped and counted in `meta.errors`.
 * There is no persistent price cache: every run re-downloads two years of history for the whole universe.
