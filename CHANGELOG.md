@@ -5,6 +5,9 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- `LICENSE` (MIT) and a license badge / section in the README.
+
 ### Security
 - Dependencies are hash-pinned: `requirements.txt` / `requirements-dev.txt`
   are compiled from `.in` files with pip-tools and every workflow and
