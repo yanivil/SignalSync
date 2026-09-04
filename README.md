@@ -58,7 +58,7 @@ logs/                          dated reports and logs from local runs (git-ignor
 ```
 GitHub Actions (02:00 UTC daily)          Claude scheduled task (04:00 UTC = 07:00 Israel*)
   checkout → pip install → pytest           curl raw.githubusercontent.com/yanivil/SignalSync/main/output/signals.json
-  python scan.py  (yfinance, open internet) check meta.last_bar is the latest trading day
+  python scan.py  (yfinance, open internet) check meta.last_bar / meta.skipped_bar for staleness
   git commit output/report.md + signals.json  e-mail the tables via Gmail + push notification
 ```
 
@@ -92,15 +92,55 @@ The constituent list is fetched from
 `output/signals.json`:
 
 ```json
-{"meta": {"run_date": "...", "universe": 503, "scanned": 500, "errors": 3,
-          "last_bar": "2026-09-03", "min_score": 60, "max_breakout_age": 3},
+{"meta": {"run_date": "...", "universe": 503, "scanned": 502, "errors": 1,
+          "last_bar": "2026-09-02", "last_bar_symbols": 502, "lagging_symbols": 0,
+          "skipped_bar": "2026-09-03", "skipped_bar_complete": 2, "skipped_bar_partial": 500,
+          "last_bar_histogram": {"2026-09-03": 2, "2026-09-02": 500},
+          "min_score": 60, "max_breakout_age": 3,
+          "max_breakout_age_by_pattern": {"Cup & Handle": 3,
+                                          "Inverse Head & Shoulders": 8,
+                                          "Bullish Wolfe Wave": 8}},
  "signals": [{"ticker": "XYZ", "pattern": "Cup & Handle", "status": "CONFIRMED",
               "entry": 102.0, "stop": 93.31, "risk_pct": 8.52, "target": 128.11,
-              "score": 88, "last_close": 102.0, "last_date": "2026-09-03",
+              "score": 88, "last_close": 102.0, "last_date": "2026-09-02",
               "bars_since_break": 1, "volume_ratio": 1.47,
               "trend": "close above SMA200, SMA50 > SMA200, SMA200 rising/flat",
               "notes": "left rim 2026-03-04 @100.47, ..."}]}
 ```
+
+### Which bar is scanned (`meta.last_bar`)
+
+Yahoo publishes the previous session's daily row in two steps: first a
+volume-only row (open/high/low/close null), then the prices some hours later.
+At 07:30 UTC on 2026-09-04, 501 of 503 symbols still had the volume-only row
+for 2026-09-03 and only two (APH, HUBB) had the complete bar. Rows without a
+close are dropped per symbol, and then `align_last_bar()` picks the scan bar:
+
+* `last_bar` is the newest date on/after which at least `LAST_BAR_MIN_FRACTION`
+  (50 %) of the symbols have a complete bar, i.e. the majority's newest
+  complete bar. Every signal's `last_date` is `<= last_bar`.
+* Symbols that already have newer bars are truncated to `last_bar` so all
+  signals are comparable; `skipped_bar` names the newest date that was seen
+  but not scanned, with how many symbols had it complete
+  (`skipped_bar_complete`) and how many only volume-only
+  (`skipped_bar_partial`).
+* Symbols whose newest complete bar is *older* than `last_bar` (halted, late)
+  are scanned on their own last bar and counted in `lagging_symbols`.
+
+So on a normal early-morning run `last_bar` is the session *before* the last
+one and `skipped_bar` is the last session. The daily-scan log prints the same
+histogram (`last raw bar per symbol` / `last complete bar per symbol`), and
+`tools/debug_last_bar.py` (also runnable as the `debug-last-bar` workflow)
+dumps the per-symbol detail.
+
+### Breakout age
+
+`max_breakout_age` is the base limit; `max_breakout_age_by_pattern` is the
+effective limit the detectors apply. H&S and Wolfe get `PIVOT_ORDER` (5)
+extra bars because their final pivot (right shoulder / point 5) is a swing
+low that is only visible 5 bars after it prints, so with the defaults a
+Cup & Handle breakout may be at most 3 bars old and an H&S or Wolfe breakout
+at most 8. The report header states the same numbers.
 
 `output/report.md` is the same content as two Markdown tables (Confirmed /
 Watchlist), which the scheduled task forwards by e-mail and push notification.
@@ -113,7 +153,8 @@ All thresholds are module-level constants at the top of `scan.py`:
 |---|---|---|
 | `PIVOT_ORDER` | 5 | bars on each side to qualify a swing high/low |
 | `MIN_SCORE` | 60 | minimum quality score to report |
-| `MAX_BREAKOUT_AGE` | 3 | max bars since the confirming close |
+| `MAX_BREAKOUT_AGE` | 3 | max bars since the confirming close (Cup & Handle; +`PIVOT_ORDER` for H&S and Wolfe, see `BREAKOUT_AGE_LAG`) |
+| `LAST_BAR_MIN_FRACTION` | 0.5 | share of symbols that must have a complete bar on/after a date for it to be `meta.last_bar` |
 | `MAX_RUNAWAY` | 0.05 | max close/trigger excess before it counts as chasing |
 | `WATCH_PROXIMITY` | 0.03 | unbroken setups within this of trigger → watchlist |
 | `CUP_MIN_LEN / CUP_MAX_LEN` | 30 / 250 | cup width in bars |
@@ -155,5 +196,8 @@ All thresholds are module-level constants at the top of `scan.py`:
 2. In the repo, *Actions* → *daily-scan* → *Run workflow* once to verify the
    runner can download data; it commits `output/report.md`.
 3. The Claude scheduled task (04:00 UTC daily) reads that file and e-mails
-   it. If the file's `meta.last_bar` is older than the last trading day the
-   task reports the staleness instead of sending stale alerts.
+   it. Because Yahoo has usually not published the last session's prices by
+   then, `meta.last_bar` is normally the session *before* the last one and
+   `meta.skipped_bar` is the last session (see "Which bar is scanned"); the
+   task should treat the file as stale only when `last_bar` is older than
+   that, or when `run_date` is not today.

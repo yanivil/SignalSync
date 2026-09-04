@@ -55,3 +55,9 @@ jobs:
           if [ -n "${{ github.event.inputs.tickers }}" ]; then ARGS="$ARGS --tickers ${{ github.event.inputs.tickers }}"; fi
           if [ "${{ github.event.inputs.verbose }}" = "true" ]; then ARGS="$ARGS -v"; fi
           python tools/debug_last_bar.py $ARGS
+      - name: Dry-run scan (nothing is committed)
+        run: |
+          python scan.py --out-dir /tmp/scan-out ${{ github.event.inputs.tickers && format('--tickers {0}', github.event.inputs.tickers) || '' }} > /tmp/scan-out/report.txt 2> /tmp/scan-out/scan.log || true
+          grep -E "INFO (last|bar|downloaded|universe)" /tmp/scan-out/scan.log || tail -20 /tmp/scan-out/scan.log
+          python -c "import json; print(json.dumps(json.load(open('/tmp/scan-out/signals.json'))['meta'], indent=1))"
+          head -8 /tmp/scan-out/report.md

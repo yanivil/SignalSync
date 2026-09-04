@@ -69,6 +69,24 @@ MIN_SCORE = 60           # reporting threshold for the 0-100 quality score
 MAX_BREAKOUT_AGE = 3     # a breakout older than this many bars is stale
 MAX_RUNAWAY = 0.05       # close more than 5% above trigger = chasing, not an entry
 WATCH_PROXIMITY = 0.03   # unbroken setups within 3% of trigger -> watchlist
+# Extra breakout age tolerated per pattern, in bars.  The H&S right shoulder
+# and Wolfe point 5 are swing lows, which only become visible PIVOT_ORDER bars
+# after they print, so a breakout can already be up to PIVOT_ORDER bars old the
+# first time the pattern is detectable at all.  The cup's handle low needs no
+# right-side confirmation, so the cup gets no extra tolerance.  Keep this table
+# and the detectors in sync via ``max_breakout_age()`` so the report can state
+# the effective limit per pattern.
+BREAKOUT_AGE_LAG = {
+    "Cup & Handle": 0,
+    "Inverse Head & Shoulders": PIVOT_ORDER,
+    "Bullish Wolfe Wave": PIVOT_ORDER,
+}
+# A trading day only counts as "the" last bar of the scan when at least this
+# share of symbols has a complete OHLC bar on (or after) it.  Why: Yahoo
+# publishes the previous session's daily row in two steps -- first volume only
+# (OHLC null), then the prices some hours later -- so early in the day a
+# handful of symbols carry a complete newest bar while the rest do not.
+LAST_BAR_MIN_FRACTION = 0.5
 
 # Cup & Handle
 CUP_MIN_LEN, CUP_MAX_LEN = 30, 250       # bars from left rim to right rim
@@ -94,6 +112,16 @@ WW_MAX_OVERSHOOT_ATR = 2.0               # point 5 may undercut line 1-3 by <= 2
 WW_MAX_BARS_SINCE_P5 = 25                # confirmation must come soon after point 5
 
 
+def max_breakout_age(pattern: str) -> int:
+    """Effective maximum bars since the confirming close for ``pattern``.
+
+    :param pattern: Pattern name as reported in :class:`Signal`.
+    :returns: ``MAX_BREAKOUT_AGE`` plus the pattern's pivot lag (see
+        ``BREAKOUT_AGE_LAG``).  Reads the module global so ``--max-age`` applies.
+    """
+    return MAX_BREAKOUT_AGE + BREAKOUT_AGE_LAG.get(pattern, 0)
+
+
 # --------------------------------------------------------------------------- #
 # Data classes
 # --------------------------------------------------------------------------- #
@@ -103,8 +131,9 @@ class Signal:
 
     :param ticker: Yahoo-style symbol (BRK-B etc.).
     :param pattern: Human readable pattern name.
-    :param status: ``"CONFIRMED"`` (close broke trigger within ``MAX_BREAKOUT_AGE``
-        bars) or ``"WATCHLIST"`` (pattern complete, trigger not yet broken).
+    :param status: ``"CONFIRMED"`` (close broke trigger within
+        ``max_breakout_age(pattern)`` bars) or ``"WATCHLIST"`` (pattern complete,
+        trigger not yet broken).
     :param entry: Suggested entry price (the trigger level, or the breakout close
         if it is above the trigger).
     :param stop: Stop-loss price derived from the pattern structure.
@@ -112,7 +141,7 @@ class Signal:
     :param target: Reference measured-move target (informational).
     :param score: 0-100 quality score (higher = cleaner geometry).
     :param last_close: Most recent close.
-    :param last_date: Date of the most recent bar (ISO).
+    :param last_date: Date of the most recent *complete* bar scanned (ISO).
     :param bars_since_break: Bars since the confirming close (0 = today), or None.
     :param volume_ratio: Breakout-day volume / 50-day average volume, or None.
     :param trend: Short description of the wider-trend context.
@@ -175,12 +204,16 @@ def download_history(symbols: Sequence[str], period: str = "2y",
     :param period: yfinance period string (``"2y"`` gives ~500 daily bars).
     :param batch: Symbols per request; Yahoo tolerates ~100 comfortably.
     :returns: ``{symbol: DataFrame[Open, High, Low, Close, Volume]}`` with only
-        symbols that returned usable data.
+        symbols that returned usable data.  Rows without a Close are dropped;
+        the dates of *trailing* rows dropped this way (Yahoo's not-yet-published
+        newest bar, which arrives with volume but null OHLC) are recorded in
+        ``df.attrs["partial_bars"]`` so :func:`align_last_bar` can report them.
     :raises ImportError: if yfinance is not installed.
     """
     import yfinance as yf  # imported lazily so tests can run without it
 
     out: dict = {}
+    raw_last: dict = {}     # last index date before cleaning, per symbol (diagnostics)
     for i in range(0, len(symbols), batch):
         chunk = list(symbols[i:i + batch])
         for attempt in range(3):  # Yahoo occasionally throttles; retry with backoff
@@ -199,10 +232,116 @@ def download_history(symbols: Sequence[str], period: str = "2y",
                 df = raw[sym] if isinstance(raw.columns, pd.MultiIndex) else raw
             except KeyError:
                 continue
-            df = df.dropna(subset=["Close"])
+            if df.empty:
+                continue
+            raw_last[sym] = df.index[-1]
+            has_close = df["Close"].notna().to_numpy()
+            if not has_close.any():
+                continue
+            last_ok = int(np.flatnonzero(has_close)[-1])
+            # Trailing rows without a Close: Yahoo's volume-only row for a bar
+            # whose prices are not published yet ("partial").  Rows that are
+            # NaN in every column are just batch-index padding for a symbol
+            # that has no row on that date at all (halted / delisted) and are
+            # not reported as partial.
+            tail = df.iloc[last_ok + 1:]
+            partial = [str(d.date()) for d, row in tail.iterrows() if row.notna().any()]
+            df = df[has_close]
+            log.debug("%s: last raw bar %s, last complete bar %s%s", sym,
+                      raw_last[sym].date(), df.index[-1].date(),
+                      f", trailing rows without Close: {partial}" if partial else "")
             if len(df) >= 60:
-                out[sym] = df[["Open", "High", "Low", "Close", "Volume"]].copy()
+                clean = df[["Open", "High", "Low", "Close", "Volume"]].copy()
+                clean.attrs["partial_bars"] = partial
+                out[sym] = clean
+    if out:
+        hist_raw = _date_histogram(raw_last.values())
+        hist_ok = _date_histogram(df.index[-1] for df in out.values())
+        log.info("last raw bar per symbol: %s; last complete bar per symbol: %s",
+                 hist_raw, hist_ok)
     return out
+
+
+def _date_histogram(dates: Iterable) -> dict:
+    """``{"YYYY-MM-DD": count}`` sorted newest first (for logs and meta)."""
+    counts: dict = {}
+    for d in dates:
+        key = str(pd.Timestamp(d).date())
+        counts[key] = counts.get(key, 0) + 1
+    return dict(sorted(counts.items(), reverse=True))
+
+
+def align_last_bar(data: dict, min_fraction: float = LAST_BAR_MIN_FRACTION
+                   ) -> Tuple[dict, dict]:
+    """Pick the bar the scan is "as of" and make sure no symbol runs ahead of it.
+
+    Why: Yahoo publishes the newest daily bar per symbol at different times
+    (volume first, prices later).  Scanning each symbol on whatever it has
+    gives a report whose ``last_bar`` is the newest date *any* symbol reached,
+    while nearly every signal is based on the previous close.  Instead:
+
+    * ``last_bar`` is the newest date on/after which at least ``min_fraction``
+      of the symbols have a complete bar.  With the default 0.5 that is the
+      majority's newest complete bar.
+    * Symbols with bars newer than ``last_bar`` are truncated to it so every
+      signal is comparable (the dropped bars are counted as ``skipped``).
+    * Symbols whose newest complete bar is *older* than ``last_bar`` are kept
+      as they are (halted / late symbols); their signals carry their own
+      ``last_date`` and they are counted as ``lagging``.
+
+    :param data: ``{symbol: OHLCV DataFrame}`` as returned by
+        :func:`download_history` (rows already have a Close).
+    :param min_fraction: Share of symbols required on/after a date.
+    :returns: ``(data, info)`` where ``info`` has ``last_bar``,
+        ``last_bar_symbols``, ``lagging_symbols``, ``skipped_bar`` (newest date
+        seen but not scanned, or ``None``), ``skipped_bar_complete`` (symbols
+        that had a complete bar on it), ``skipped_bar_partial`` (symbols that
+        had only Yahoo's volume-only row on it) and ``last_bar_histogram``
+        (newest complete bar per symbol before alignment).
+    """
+    if not data:
+        return data, {"last_bar": None}
+    last = {sym: pd.Timestamp(df.index[-1]).normalize() for sym, df in data.items()}
+    hist = _date_histogram(last.values())
+    need = min_fraction * len(data)
+    cum = 0
+    last_bar = None
+    for day, count in hist.items():          # newest first
+        cum += count
+        if cum >= need:
+            last_bar = pd.Timestamp(day)
+            break
+    assert last_bar is not None  # cum reaches len(data) >= need at the oldest date
+
+    aligned: dict = {}
+    skipped_complete: dict = {}
+    partial: dict = {}
+    for sym, df in data.items():
+        for day in df.attrs.get("partial_bars", []):
+            if pd.Timestamp(day) > last_bar:
+                partial[day] = partial.get(day, 0) + 1
+        if last[sym] > last_bar:
+            for d in df.index[df.index > last_bar]:
+                key = str(d.date())
+                skipped_complete[key] = skipped_complete.get(key, 0) + 1
+            df = df[df.index <= last_bar]
+            df.attrs["partial_bars"] = []
+            if len(df) < 60:
+                continue
+        aligned[sym] = df
+    newest_seen = max(list(skipped_complete) + list(partial), default=None)
+    info = {
+        "last_bar": str(last_bar.date()),
+        "last_bar_symbols": sum(1 for df in aligned.values()
+                                if pd.Timestamp(df.index[-1]).normalize() == last_bar),
+        "lagging_symbols": sum(1 for df in aligned.values()
+                               if pd.Timestamp(df.index[-1]).normalize() < last_bar),
+        "skipped_bar": newest_seen,
+        "skipped_bar_complete": skipped_complete.get(newest_seen, 0) if newest_seen else 0,
+        "skipped_bar_partial": partial.get(newest_seen, 0) if newest_seen else 0,
+        "last_bar_histogram": hist,
+    }
+    return aligned, info
 
 
 # --------------------------------------------------------------------------- #
@@ -585,7 +724,7 @@ def detect_inverse_hs(df: pd.DataFrame, ticker: str) -> List[Signal]:
         else:
             age = n - 1 - first_break
             trigger = neck_at(first_break)
-            if age > MAX_BREAKOUT_AGE + PIVOT_ORDER or close[-1] < neck_at(n - 1):
+            if age > max_breakout_age("Inverse Head & Shoulders") or close[-1] < neck_at(n - 1):
                 continue  # stale breakout or failed break (RS pivot lags PIVOT_ORDER bars)
             if close[-1] > trigger * (1 + MAX_RUNAWAY):
                 continue  # ran away from the breakout level; chasing (rule 4)
@@ -705,7 +844,7 @@ def detect_bullish_wolfe(df: pd.DataFrame, ticker: str) -> List[Signal]:
         else:
             age = n - 1 - first_break
             trigger = v1 + s13 * (first_break - p1)
-            if age > MAX_BREAKOUT_AGE + PIVOT_ORDER or close[-1] < line_now:
+            if age > max_breakout_age("Bullish Wolfe Wave") or close[-1] < line_now:
                 continue  # stale or failed (point-5 pivot lags PIVOT_ORDER bars)
             if close[-1] > trigger * (1 + MAX_RUNAWAY):
                 continue  # ran away from the breakout level; chasing (rule 4)
@@ -788,9 +927,22 @@ def render_markdown(signals: List[Signal], meta: dict) -> str:
     :returns: Markdown text.
     """
     lines = [f"# S&P 500 pattern scan — {meta['run_date']}", ""]
+    ages = meta.get("max_breakout_age_by_pattern") or {
+        p: max_breakout_age(p) for p in BREAKOUT_AGE_LAG}
+    age_text = ", ".join(f"{p} {a}" for p, a in ages.items())
     lines.append(f"Scanned {meta['scanned']} of {meta['universe']} symbols "
                  f"(daily bars, last bar {meta.get('last_bar', 'n/a')}). "
-                 f"Min quality score {MIN_SCORE}. Breakouts older than {MAX_BREAKOUT_AGE} bars are dropped.")
+                 f"Min quality score {MIN_SCORE}. Breakouts older than the per-pattern "
+                 f"limit are dropped (bars: {age_text}; H&S and Wolfe get "
+                 f"{PIVOT_ORDER} extra bars because their last pivot is only visible "
+                 f"{PIVOT_ORDER} bars after it prints).")
+    if meta.get("skipped_bar"):
+        lines.append(f"Newest bar {meta['skipped_bar']} not scanned: complete for "
+                     f"{meta.get('skipped_bar_complete', 0)} symbols, still missing OHLC at "
+                     f"Yahoo for {meta.get('skipped_bar_partial', 0)}.")
+    if meta.get("lagging_symbols"):
+        lines.append(f"{meta['lagging_symbols']} symbols have no complete bar on "
+                     f"{meta.get('last_bar')} and were scanned on their own last bar.")
     if meta.get("errors"):
         lines.append(f"Data errors: {meta['errors']}")
     lines.append("")
@@ -845,15 +997,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         log.error("no price data downloaded")
         return 2
 
+    data, bar_info = align_last_bar(data)
+    log.info("last bar %s (%d symbols; %d lagging); newest complete bar per symbol: %s",
+             bar_info["last_bar"], bar_info["last_bar_symbols"], bar_info["lagging_symbols"],
+             bar_info["last_bar_histogram"])
+    if bar_info.get("skipped_bar"):
+        log.info("bar %s not scanned: complete for %d symbols, OHLC missing for %d",
+                 bar_info["skipped_bar"], bar_info["skipped_bar_complete"],
+                 bar_info["skipped_bar_partial"])
+
     signals: List[Signal] = []
     for sym, df in data.items():
         signals.extend(scan_symbol(sym, df))
     signals.sort(key=lambda s: (s.status != "CONFIRMED", -s.score))
 
-    last_bar = max(str(df.index[-1].date()) for df in data.values())
     meta = {"run_date": dt.datetime.now().strftime("%Y-%m-%d %H:%M"), "universe": len(symbols),
-            "scanned": len(data), "errors": len(symbols) - len(data), "last_bar": last_bar,
-            "min_score": MIN_SCORE, "max_breakout_age": MAX_BREAKOUT_AGE}
+            "scanned": len(data), "errors": len(symbols) - len(data),
+            **bar_info,
+            "min_score": MIN_SCORE, "max_breakout_age": MAX_BREAKOUT_AGE,
+            "max_breakout_age_by_pattern": {p: max_breakout_age(p) for p in BREAKOUT_AGE_LAG}}
     os.makedirs(args.out_dir, exist_ok=True)
     with open(os.path.join(args.out_dir, "signals.json"), "w", encoding="utf-8") as fh:
         json.dump({"meta": meta, "signals": [asdict(s) for s in signals]}, fh, indent=2)
