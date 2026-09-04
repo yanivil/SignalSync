@@ -5,6 +5,21 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+- Strong-down-trend veto silently switched off for symbols with 200-239
+  bars of history (SMA200 existed but not 40 bars earlier); it now falls
+  back to the SMA50 test used for short histories.
+- Wolfe targets are only reported when lines 1-3 and 2-4 meet within
+  `WW_MAX_ETA_BARS` (250) after point 5; near-parallel lines no longer
+  project absurd targets.
+- One malformed history frame aborted the whole download; per-symbol
+  cleaning (`_clean_history`) is now guarded, logged and skipped.
+- `tools/evaluate_signals.py` fills stops and targets at the bar's open when
+  the open gaps beyond the level, instead of assuming a fill at the level.
+- `run_daily.sh` falls back to `shasum -a 256` where `sha256sum` is absent.
+- Tests: fat-tailed (Student-t) noise sweep; `adjust_ohlc` documents why
+  volume is intentionally not rescaled.
+
 ### Fixed (docs)
 - Pattern catalog stated two gating rules with the wrong denominator: the
   cup prior-advance is a >= 25 % *rise* from the 120-bar low (not "low 25 %

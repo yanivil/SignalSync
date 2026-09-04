@@ -19,6 +19,9 @@ Outcome per signal, walking the daily bars strictly after ``last_date``:
 * ``open``    -- neither within ``horizon`` bars; marked to the last close
 * ``no_data`` -- no bars after ``last_date`` yet
 
+Fills model gaps: a stop is filled at the bar's Open when the Open is already
+below the stop (a gap-down), and a target at the Open when it gaps above.
+
 R multiple = (exit - entry) / (entry - stop): a stop is -1 R, the target is
 (target - entry) / (entry - stop).  Signals are de-duplicated on
 (ticker, pattern, stop): the same structure is reported on consecutive days
@@ -87,12 +90,16 @@ def classify(entry: float, stop: float, target: Optional[float], bars: pd.DataFr
     if bars.empty:
         return {"outcome": "no_data", "bars": 0, "exit": None, "r": None}
     window = bars.iloc[:horizon]
-    for i, (hi, lo) in enumerate(zip(window["High"], window["Low"]), start=1):
+    opens = window["Open"] if "Open" in window.columns else window["Close"]
+    for i, (op, hi, lo) in enumerate(zip(opens, window["High"], window["Low"]), start=1):
         if lo <= stop:                      # checked first: a bar touching both is a stop
-            return {"outcome": "stop", "bars": i, "exit": stop, "r": -1.0 if risk > 0 else None}
+            exit_ = min(float(op), stop)    # gap-down opens fill below the stop
+            return {"outcome": "stop", "bars": i, "exit": exit_,
+                    "r": (exit_ - entry) / risk if risk > 0 else None}
         if target is not None and hi >= target:
-            return {"outcome": "target", "bars": i, "exit": target,
-                    "r": (target - entry) / risk if risk > 0 else None}
+            exit_ = max(float(op), target)  # gap-up opens fill above the target
+            return {"outcome": "target", "bars": i, "exit": exit_,
+                    "r": (exit_ - entry) / risk if risk > 0 else None}
     last = float(window["Close"].iloc[-1])
     return {"outcome": "open", "bars": len(window), "exit": last,
             "r": (last - entry) / risk if risk > 0 else None}

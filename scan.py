@@ -124,6 +124,7 @@ IHS_PRIOR_DECLINE = 0.10                 # >=10% decline into the left shoulder
 WW_MIN_LEN, WW_MAX_LEN = 15, 200         # bars from point 1 to point 5
 WW_MAX_OVERSHOOT_ATR = 2.0               # point 5 may undercut line 1-3 by <= 2 ATR
 WW_MAX_BARS_SINCE_P5 = 25                # confirmation must come soon after point 5
+WW_MAX_ETA_BARS = 250                    # target only if lines 1-3 / 2-4 meet within this many bars after point 5
 
 
 def max_breakout_age(pattern: str) -> int:
@@ -221,6 +222,12 @@ def adjust_ohlc(df: pd.DataFrame) -> pd.DataFrame:
     published ``adjclose`` yet, which is the case for the newest bar until the
     next pre-market.  Nothing later can have adjusted the newest bar, so a
     missing ratio is 1.0 by definition.
+
+    Volume is deliberately left alone: Yahoo's historical volume is already
+    split-adjusted, and ``Adj Close / Close`` also carries dividend
+    adjustments, so scaling volume by its inverse would double-adjust splits
+    and distort volume on every dividend-paying stock.  yfinance's own
+    ``auto_adjust`` makes the same choice.
 
     :param df: Frame with Open/High/Low/Close/Volume and optionally Adj Close.
     :returns: Frame with Open/High/Low/Close/Volume, prices adjusted.
@@ -374,38 +381,57 @@ def download_history(symbols: Sequence[str], period: str = "2y", workers: int = 
         df, meta = res
         if df is None or df.empty or "Close" not in df.columns:
             continue
-        raw_last[sym] = df.index[-1]
-        df, filled_day = fill_missing_close(df, meta, now=now)
-        df = adjust_ohlc(df)
-        if getattr(df.index, "tz", None) is not None:
-            # Ticker.history() indexes in exchange time; the rest of the scan
-            # (and align_last_bar's date comparisons) work on naive dates.
-            df.index = df.index.tz_localize(None).normalize()
-        has_close = df["Close"].notna().to_numpy()
-        if not has_close.any():
+        try:
+            cleaned = _clean_history(sym, df, meta, now)
+        except Exception as exc:  # a malformed frame must not abort the whole download
+            log.exception("%s: unusable history, skipped: %s", sym, exc)
             continue
-        last_ok = int(np.flatnonzero(has_close)[-1])
-        # Trailing rows without a Close that fill_missing_close could not
-        # complete (no quote on that date yet): reported as "partial".
-        tail = df.iloc[last_ok + 1:]
-        partial = [str(d.date()) for d, row in tail.iterrows() if row.notna().any()]
-        df = df[has_close]
-        log.debug("%s: last raw bar %s, last complete bar %s%s%s", sym,
-                  raw_last[sym].date(), df.index[-1].date(),
-                  f", close filled from quote for {filled_day}" if filled_day else "",
-                  f", trailing rows without Close: {partial}" if partial else "")
-        if len(df) >= 60:
-            clean = df.copy()
-            clean.attrs["partial_bars"] = partial
-            clean.attrs["filled_close"] = filled_day
-            out[sym] = clean
-            filled += 1 if filled_day else 0
+        if cleaned is None:
+            continue
+        raw_last[sym], out[sym] = cleaned
+        filled += 1 if out[sym].attrs["filled_close"] else 0
     if out:
         hist_raw = _date_histogram(raw_last.values())
         hist_ok = _date_histogram(df.index[-1] for df in out.values())
         log.info("last raw bar per symbol: %s; last complete bar per symbol: %s; "
                  "closes filled from quote: %d", hist_raw, hist_ok, filled)
     return out
+
+
+def _clean_history(sym: str, df: pd.DataFrame, meta: Mapping[str, Any], now: Optional[pd.Timestamp]
+                   ) -> Optional[Tuple[pd.Timestamp, pd.DataFrame]]:
+    """Fill, adjust, normalise and trim one symbol's raw history.
+
+    :returns: ``(last_raw_index, clean_frame)`` with ``attrs["partial_bars"]``
+        and ``attrs["filled_close"]`` set, or ``None`` if fewer than 60 usable
+        bars remain.  Raises on malformed input; the caller logs and skips.
+    """
+    raw_last = df.index[-1]
+    df, filled_day = fill_missing_close(df, meta, now=now)
+    df = adjust_ohlc(df)
+    if getattr(df.index, "tz", None) is not None:
+        # Ticker.history() indexes in exchange time; the rest of the scan
+        # (and align_last_bar's date comparisons) work on naive dates.
+        df.index = df.index.tz_localize(None).normalize()
+    has_close = df["Close"].notna().to_numpy()
+    if not has_close.any():
+        return None
+    last_ok = int(np.flatnonzero(has_close)[-1])
+    # Trailing rows without a Close that fill_missing_close could not
+    # complete (no quote on that date yet): reported as "partial".
+    tail = df.iloc[last_ok + 1:]
+    partial = [str(d.date()) for d, row in tail.iterrows() if row.notna().any()]
+    df = df[has_close]
+    log.debug("%s: last raw bar %s, last complete bar %s%s%s", sym,
+              raw_last.date(), df.index[-1].date(),
+              f", close filled from quote for {filled_day}" if filled_day else "",
+              f", trailing rows without Close: {partial}" if partial else "")
+    if len(df) < 60:
+        return None
+    clean = df.copy()
+    clean.attrs["partial_bars"] = partial
+    clean.attrs["filled_close"] = filled_day
+    return raw_last, clean
 
 
 def _date_histogram(dates: Iterable) -> Dict[str, int]:
@@ -577,13 +603,22 @@ def trend_context(df: pd.DataFrame) -> Tuple[str, bool, bool]:
         desc = f"close {'above' if uptrend else 'below'} SMA50 (SMA200 n/a)"
         return desc, uptrend, strong_down
 
-    falling200 = s200_prev is not None and s200 < s200_prev
     uptrend = c > s200
-    strong_down = (c < TREND_STRONG_DOWN * s200) and falling200
+    if s200_prev is None:
+        # SMA200 exists but did not TREND_SLOPE_LOOKBACK bars ago (200-239 bars
+        # of history): its slope is unknowable, so the veto falls back to the
+        # SMA50 test used for short histories rather than silently switching off.
+        falling200 = False
+        strong_down = s50 is not None and c < TREND_STRONG_DOWN_SMA50 * s50
+        slope_text = "SMA200 slope n/a"
+    else:
+        falling200 = s200 < s200_prev
+        strong_down = (c < TREND_STRONG_DOWN * s200) and falling200
+        slope_text = "SMA200 " + ("falling" if falling200 else "rising/flat")
     parts = [f"close {'above' if uptrend else 'below'} SMA200"]
     if s50 is not None:
         parts.append(f"SMA50 {'>' if s50 > s200 else '<'} SMA200")
-    parts.append("SMA200 " + ("falling" if falling200 else "rising/flat"))
+    parts.append(slope_text)
     return ", ".join(parts), uptrend, strong_down
 
 
@@ -1113,10 +1148,14 @@ def detect_bullish_wolfe(df: pd.DataFrame, ticker: str) -> List[Signal]:
         # for x gives  x = [(v2 - s24 p2) - (v1 - s13 p1)] / (s13 - s24);
         # s24 < s13 (both negative) so the denominator is positive.
         # EPA = line 1-4 evaluated at the ETA bar (Wolfe's price target).
+        # Near-parallel lines push the ETA (and the target on line 1-4) towards
+        # infinity, so the target is only reported when the lines meet within
+        # WW_MAX_ETA_BARS after point 5.
         denom = s13 - s24
         eta = (v2 - s24 * p2 - (v1 - s13 * p1)) / denom if denom != 0 else None
         s14 = (v4 - v1) / (p4 - p1)
-        target = float(v1 + s14 * (eta - p1)) if eta is not None and eta > p5 else None
+        target = (float(v1 + s14 * (eta - p1))
+                  if eta is not None and p5 < eta <= p5 + WW_MAX_ETA_BARS else None)
         if target is not None and target <= entry:
             target = None
         # Quality score (0-100): 50 base

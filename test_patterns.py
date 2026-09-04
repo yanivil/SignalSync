@@ -124,6 +124,11 @@ def test_trend_context_states(cup_df, flat_df):
     # Fewer than 200 bars: falls back to SMA50 and says so.
     desc, up, _ = scan.trend_context(_ohlc_from_path(np.linspace(50, 100, 120), seed=1))
     assert up and "SMA200 n/a" in desc
+    # 200-239 bars: SMA200 exists but its slope does not; the veto must not
+    # silently switch off, so it falls back to the SMA50 test.
+    for n in (200, 220, 238):
+        desc, up, strong_down = scan.trend_context(_ohlc_from_path(np.linspace(300, 100, n), seed=1))
+        assert strong_down and not up and "SMA200 slope n/a" in desc, n
     # Flat: close equals every average -> neither up nor a strong down-trend.
     assert scan.trend_context(flat_df)[1:] == (False, False)
 
@@ -407,6 +412,26 @@ def test_wolfe_single_rule_violations_are_rejected(label, kwargs):
     assert scan.detect_bullish_wolfe(wolfe_variant(**kwargs), "WW") == [], label
 
 
+def test_wolfe_target_is_dropped_when_the_lines_meet_too_far_out(wolfe_df):
+    (base,) = scan.detect_bullish_wolfe(wolfe_df, "WW")
+    assert base.target is not None
+    with pytest.MonkeyPatch.context() as mp:            # fixture ETA is ~160 bars after point 5
+        mp.setattr(scan, "WW_MAX_ETA_BARS", 100)
+        (s,) = scan.detect_bullish_wolfe(wolfe_df, "WW")
+    assert s.target is None and (s.entry, s.stop, s.status) == (base.entry, base.stop, base.status)
+
+
+def test_fat_tailed_noise_false_positive_rate():
+    """Student-t(3) returns (fat tails, spikes) must not inflate the false-positive rate."""
+    rng = np.random.default_rng(7)
+    fired = 0
+    for k in range(200):
+        path = 100 * np.exp(np.cumsum(rng.standard_t(3, 500) * 0.015 / np.sqrt(3)))
+        if scan.scan_symbol(f"T{k}", _ohlc_from_path(path, seed=k)):
+            fired += 1
+    assert fired / 200 < 0.05, fired
+
+
 def test_flat_line_and_random_walk_controls_are_silent(flat_df):
     assert scan.scan_symbol("FLAT", flat_df) == []
     assert scan.atr(flat_df).iloc[-1] == 0.0
@@ -469,7 +494,10 @@ def test_stock_split_is_neutralised_by_adjust_ohlc(cup_df):
     assert list(adj.columns) == ["Open", "High", "Low", "Close", "Volume"]
     assert np.allclose(adj[["Open", "High", "Low", "Close"]].to_numpy(),
                        cup_df[["Open", "High", "Low", "Close"]].to_numpy())
-    assert (adj["Volume"] == raw["Volume"]).all()                 # volume is never rescaled
+    # Volume is never rescaled: Yahoo's volume is already split-adjusted and the
+    # Adj Close / Close ratio also carries dividends, so scaling volume by its
+    # inverse would double-adjust splits (yfinance's auto_adjust agrees).
+    assert (adj["Volume"] == raw["Volume"]).all()
     (s,) = scan.detect_cup_and_handle(adj, "CUP")
     assert _levels(s) == _levels(base) and s.score == base.score
 

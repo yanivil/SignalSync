@@ -25,7 +25,12 @@ fi
 . "$VENV/bin/activate"
 
 # Install / upgrade only when requirements changed (cheap check via checksum).
-REQ_SUM=$(sha256sum requirements.txt | cut -d' ' -f1)
+# sha256sum is GNU coreutils; older macOS only has shasum.
+if command -v sha256sum >/dev/null 2>&1; then
+  REQ_SUM=$(sha256sum requirements.txt | cut -d' ' -f1)
+else
+  REQ_SUM=$(shasum -a 256 requirements.txt | cut -d' ' -f1)
+fi
 if [ ! -f "$VENV/.req.sum" ] || [ "$(cat "$VENV/.req.sum")" != "$REQ_SUM" ]; then
   pip install -q --upgrade pip
   pip install -q --require-hashes -r requirements.txt
