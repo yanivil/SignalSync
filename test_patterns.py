@@ -219,10 +219,15 @@ def test_ihs_neckline_ignores_wicks_on_the_anchor_bars(ihs_df):
     """A long upper wick on the LS/head/RS bar must not become a neckline anchor."""
     (base,) = scan.detect_inverse_hs(ihs_df, "IHS")
     m = re.search(r"LS (\S+) @[\d.]+, head (\S+) @[\d.]+, RS (\S+) @", base.notes)
+    ls, h, rs = (_loc(ihs_df, m[k]) for k in (1, 2, 3))
     high = ihs_df["High"].to_numpy()
     spiked = ihs_df.copy()
-    for day in (m[1], m[2], m[3]):                       # wick above every rally peak in the pattern
-        spiked.loc[pd.Timestamp(day), "High"] = high.max() * 1.5
+    # Wicks just above the rally peaks of each half, on the LS and head bars
+    # (the RS bar is left alone so ATR[rs], which sets the stop, is unchanged).
+    spiked.loc[spiked.index[ls], "High"] = high[ls + 1:h].max() * 1.01
+    spiked.loc[spiked.index[h], "High"] = high[h + 1:rs].max() * 1.01
+    sh = spiked["High"].to_numpy()
+    assert np.argmax(sh[ls:h + 1]) == 0 and np.argmax(sh[h:rs + 1]) == 0   # the old slices would anchor here
     (s,) = scan.detect_inverse_hs(spiked, "IHS")
     assert s.notes == base.notes                          # neckline, trigger and levels unchanged
     assert (s.entry, s.stop, s.target) == (base.entry, base.stop, base.target)
