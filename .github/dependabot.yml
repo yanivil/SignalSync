@@ -1,0 +1,14 @@
+# Keep the pinned GitHub Actions SHAs and Python dependencies current.
+# Security updates are enabled separately in the repo settings; this file
+# adds regular version-update PRs as well.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
