@@ -59,9 +59,14 @@ log = logging.getLogger("sp500scan")
 # (O'Neil for Cup & Handle, Bulkowski for H&S, Bill Wolfe's published rules
 # for Wolfe Waves) but they are heuristics, not standards.
 # --------------------------------------------------------------------------- #
+# Constituent list, pinned to a specific commit of the public dataset rather
+# than its moving ``main`` branch so a change upstream (or a compromise of that
+# repository) cannot silently alter which tickers are scanned.  To pick up new
+# index membership, bump the commit here after reviewing the upstream diff.
+CONSTITUENTS_COMMIT = "7ee00fbbe71e521f4497250ac8d3b244ca8cba79"  # 2026-08-20
 CONSTITUENTS_URL = (
     "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/"
-    "main/data/constituents.csv"
+    f"{CONSTITUENTS_COMMIT}/data/constituents.csv"
 )
 PIVOT_ORDER = 5          # bars on each side needed to call a swing high/low
 ATR_LEN = 14

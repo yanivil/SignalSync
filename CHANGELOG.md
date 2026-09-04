@@ -5,6 +5,12 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Security
+- The S&P 500 constituent CSV is now fetched from a pinned commit of
+  `datasets/s-and-p-500-companies` (`CONSTITUENTS_COMMIT`) instead of the
+  moving `main` branch, so an upstream change cannot silently alter the
+  scanned universe.
+
 ### Fixed
 - `meta.last_bar` claimed the newest date reached by *any* symbol while the
   signals were computed on the previous close. Cause: Yahoo publishes the

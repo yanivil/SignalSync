@@ -82,9 +82,12 @@ bash run_daily.sh                     # local run with an auto-created venv
 python3 -m pytest test_scan.py -q     # tests (no network needed)
 ```
 
-The constituent list is fetched from
-`https://raw.githubusercontent.com/datasets/s-and-p-500-companies/main/data/constituents.csv`
-(`--csv` overrides it with a local file). Prices come from Yahoo Finance via
+The constituent list is fetched from the public
+`datasets/s-and-p-500-companies` dataset on GitHub, pinned to a specific
+commit (`CONSTITUENTS_COMMIT` in `scan.py`) rather than its `main` branch so an
+upstream change cannot silently alter the scanned universe. Bump the commit
+after reviewing the upstream diff to pick up index changes (`--csv` overrides
+it with a local file). Prices come from Yahoo Finance via
 `yfinance`. Class-share tickers are normalised (`BRK.B` → `BRK-B`).
 
 ## Output
