@@ -68,6 +68,7 @@ CONSTITUENTS_URL = (
     "https://raw.githubusercontent.com/datasets/s-and-p-500-companies/"
     f"{CONSTITUENTS_COMMIT}/data/constituents.csv"
 )
+CONSTITUENTS_MAX_BYTES = 5 * 1024 * 1024   # the CSV is ~40 KB; anything near this is not the CSV
 PIVOT_ORDER = 5          # bars on each side needed to call a swing high/low
 ATR_LEN = 14
 MIN_SCORE = 60           # reporting threshold for the 0-100 quality score
@@ -187,11 +188,13 @@ def load_sp500_symbols(csv_path: Optional[str] = None) -> List[str]:
 
     Source priority: a local CSV (``--csv``), then the public GitHub dataset
     ``datasets/s-and-p-500-companies``.  Dots in class-share tickers are
-    replaced with dashes because Yahoo uses ``BRK-B`` where S&P uses ``BRK.B``.
+    replaced with dashes because Yahoo uses ``BRK-B`` where S&P uses ``BRK.B``,
+    and symbols are upper-cased so a local CSV behaves like ``--tickers``.
 
     :param csv_path: Optional local CSV with a ``Symbol`` column.
-    :returns: Sorted, de-duplicated list of symbols.
-    :raises RuntimeError: if no source could be read.
+    :returns: Sorted, de-duplicated list of upper-case symbols.
+    :raises RuntimeError: if no source could be read, or the download exceeds
+        ``CONSTITUENTS_MAX_BYTES``.
     """
     text: Optional[str] = None
     if csv_path and os.path.exists(csv_path):
@@ -201,16 +204,21 @@ def load_sp500_symbols(csv_path: Optional[str] = None) -> List[str]:
         if csv_path:
             log.warning("--csv %s not found; falling back to the pinned GitHub constituent list",
                         csv_path)
+        raw: Optional[bytes] = None
         try:
             with urllib.request.urlopen(CONSTITUENTS_URL, timeout=30) as resp:
-                text = resp.read().decode("utf-8")
+                raw = resp.read(CONSTITUENTS_MAX_BYTES + 1)
         except Exception as exc:  # network blocked, DNS failure, etc.
             log.warning("Could not download constituents: %s", exc)
+        if raw is not None:
+            if len(raw) > CONSTITUENTS_MAX_BYTES:   # not the ~40 KB CSV: refuse rather than parse it
+                raise RuntimeError(f"constituent download exceeds {CONSTITUENTS_MAX_BYTES} bytes")
+            text = raw.decode("utf-8")
     if not text:
         raise RuntimeError("No S&P 500 constituent source available")
     df = pd.read_csv(io.StringIO(text))
     col = "Symbol" if "Symbol" in df.columns else df.columns[0]
-    syms = sorted({str(s).strip().replace(".", "-") for s in df[col].dropna()})
+    syms = sorted({str(s).strip().upper().replace(".", "-") for s in df[col].dropna()})
     return [s for s in syms if s and s.upper() != "NAN"]
 
 

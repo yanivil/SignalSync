@@ -65,6 +65,8 @@ jobs:
             echo "no changes to commit (scan_exit=$scan_exit)"
           else
             git commit -m "scan: $(date -u +%Y-%m-%d) (exit $scan_exit)"
+            # main may have moved while the scan ran; only the bot touches output/, so this cannot conflict
+            git pull --rebase origin main
             git push
           fi
 

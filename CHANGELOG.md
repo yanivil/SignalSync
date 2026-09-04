@@ -5,6 +5,16 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+- `daily-scan` rebases on `main` before pushing, so a PR merged while the
+  scan runs no longer fails the run with a non-fast-forward push.
+- `debug-last-bar` builds its commands as bash arrays (no word splitting
+  or globbing of dispatch inputs).
+- The constituent download is capped at `CONSTITUENTS_MAX_BYTES` (5 MB).
+- `load_sp500_symbols` upper-cases symbols from a local CSV, matching `--tickers`.
+- Tests: a W-shaped base is not a cup across its full span; zero-price bars
+  never raise.
+
 ### Changed (detectors)
 - One breakout evaluator (`evaluate_breakout`, trigger as a function of the
   bar) replaces `_status_from_break` plus the two inline copies in the H&S

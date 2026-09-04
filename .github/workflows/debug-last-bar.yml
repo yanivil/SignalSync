@@ -54,18 +54,18 @@ jobs:
           TICKERS: ${{ github.event.inputs.tickers }}
           VERBOSE: ${{ github.event.inputs.verbose }}
         run: |
-          ARGS=""
-          if [ -n "$TICKERS" ]; then ARGS="$ARGS --tickers $TICKERS"; fi
-          if [ "$VERBOSE" = "true" ]; then ARGS="$ARGS -v"; fi
-          python tools/debug_last_bar.py $ARGS
+          cmd=(python tools/debug_last_bar.py)          # array: no word splitting or globbing of inputs
+          if [ -n "$TICKERS" ]; then cmd+=(--tickers "$TICKERS"); fi
+          if [ "$VERBOSE" = "true" ]; then cmd+=(-v); fi
+          "${cmd[@]}"
       - name: Dry-run scan (nothing is committed)
         env:
           TICKERS: ${{ github.event.inputs.tickers }}
         run: |
           mkdir -p /tmp/scan-out
-          ARGS=""
-          if [ -n "$TICKERS" ]; then ARGS="--tickers $TICKERS"; fi
-          python scan.py --out-dir /tmp/scan-out $ARGS > /tmp/scan-out/report.txt 2> /tmp/scan-out/scan.log || true
+          cmd=(python scan.py --out-dir /tmp/scan-out)
+          if [ -n "$TICKERS" ]; then cmd+=(--tickers "$TICKERS"); fi
+          "${cmd[@]}" > /tmp/scan-out/report.txt 2> /tmp/scan-out/scan.log || true
           grep -E "INFO (last|bar|downloaded|universe)" /tmp/scan-out/scan.log || tail -20 /tmp/scan-out/scan.log
           python -c "import json; print(json.dumps(json.load(open('/tmp/scan-out/signals.json'))['meta'], indent=1))"
           head -8 /tmp/scan-out/report.md
