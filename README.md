@@ -1,217 +1,137 @@
-# SignalSync — S&P 500 Pattern Scanner
+# SignalSync
 
-Daily scanner that checks every S&P 500 constituent (daily bars) for three
-bullish chart patterns and reports actionable setups with an entry price and a
-structural stop-loss:
+[![build](https://img.shields.io/badge/build-placeholder-lightgrey)](#)
+[![tests](https://img.shields.io/badge/tests-placeholder-lightgrey)](#)
+[![coverage](https://img.shields.io/badge/coverage-placeholder-lightgrey)](#)
+[![python](https://img.shields.io/badge/python-3.12%2B-blue)](#)
 
-| Pattern | Type | Trigger (confirmation) | Stop-loss | Reference target |
+**SignalSync scans every S&P 500 constituent on daily bars for three bullish chart patterns and reports only confirmed, risk-defined setups with an entry, a structural stop and a reference target.**
+
+It is a heuristic screener, not trading advice. Every hit should be checked on a chart before acting.
+
+| Pattern | Type | Confirmation trigger | Stop-loss | Reference target |
 |---|---|---|---|---|
 | Cup & Handle | continuation | daily close above the handle high | handle low − 0.25 ATR | entry + cup depth |
 | Inverse Head & Shoulders | reversal | daily close above the neckline | right-shoulder low − 0.25 ATR | entry + (neckline − head) |
-| Bullish Wolfe Wave | reversal | daily close back above the 1-3 line after point 5 | point-5 low − 0.25 ATR | line 1-4 at the ETA (EPA) |
+| Bullish Wolfe Wave | reversal | daily close back above the 1-3 line after point 5 | point-5 low − 0.25 ATR | line 1-4 at the ETA |
 
-It is a **heuristic screener, not trading advice**. Every hit should be checked
-on a chart before acting.
+Four rules shape every detector: **no forced patterns** (strict geometry plus a 0–100 quality score, minimum 60), **respect the wider trend** (SMA50/SMA200 gate), **enter only after confirmation** (close-based triggers, `CONFIRMED` vs `WATCHLIST`, no chasing beyond 5 %), and **always define risk** (setups with a stop more than 15 % away are rejected).
 
-## The four rules and how the code enforces them
+## Pipeline
 
-The scanner implements the "common mistakes to avoid" rules the user supplied:
+```mermaid
+flowchart LR
+    A[S&P 500 constituent CSV<br/>pinned upstream commit] --> B[Symbol normalisation<br/>BRK.B → BRK-B]
+    B --> C[yfinance Ticker.history<br/>8 threads · retry 5 s / 10 s]
+    C --> D[fill_missing_close<br/>last-trade quote → newest close]
+    D --> E[adjust_ohlc<br/>split / dividend ratio]
+    E --> F[align_last_bar<br/>majority's newest complete bar]
+    F --> G{per symbol}
+    G --> H[Cup & Handle]
+    G --> I[Inverse H&S]
+    G --> J[Bullish Wolfe Wave]
+    H & I & J --> K[score ≥ 60<br/>CONFIRMED / WATCHLIST<br/>de-duplicate]
+    K --> L[output/signals.json]
+    K --> M[output/report.md]
+    L & M --> N[GitHub Actions commit<br/>→ scheduled e-mail / push]
+```
 
-1. **Don't force a pattern that isn't there.** Each detector uses strict
-   geometric thresholds (see *Parameters*), a convex-quadratic roundness test
-   for cups, symmetry tests for shoulders, and Wolfe's "point 4 between 1 and
-   2" rule. Every hit gets a 0–100 quality score; only hits ≥ `MIN_SCORE` (60)
-   are reported, and overlapping pivot combinations are de-duplicated to the
-   best one. On 200 synthetic random walks of 500 bars the detectors fire on
-   1.5 % of series (see `test_scan.py`).
-2. **Don't ignore the wider trend.** `trend_context()` computes SMA50/SMA200.
-   Cup & Handle (a continuation pattern) requires the close above the SMA200.
-   The two reversal patterns are vetoed when the stock is in a *strong*
-   down-trend (close > 10 % below a falling SMA200); being above the SMA200
-   adds to their score.
-3. **Don't enter before confirmation.** A setup is `CONFIRMED` only when a
-   daily *close* has broken its trigger level within the last
-   `MAX_BREAKOUT_AGE` (3) bars (+ `PIVOT_ORDER` bars of pivot lag for H&S and
-   Wolfe, whose final pivot is only knowable 5 bars after it prints). A close
-   that has already run more than `MAX_RUNAWAY` (5 %) above the trigger is
-   dropped as chasing. Complete-but-unbroken setups within 3 % of their
-   trigger are listed separately as `WATCHLIST` with the trigger price, so
-   nothing is entered early.
-4. **Don't neglect risk management.** Every alert carries `entry`, `stop`,
-   `risk_pct` and a reference `target`. Setups whose structural stop is more
-   than 15 % away are rejected.
+The whole scanner is one module, [`scan.py`](scan.py): constants at the top, then data loading, indicators, the three detectors, and reporting. See the wiki for the full walk-through.
+
+## Quickstart
+
+Requirements: Python 3.12+, `pandas`, `numpy`, `yfinance` (pinned lower bounds in [`requirements.txt`](requirements.txt)). No API keys: the constituent list comes from a pinned public GitHub dataset and prices from Yahoo Finance via yfinance.
+
+```bash
+python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt pytest
+```
+
+```bash
+python scan.py                              # full S&P 500 scan, 2 years of daily bars
+```
+
+```bash
+python scan.py --tickers AAPL,MSFT,NVDA -v  # subset, debug logging
+```
+
+```bash
+python scan.py --min-score 70 --max-age 2 --csv my_universe.csv --out-dir out
+```
+
+```bash
+python -m pytest -q                         # whole test suite, offline, about two seconds
+```
+
+`bash run_daily.sh` wraps the scan in a self-healing virtualenv and keeps dated logs under `logs/`.
+
+| Flag | Default | Meaning |
+|---|---|---|
+| `--tickers` | S&P 500 | comma-separated symbols instead of the index |
+| `--csv` | pinned GitHub CSV | local constituents file with a `Symbol` column |
+| `--period` | `2y` | yfinance history period (about 500 daily bars) |
+| `--min-score` | `60` | minimum quality score to report |
+| `--max-age` | `3` | max bars since the confirming close (H&S and Wolfe get +5 for pivot lag) |
+| `--out-dir` | `output` | where `signals.json` and `report.md` are written |
+
+Exit codes: `0` ok, `2` no price data at all (network problem).
+
+## Sample output
+
+`output/report.md` from the 2026-09-04 run (abridged):
+
+```
+# S&P 500 pattern scan — 2026-09-04 08:25
+
+Scanned 502 of 503 symbols (daily bars, last bar 2026-09-03). Min quality score 60.
+Breakouts older than the per-pattern limit are dropped (bars: Cup & Handle 3,
+Inverse Head & Shoulders 8, Bullish Wolfe Wave 8; ...).
+Data errors: 1
+
+## Confirmed breakouts (actionable): 5
+
+| Ticker | Pattern                  | Entry  | Stop   | Risk % | Target | Score | Vol× | Trend                                   | Details                                              |
+|--------|--------------------------|--------|--------|--------|--------|-------|------|-----------------------------------------|------------------------------------------------------|
+| CL     | Bullish Wolfe Wave       | 90.09  | 88.67  | 1.58   | 107.98 | 84    | 0.97 | close above SMA200, SMA50 > SMA200, ... | 1 2026-07-23 @89.25, 2 2026-07-28 @95.46, ... 5 2026-08-21 @89.16; line 1-3 now 88.95 |
+| HAL    | Inverse Head & Shoulders | 37.29  | 32.64  | 12.47  | 42.34  | 82    | 0.8  | close above SMA200, SMA50 < SMA200, ... | LS 2026-07-02 @32.44, head 2026-07-30 @30.84, RS 2026-08-26 @32.88, neckline 36.03->35.91 |
+| VRTX   | Cup & Handle             | 557.96 | 528.86 | 5.22   | 626.63 | 77    | 1.16 | close above SMA200, SMA50 > SMA200, ... | left rim 2026-07-07 @533.67, bottom 2026-07-23 @465.00 (depth 13%), ... trigger 553.47 |
+
+## Watchlist (pattern complete, waiting for a close above trigger): 17
+
+| BDX    | Cup & Handle             | 191.76 | 183.9  | 4.1    | 236.51 | 84    | -    | close above SMA200, ...                 | left rim 2026-02-24 @184.86, ... handle low 2026-09-03 @184.91 (depth 4.2%), trigger 191.76 |
+```
+
+`output/signals.json` carries the same rows as records plus a `meta` block (`last_bar`, per-symbol bar histogram, effective breakout-age limits). The schema is documented in the wiki.
+
+## Documentation
+
+| Page | Contents |
+|---|---|
+| [Architecture and Data Pipeline](docs/wiki/01-Architecture-and-Data-Pipeline.md) | universe source, ingestion, throttling, the "which bar is scanned" logic, scheduling |
+| [Pattern Catalog](docs/wiki/02-Pattern-Catalog.md) | exact geometric criteria, formulas for entry / stop / target / score, known edge cases |
+| [Configuration and Tuning](docs/wiki/03-Configuration-and-Tuning.md) | every threshold, what loosening or tightening it does, false-positive filters |
+| [Testing and Contributing](docs/wiki/04-Testing-and-Contributing.md) | running the suite, fixtures, adding a pattern, code style |
+
+The `docs/wiki/` files are written to be copied verbatim into the GitHub wiki.
 
 ## Layout
 
 ```
-scan.py                        detectors, data loading, reporting (single module, CLI)
-test_scan.py                   synthetic-data + end-to-end tests (pytest)
-.github/workflows/daily-scan.yml  GitHub Actions: daily 02:00 UTC scan, commits output/
-run_daily.sh                   local wrapper (venv + deps) for running by hand
-requirements.txt               pandas, numpy, yfinance
-output/                        signals.json + report.md from the latest run (committed by CI)
-logs/                          dated reports and logs from local runs (git-ignored)
+scan.py                              detectors, data loading, reporting, CLI (single module)
+test_scan.py                         original suite: textbook fixtures, random-walk sweep, last-bar handling
+test_patterns.py                     primitive precision, formula verification, negative controls, boundaries
+test_pipeline.py                     retry policy, universe loading, end-to-end mini universe
+conftest.py                          shared fixtures and the offline yfinance stand-in
+tools/debug_last_bar.py              per-symbol last-bar diagnostics (also a manual GitHub workflow)
+.github/workflows/daily-scan.yml     02:00 UTC daily: tests, scan, commit output/
+run_daily.sh                         local wrapper (venv, dependency checksum, dated logs)
+output/                              latest signals.json + report.md, committed by CI
+docs/wiki/                           GitHub-wiki-ready documentation
 ```
-
-## Architecture
-
-```
-GitHub Actions (02:00 UTC daily)          Claude scheduled task (04:00 UTC = 07:00 Israel*)
-  checkout → pip install → pytest           curl raw.githubusercontent.com/yanivil/SignalSync/main/output/signals.json
-  python scan.py  (yfinance, open internet) check meta.last_bar / meta.skipped_bar for staleness
-  git commit output/report.md + signals.json  e-mail the tables via Gmail + push notification
-```
-
-The scan runs on GitHub because both the Claude cloud sandbox and the Claude
-shell on the user's Mac sit behind a network policy that blocks every
-market-data host (Yahoo, Stooq, Alpha Vantage, Nasdaq…); GitHub and PyPI are
-reachable from both. The repo must be **public** (or the Claude task needs a
-token) so `raw.githubusercontent.com` serves the report.
-
-\* Israel is UTC+3 until 25 Oct 2026, then UTC+2 — the Claude task must move
-to 05:00 UTC (and the workflow can stay at 02:00) after the clock change.
-
-## Usage
-
-```bash
-pip install -r requirements.txt
-python3 scan.py                       # full S&P 500 scan, 2 years of daily bars
-python3 scan.py --tickers AAPL,MSFT   # subset
-python3 scan.py --min-score 70 --max-age 2
-bash run_daily.sh                     # local run with an auto-created venv
-python3 -m pytest test_scan.py -q     # tests (no network needed)
-```
-
-The constituent list is fetched from the public
-`datasets/s-and-p-500-companies` dataset on GitHub, pinned to a specific
-commit (`CONSTITUENTS_COMMIT` in `scan.py`) rather than its `main` branch so an
-upstream change cannot silently alter the scanned universe. Bump the commit
-after reviewing the upstream diff to pick up index changes (`--csv` overrides
-it with a local file). Prices come from Yahoo Finance via
-`yfinance`. Class-share tickers are normalised (`BRK.B` → `BRK-B`).
-
-## Output
-
-`output/signals.json`:
-
-```json
-{"meta": {"run_date": "...", "universe": 503, "scanned": 502, "errors": 1,
-          "last_bar": "2026-09-03", "last_bar_symbols": 502, "lagging_symbols": 0,
-          "filled_close_symbols": 500,
-          "skipped_bar": null, "skipped_bar_complete": 0, "skipped_bar_partial": 0,
-          "last_bar_histogram": {"2026-09-03": 502},
-          "min_score": 60, "max_breakout_age": 3,
-          "max_breakout_age_by_pattern": {"Cup & Handle": 3,
-                                          "Inverse Head & Shoulders": 8,
-                                          "Bullish Wolfe Wave": 8}},
- "signals": [{"ticker": "XYZ", "pattern": "Cup & Handle", "status": "CONFIRMED",
-              "entry": 102.0, "stop": 93.31, "risk_pct": 8.52, "target": 128.11,
-              "score": 88, "last_close": 102.0, "last_date": "2026-09-03",
-              "bars_since_break": 1, "volume_ratio": 1.47,
-              "trend": "close above SMA200, SMA50 > SMA200, SMA200 rising/flat",
-              "notes": "left rim 2026-03-04 @100.47, ..."}]}
-```
-
-### Which bar is scanned (`meta.last_bar`)
-
-After the US close, Yahoo's chart row for that session carries open, high,
-low and volume but no close (and no adjusted close) until about 08:00 UTC the
-next day, when US pre-market opens (on 2026-09-04, 500 of 502 symbols were
-still incomplete at 08:05 UTC and complete at 08:10 UTC). The chart's quote
-fields, however, already hold the closing print (`regularMarketPrice` stamped
-`regularMarketTime` 16:00 New York). `fill_missing_close()` therefore uses
-that price as the close when the newest row lacks one, the last trade falls on
-that row's date, and it is at least `FILL_CLOSE_MIN_AGE` (1 h) old, so a live
-intraday tick is never mistaken for a close; `meta.filled_close_symbols`
-counts the symbols completed this way. Prices are then split/dividend
-adjusted by `adjust_ohlc()` (a missing adjusted close on the newest bar means
-a ratio of 1.0, whereas yfinance's own `auto_adjust` would blank the row).
-Rows that still have no close are dropped per symbol, and then
-`align_last_bar()` picks the scan bar:
-
-* `last_bar` is the newest date on/after which at least `LAST_BAR_MIN_FRACTION`
-  (50 %) of the symbols have a complete bar, i.e. the majority's newest
-  complete bar. Every signal's `last_date` is `<= last_bar`.
-* Symbols that already have newer bars are truncated to `last_bar` so all
-  signals are comparable; `skipped_bar` names the newest date that was seen
-  but not scanned, with how many symbols had it complete
-  (`skipped_bar_complete`) and how many only volume-only
-  (`skipped_bar_partial`).
-* Symbols whose newest complete bar is *older* than `last_bar` (halted, late)
-  are scanned on their own last bar and counted in `lagging_symbols`.
-
-So on a normal 02:00 UTC run `last_bar` is the last completed session, with
-most symbols' closes filled from the quote; if Yahoo has no quote for a symbol
-yet, it is reported as partial and the majority rule still decides the bar.
-The daily-scan log prints the same
-histogram (`last raw bar per symbol` / `last complete bar per symbol`), and
-`tools/debug_last_bar.py` (also runnable as the `debug-last-bar` workflow)
-dumps the per-symbol detail.
-
-### Breakout age
-
-`max_breakout_age` is the base limit; `max_breakout_age_by_pattern` is the
-effective limit the detectors apply. H&S and Wolfe get `PIVOT_ORDER` (5)
-extra bars because their final pivot (right shoulder / point 5) is a swing
-low that is only visible 5 bars after it prints, so with the defaults a
-Cup & Handle breakout may be at most 3 bars old and an H&S or Wolfe breakout
-at most 8. The report header states the same numbers.
-
-`output/report.md` is the same content as two Markdown tables (Confirmed /
-Watchlist), which the scheduled task forwards by e-mail and push notification.
-
-## Parameters
-
-All thresholds are module-level constants at the top of `scan.py`:
-
-| Constant | Default | Meaning |
-|---|---|---|
-| `PIVOT_ORDER` | 5 | bars on each side to qualify a swing high/low |
-| `MIN_SCORE` | 60 | minimum quality score to report |
-| `MAX_BREAKOUT_AGE` | 3 | max bars since the confirming close (Cup & Handle; +`PIVOT_ORDER` for H&S and Wolfe, see `BREAKOUT_AGE_LAG`) |
-| `LAST_BAR_MIN_FRACTION` | 0.5 | share of symbols that must have a complete bar on/after a date for it to be `meta.last_bar` |
-| `MAX_RUNAWAY` | 0.05 | max close/trigger excess before it counts as chasing |
-| `WATCH_PROXIMITY` | 0.03 | unbroken setups within this of trigger → watchlist |
-| `CUP_MIN_LEN / CUP_MAX_LEN` | 30 / 250 | cup width in bars |
-| `CUP_MIN_DEPTH / CUP_MAX_DEPTH` | 0.12 / 0.50 | cup depth vs left rim |
-| `CUP_RIM_TOL` | 0.05 | right rim within 5 % of left rim |
-| `CUP_PRIOR_ADVANCE` | 0.25 | ≥ 25 % rise into the left rim |
-| `CUP_MIN_ROUNDNESS` | 0.60 | R² of convex quadratic fit of cup lows |
-| `HANDLE_MIN_LEN / HANDLE_MAX_LEN` | 5 / 40 | handle length in bars |
-| `HANDLE_MAX_DEPTH` | 0.12 | handle depth vs right rim |
-| `HANDLE_MAX_FRACTION_OF_CUP` | 0.50 | handle depth vs cup depth |
-| `IHS_MIN_LEN / IHS_MAX_LEN` | 20 / 200 | shoulder-to-shoulder width |
-| `IHS_MIN_HEAD_ATR` | 1.0 | head below shoulders by ≥ 1 ATR |
-| `IHS_SHOULDER_SYM` | 0.50 | shoulder price asymmetry vs shallower depth |
-| `IHS_TIME_SYM` | 2.5 | left/right duration ratio limit |
-| `IHS_MAX_NECK_SLOPE` | 0.15 | neckline slope over pattern, fraction of price |
-| `IHS_PRIOR_DECLINE` | 0.10 | ≥ 10 % decline into the left shoulder |
-| `WW_MIN_LEN / WW_MAX_LEN` | 15 / 200 | point-1 to point-5 width |
-| `WW_MAX_OVERSHOOT_ATR` | 2.0 | max undercut of line 1-3 by point 5 |
-| `WW_MAX_BARS_SINCE_P5` | 25 | point 5 must be recent |
 
 ## Known limitations
 
-* Pattern recognition is heuristic; parameters follow common practice (O'Neil,
-  Bulkowski, Wolfe) but there is no industry standard. Expect some false
-  positives and misses — check the chart.
-* Swing points are only recognised `PIVOT_ORDER` bars after they print, so
-  H&S and Wolfe confirmations are reported with a lag of up to 5 bars.
-* Yahoo Finance data is unofficial and occasionally incomplete; symbols with
-  fewer than 60 bars are skipped and counted in `meta.errors`.
-* The detectors were validated on synthetic data only (the development
-  environment had no market-data access); the first real runs should be
-  reviewed against charts and thresholds tuned if needed.
-
-## Scheduling & first-time setup
-
-1. The public GitHub repo is `yanivil/SignalSync`; push
-   this project (feature branch → PR → merge to `main`; scheduled workflows
-   only run from the default branch).
-2. In the repo, *Actions* → *daily-scan* → *Run workflow* once to verify the
-   runner can download data; it commits `output/report.md`.
-3. The Claude scheduled task (04:00 UTC daily) reads that file and e-mails
-   it. `meta.last_bar` is normally the last completed session (its closes
-   come from Yahoo's quote, see "Which bar is scanned"); the task should treat
-   the file as stale when `last_bar` is older than that, or when `run_date`
-   is not today.
+* Pattern recognition is heuristic. Thresholds follow common practice (O'Neil, Bulkowski, Wolfe) but there is no industry standard; expect some false positives and misses.
+* Swing points are only recognised 5 bars after they print, so Inverse H&S and Wolfe confirmations can be reported up to 5 bars late.
+* The cup roundness test does not reject a clean symmetric V (see the pattern catalog).
+* Yahoo Finance data is unofficial. Symbols with fewer than 60 bars are skipped and counted in `meta.errors`.
+* There is no persistent price cache: every run re-downloads two years of history for the whole universe.

@@ -24,6 +24,7 @@ import collections
 import logging
 import os
 import sys
+from typing import Optional, Sequence
 
 import pandas as pd
 
@@ -31,7 +32,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import scan  # noqa: E402
 
 
-def main(argv=None) -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    """Print per-symbol last-bar diagnostics; returns the process exit code."""
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--tickers", help="comma separated symbols (default: full S&P 500 list)")
     ap.add_argument("--period", default="2y")

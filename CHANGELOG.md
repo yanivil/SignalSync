@@ -5,7 +5,43 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Fixed
+- Report footer claimed entries are "capped 3% above trigger"; the rule is
+  that closes more than `MAX_RUNAWAY` (5 %) above the trigger are dropped as
+  chasing. The footer now states that and takes the value from the constant.
+- `_as_utc()` treated a numpy integer epoch as nanoseconds (→ 1970) and so
+  silently declined to fill the close; numpy integer/float epochs are now
+  accepted like Python ones.
+- `_fetch_history()` slept 15 s after its third and final failed attempt;
+  the back-off is now 5 s then 10 s with no sleep after the last try.
+
+### Added
+- `test_patterns.py`: primitives against hand-computed values, every
+  entry/stop/target/risk recomputed from the reported anchors and the
+  documented formulas, single-rule mutations of each textbook fixture that
+  must be rejected, and data boundaries (missing bars, zero volume, wick
+  spikes, unadjusted split, determinism).
+- `test_pipeline.py`: retry/back-off policy, universe CSV loading, and an
+  end-to-end six-symbol mini universe with one throttled and one delisted
+  symbol, checking the JSON schema, ordering, report formatting, `--min-score`
+  and exit code 2.
+- `conftest.py`: shared fixtures and an offline `yfinance` stand-in.
+- `docs/wiki/`: architecture and data pipeline, pattern catalog with exact
+  criteria and formulas, configuration and tuning, testing and contributing.
+- Docstrings now state algorithmic complexity; score composition, neckline
+  tilt and the Wolfe ETA/EPA algebra are annotated in the detectors; bare
+  `dict` annotations replaced by typed generics.
+
 ### Changed
+- README rewritten as a project overview (pipeline flowchart, quickstart,
+  sample output, links to the wiki); the operational detail moved to
+  `docs/wiki/01-Architecture-and-Data-Pipeline.md`.
+- CI runs the whole suite (`python -m pytest -q`) instead of `test_scan.py` only.
+- `_u_shape_r2` docstring and the cup detector comment now say what the
+  roundness test does and does not reject (a clean symmetric V passes with
+  R² ≈ 0.93).
+
+### Changed (earlier)
 - The newest daily bar's close is filled from Yahoo's last-trade quote
   (`fill_missing_close()`): after the US close the chart row has no close
   until ~08:00 UTC, but `regularMarketPrice`/`regularMarketTime` already hold
