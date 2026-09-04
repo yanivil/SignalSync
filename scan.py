@@ -42,8 +42,8 @@ import os
 import sys
 import time
 import urllib.request
-from dataclasses import dataclass, asdict, field
-from typing import Iterable, List, Optional, Sequence, Tuple
+from dataclasses import dataclass, asdict
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -223,19 +223,26 @@ def adjust_ohlc(df: pd.DataFrame) -> pd.DataFrame:
     return out[["Open", "High", "Low", "Close", "Volume"]]
 
 
-def _as_utc(ts) -> pd.Timestamp:
+def _as_utc(ts: Any) -> pd.Timestamp:
     """Yahoo's ``regularMarketTime`` as a UTC Timestamp.
 
     yfinance >= 1.x converts it to a tz-aware ``pd.Timestamp`` in
-    ``get_history_metadata()``; the raw chart meta carries epoch seconds.
+    ``get_history_metadata()``; the raw chart meta carries epoch seconds, which
+    may arrive as ``int``, a numeric string, or a numpy integer/float.
+
+    :param ts: Epoch seconds, or anything ``pd.Timestamp`` accepts.
+    :returns: tz-aware UTC Timestamp.
+    :raises ValueError, TypeError, OverflowError: for unparseable input (the
+        caller treats these as "no usable quote").
     """
-    if isinstance(ts, (int, float)) or (isinstance(ts, str) and ts.strip().lstrip("-").isdigit()):
+    if isinstance(ts, (int, float, np.integer, np.floating)) or (
+            isinstance(ts, str) and ts.strip().lstrip("-").isdigit()):
         return pd.Timestamp(int(ts), unit="s", tz="UTC")
     t = pd.Timestamp(ts)
     return t.tz_convert("UTC") if t.tzinfo is not None else t.tz_localize("UTC")
 
 
-def fill_missing_close(df: pd.DataFrame, meta: dict, now: Optional[pd.Timestamp] = None
+def fill_missing_close(df: pd.DataFrame, meta: Mapping[str, Any], now: Optional[pd.Timestamp] = None
                        ) -> Tuple[pd.DataFrame, Optional[str]]:
     """Complete the newest bar from Yahoo's last-trade quote when its close is missing.
 
@@ -289,9 +296,14 @@ def fill_missing_close(df: pd.DataFrame, meta: dict, now: Optional[pd.Timestamp]
 def _fetch_history(sym: str, period: str) -> Optional[Tuple[pd.DataFrame, dict]]:
     """Download one symbol's raw daily history plus Yahoo's chart metadata.
 
+    Transient failures (throttling, HTTP 5xx, timeouts) are retried up to
+    three times with a linear back-off of 5 s then 10 s.  A "delisted" /
+    "no data" error is final and returns ``None`` immediately, without retry.
+
     :param sym: Yahoo symbol.
     :param period: yfinance period string.
-    :returns: ``(frame, meta)`` or ``None`` if the symbol yielded nothing.
+    :returns: ``(frame, meta)``, or ``None`` if the symbol yielded nothing or
+        every attempt failed.
     """
     import yfinance as yf  # imported lazily so tests can run without it
 
@@ -310,12 +322,13 @@ def _fetch_history(sym: str, period: str) -> Optional[Tuple[pd.DataFrame, dict]]
                 log.warning("%s: no data (%s)", sym, msg.splitlines()[0][:120])
                 return None
             log.warning("%s attempt %d failed: %s", sym, attempt, msg.splitlines()[0][:120])
-            time.sleep(5 * (attempt + 1))
+            if attempt < 2:
+                time.sleep(5 * (attempt + 1))   # 5 s, then 10 s; no sleep after the last try
     return None
 
 
 def download_history(symbols: Sequence[str], period: str = "2y", workers: int = 8,
-                     now: Optional[pd.Timestamp] = None) -> dict:
+                     now: Optional[pd.Timestamp] = None) -> Dict[str, pd.DataFrame]:
     """Download daily OHLCV for many symbols with yfinance, in parallel.
 
     Per-symbol ``Ticker.history`` (rather than the batched ``yf.download``)
@@ -333,11 +346,14 @@ def download_history(symbols: Sequence[str], period: str = "2y", workers: int = 
         and ``df.attrs["filled_close"]`` is the date whose close was taken from
         the quote (or ``None``).
     :raises ImportError: if yfinance is not installed.
+
+    Complexity: one chart request per symbol spread over ``workers`` threads
+    (wall time is network-bound), then O(rows) cleaning per symbol.
     """
     from concurrent.futures import ThreadPoolExecutor
 
-    out: dict = {}
-    raw_last: dict = {}     # last index date before cleaning, per symbol (diagnostics)
+    out: Dict[str, pd.DataFrame] = {}
+    raw_last: Dict[str, pd.Timestamp] = {}   # last index date before cleaning (diagnostics)
     filled = 0
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         results = list(pool.map(lambda s: (s, _fetch_history(s, period)), symbols))
@@ -381,17 +397,17 @@ def download_history(symbols: Sequence[str], period: str = "2y", workers: int = 
     return out
 
 
-def _date_histogram(dates: Iterable) -> dict:
+def _date_histogram(dates: Iterable) -> Dict[str, int]:
     """``{"YYYY-MM-DD": count}`` sorted newest first (for logs and meta)."""
-    counts: dict = {}
+    counts: Dict[str, int] = {}
     for d in dates:
         key = str(pd.Timestamp(d).date())
         counts[key] = counts.get(key, 0) + 1
     return dict(sorted(counts.items(), reverse=True))
 
 
-def align_last_bar(data: dict, min_fraction: float = LAST_BAR_MIN_FRACTION
-                   ) -> Tuple[dict, dict]:
+def align_last_bar(data: Dict[str, pd.DataFrame], min_fraction: float = LAST_BAR_MIN_FRACTION
+                   ) -> Tuple[Dict[str, pd.DataFrame], Dict[str, Any]]:
     """Pick the bar the scan is "as of" and make sure no symbol runs ahead of it.
 
     Why: Yahoo publishes the newest daily bar per symbol at different times
@@ -417,6 +433,9 @@ def align_last_bar(data: dict, min_fraction: float = LAST_BAR_MIN_FRACTION
         that had a complete bar on it), ``skipped_bar_partial`` (symbols that
         had only Yahoo's volume-only row on it) and ``last_bar_histogram``
         (newest complete bar per symbol before alignment).
+
+    Complexity: O(S log S) for the date histogram over S symbols, plus O(rows)
+    for the truncation mask of each symbol that runs ahead.
     """
     if not data:
         return data, {"last_bar": None}
@@ -432,9 +451,9 @@ def align_last_bar(data: dict, min_fraction: float = LAST_BAR_MIN_FRACTION
             break
     assert last_bar is not None  # cum reaches len(data) >= need at the oldest date
 
-    aligned: dict = {}
-    skipped_complete: dict = {}
-    partial: dict = {}
+    aligned: Dict[str, pd.DataFrame] = {}
+    skipped_complete: Dict[str, int] = {}
+    partial: Dict[str, int] = {}
     for sym, df in data.items():
         for day in df.attrs.get("partial_bars", []):
             if pd.Timestamp(day) > last_bar:
@@ -471,7 +490,10 @@ def atr(df: pd.DataFrame, n: int = ATR_LEN) -> pd.Series:
 
     :param df: OHLC DataFrame.
     :param n: Look-back length.
-    :returns: ATR series aligned with ``df``.
+    :returns: ATR series aligned with ``df``.  The first ``n - 1`` values are
+        partial means (``min_periods=1``); bar 0 is simply High - Low.
+
+    Complexity: O(n_bars).
     """
     prev_close = df["Close"].shift(1)
     tr = pd.concat([
@@ -495,6 +517,10 @@ def find_pivots(high: np.ndarray, low: np.ndarray, order: int = PIVOT_ORDER
     :param low: Low prices.
     :param order: Bars required on each side.
     :returns: ``(swing_high_indices, swing_low_indices)``.
+
+    Complexity: O(n * order) -- each of the n bars scans a 2*order+1 window.
+    A flat stretch yields no pivots (the tie goes to the window's first bar,
+    which is never the centre), so constant prices produce nothing.
     """
     n = len(high)
     highs, lows = [], []
@@ -520,6 +546,8 @@ def trend_context(df: pd.DataFrame) -> Tuple[str, bool, bool]:
 
     :param df: OHLCV DataFrame (>= 60 bars).
     :returns: ``(description, uptrend, strong_downtrend)``.
+
+    Complexity: O(n_bars) for the two rolling means.
     """
     close = df["Close"]
     sma50 = close.rolling(50).mean()
@@ -527,6 +555,8 @@ def trend_context(df: pd.DataFrame) -> Tuple[str, bool, bool]:
     c = float(close.iloc[-1])
     s50 = float(sma50.iloc[-1]) if not math.isnan(sma50.iloc[-1]) else None
     s200 = float(sma200.iloc[-1]) if not math.isnan(sma200.iloc[-1]) else None
+    # The SMA200 slope is judged against its value 40 bars (~2 months) earlier:
+    # long enough to ignore day-to-day wobble, short enough to notice a roll-over.
     s200_prev = (float(sma200.iloc[-40]) if len(sma200) > 40
                  and not math.isnan(sma200.iloc[-40]) else None)
 
@@ -547,7 +577,12 @@ def trend_context(df: pd.DataFrame) -> Tuple[str, bool, bool]:
 
 
 def _volume_ratio(df: pd.DataFrame, idx: int) -> Optional[float]:
-    """Volume on bar ``idx`` divided by the trailing 50-bar average (excl. idx)."""
+    """Volume on bar ``idx`` divided by the trailing 50-bar average (excl. idx).
+
+    :returns: The ratio rounded to 2 dp, or ``None`` when ``idx < 20``, the
+        bar's volume is NaN, or the trailing average is zero/NaN (a zero-volume
+        session on ``idx`` itself yields ``0.0``).
+    """
     vol = df["Volume"].to_numpy(dtype=float)
     if idx < 20 or np.isnan(vol[idx]):
         return None
@@ -573,6 +608,8 @@ def _status_from_break(close: np.ndarray, trigger: float, start: int,
     :returns: ``("CONFIRMED", bars_since_break)``, ``("WATCHLIST", None)`` or
         ``("STALE", bars_since_break)`` if the break is too old / price already
         ran away (rule 3 + rule 4: no chasing).
+
+    Complexity: O(n - start).
     """
     n = len(close)
     first_break = None
@@ -600,9 +637,16 @@ def _u_shape_r2(lows: np.ndarray) -> float:
     """R^2 of a convex quadratic fitted to the cup lows (1.0 = perfect U).
 
     Returns 0 when the best-fit parabola opens downward (an arch, not a cup).
+    Note what this does and does not reject: it measures how much of the lows'
+    variance *one parabola* explains, so a ragged, multi-legged or lopsided
+    base scores poorly, but a clean symmetric V still scores about 0.93 (a
+    parabola fits ``|x|`` well).  V-shaped cups are therefore only screened by
+    the bottom-position and depth rules, not by this test.
 
     :param lows: Low prices from left rim to right rim inclusive.
     :returns: Coefficient of determination in [0, 1].
+
+    Complexity: O(m) for m lows (one least-squares fit of degree 2).
     """
     x = np.arange(len(lows), dtype=float)
     if len(x) < 5:
@@ -671,6 +715,10 @@ def detect_cup_and_handle(df: pd.DataFrame, ticker: str) -> List[Signal]:
     :param df: OHLCV DataFrame.
     :param ticker: Symbol for labelling.
     :returns: Zero or more Signals (best-scoring per rim pair).
+
+    Complexity: O(P^2 * W) worst case for P swing highs and cup width W --
+    each candidate rim pair costs O(W) for the bottom search and the quadratic
+    fit.  The ``break`` on ``CUP_MAX_LEN`` bounds the pairs per left rim.
     """
     high, low, close = (df[c].to_numpy(dtype=float) for c in ("High", "Low", "Close"))
     n = len(close)
@@ -707,9 +755,10 @@ def detect_cup_and_handle(df: pd.DataFrame, ticker: str) -> List[Signal]:
             pre_low = float(low[max(0, a - 120):a + 1].min())
             if (rim_a - pre_low) / pre_low < CUP_PRIOR_ADVANCE:
                 continue
-            # Roundness: fit a convex quadratic to the cup lows; a V or a ragged
-            # base scores poorly.  This is the main defence against "seeing"
-            # cups in random price movement (rule 1).
+            # Roundness: fit a convex quadratic to the cup lows; a ragged or
+            # lopsided base scores poorly (a clean V still passes, see
+            # _u_shape_r2).  This is the main defence against "seeing" cups in
+            # random price movement (rule 1).
             roundness = _u_shape_r2(seg_low)
             if roundness < CUP_MIN_ROUNDNESS:
                 continue
@@ -739,8 +788,12 @@ def detect_cup_and_handle(df: pd.DataFrame, ticker: str) -> List[Signal]:
             risk = (entry - stop) / entry * 100
             if risk > 15:
                 continue  # rule 4: reject setups whose structural stop is too far
-            # Quality score: symmetric cup, moderate depth, shallow handle,
-            # tight risk, volume on breakout.
+            # Quality score (0-100): 50 base
+            #   +15 roundness         (0 at CUP_MIN_ROUNDNESS, 15 at R^2 = 1)
+            #   +10 depth near 25 %   (0 at 0 % or 50 %, linear)
+            #   +10 shallow handle    (0 at HANDLE_MAX_DEPTH)
+            #   +10 tight risk        (0 at the 15 % limit)
+            #   +5  breakout volume >= 1.3x the 50-day average
             score = 50
             score += 15 * (roundness - CUP_MIN_ROUNDNESS) / (1 - CUP_MIN_ROUNDNESS)
             score += 10 * (1 - min(abs(depth - 0.25) / 0.25, 1))  # depth ~25% ideal
@@ -785,6 +838,9 @@ def detect_inverse_hs(df: pd.DataFrame, ticker: str) -> List[Signal]:
     :param df: OHLCV DataFrame.
     :param ticker: Symbol for labelling.
     :returns: Zero or more Signals.
+
+    Complexity: O(L * (W + n)) for L swing lows: each consecutive triple costs
+    O(W) for the neckline anchors and O(n) for the confirmation scan.
     """
     high, low, close = (df[c].to_numpy(dtype=float) for c in ("High", "Low", "Close"))
     n = len(close)
@@ -818,6 +874,9 @@ def detect_inverse_hs(df: pd.DataFrame, ticker: str) -> List[Signal]:
         if n2 == n1:
             continue
         slope = (high[n2] - high[n1]) / (n2 - n1)
+        # Neckline tilt = its total rise/fall over the pattern width, as a
+        # fraction of the head price.  Beyond IHS_MAX_NECK_SLOPE (15 %) it is a
+        # trend line rather than a neckline.
         if abs(slope * width) / close[h] > IHS_MAX_NECK_SLOPE:
             continue
         # Prior decline into the left shoulder.
@@ -855,7 +914,14 @@ def detect_inverse_hs(df: pd.DataFrame, ticker: str) -> List[Signal]:
         risk = (entry - stop) / entry * 100
         if risk > 15:
             continue
-        height = trigger - h_v
+        height = trigger - h_v          # measured move: neckline minus head
+        # Quality score (0-100): 50 base
+        #   +15 shoulder price symmetry (0 at the IHS_SHOULDER_SYM limit)
+        #   +10 shoulder time symmetry  (log-scaled, 0 at the IHS_TIME_SYM limit)
+        #   +10 flat neckline           (0 at the IHS_MAX_NECK_SLOPE limit)
+        #   +5  close above SMA200
+        #   +5  tight risk              (0 at the 15 % limit)
+        #   +5  breakout volume >= 1.3x the 50-day average
         score = 50
         score += 15 * (1 - abs(ls_v - rs_v) / max(IHS_SHOULDER_SYM * min(d_left, d_right), 1e-9))
         score += 10 * (1 - abs(math.log(ratio)) / math.log(IHS_TIME_SYM))
@@ -904,6 +970,9 @@ def detect_bullish_wolfe(df: pd.DataFrame, ticker: str) -> List[Signal]:
     :param df: OHLCV DataFrame.
     :param ticker: Symbol for labelling.
     :returns: Zero or more Signals.
+
+    Complexity: O(L * (W + n)) for L swing lows: each consecutive triple costs
+    O(W) to pick points 2 and 4 and O(n) for the confirmation scan.
     """
     high, low, close = (df[c].to_numpy(dtype=float) for c in ("High", "Low", "Close"))
     n = len(close)
@@ -975,13 +1044,23 @@ def detect_bullish_wolfe(df: pd.DataFrame, ticker: str) -> List[Signal]:
         risk = (entry - stop) / entry * 100
         if risk > 15:
             continue
-        # ETA = intersection of lines 1-3 and 2-4; EPA = line 1-4 at ETA.
+        # ETA = the bar where lines 1-3 and 2-4 meet.  Solving
+        #   v1 + s13 (x - p1) = v2 + s24 (x - p2)
+        # for x gives  x = [(v2 - s24 p2) - (v1 - s13 p1)] / (s13 - s24);
+        # s24 < s13 (both negative) so the denominator is positive.
+        # EPA = line 1-4 evaluated at the ETA bar (Wolfe's price target).
         denom = s13 - s24
         eta = (v2 - s24 * p2 - (v1 - s13 * p1)) / denom if denom != 0 else None
         s14 = (v4 - v1) / (p4 - p1)
         target = float(v1 + s14 * (eta - p1)) if eta is not None and eta > p5 else None
         if target is not None and target <= entry:
             target = None
+        # Quality score (0-100): 50 base
+        #   +15 point 5 close to line 1-3 (0 at the WW_MAX_OVERSHOOT_ATR limit)
+        #   +10 time symmetry of legs 1-3 vs 3-5 (log-scaled, 0 at a 3x ratio)
+        #   +10 tight risk (0 at the 15 % limit)
+        #   +5  close above SMA200
+        #   +5  breakout volume >= 1.3x the 50-day average
         score = 50
         score += 15 * (1 - min(abs(overshoot) / (WW_MAX_OVERSHOOT_ATR * a_tr[p5]), 1))
         sym = (p3 - p1) / max(p5 - p3, 1)
@@ -1011,7 +1090,7 @@ def _dedupe(signals: List[Signal]) -> List[Signal]:
     Overlapping pivot combinations often describe the same structure; reporting
     all of them would be noise (and would look like forcing patterns).
     """
-    best: dict = {}
+    best: Dict[Tuple[str, str, str], Signal] = {}
     for s in signals:
         key = (s.ticker, s.pattern, s.status)
         if key not in best or s.score > best[key].score:
@@ -1038,7 +1117,7 @@ def scan_symbol(sym: str, df: pd.DataFrame) -> List[Signal]:
     return out
 
 
-def render_markdown(signals: List[Signal], meta: dict) -> str:
+def render_markdown(signals: List[Signal], meta: Mapping[str, Any]) -> str:
     """Render the Markdown report.
 
     :param signals: All signals.
@@ -1081,8 +1160,9 @@ def render_markdown(signals: List[Signal], meta: dict) -> str:
                          f"{s.target if s.target else '-'} | {s.score} | "
                          f"{s.volume_ratio if s.volume_ratio else '-'} | {s.trend} | {s.notes} |")
         lines.append("")
-    lines.append("_Heuristic scan, not advice. Entry = trigger level (or breakout close, capped 3% above trigger). "
-                 "Stop = structural level minus 0.25 ATR. Verify on a chart before trading._")
+    lines.append(f"_Heuristic scan, not advice. Entry = trigger level, or the breakout close when it "
+                 f"is above the trigger (closes more than {MAX_RUNAWAY:.0%} above the trigger are dropped "
+                 f"as chasing). Stop = structural level minus 0.25 ATR. Verify on a chart before trading._")
     return "\n".join(lines)
 
 
@@ -1132,7 +1212,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         signals.extend(scan_symbol(sym, df))
     signals.sort(key=lambda s: (s.status != "CONFIRMED", -s.score))
 
-    meta = {"run_date": dt.datetime.now().strftime("%Y-%m-%d %H:%M"), "universe": len(symbols),
+    meta: Dict[str, Any] = {"run_date": dt.datetime.now().strftime("%Y-%m-%d %H:%M"), "universe": len(symbols),
             "scanned": len(data), "errors": len(symbols) - len(data),
             **bar_info,
             "min_score": MIN_SCORE, "max_breakout_age": MAX_BREAKOUT_AGE,
