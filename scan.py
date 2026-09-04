@@ -350,6 +350,10 @@ def download_history(symbols: Sequence[str], period: str = "2y", workers: int = 
         raw_last[sym] = df.index[-1]
         df, filled_day = fill_missing_close(df, meta, now=now)
         df = adjust_ohlc(df)
+        if getattr(df.index, "tz", None) is not None:
+            # Ticker.history() indexes in exchange time; the rest of the scan
+            # (and align_last_bar's date comparisons) work on naive dates.
+            df.index = df.index.tz_localize(None).normalize()
         has_close = df["Close"].notna().to_numpy()
         if not has_close.any():
             continue

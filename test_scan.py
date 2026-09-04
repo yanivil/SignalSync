@@ -464,6 +464,21 @@ def test_adjust_ohlc_applies_ratio_and_defaults_missing_adjclose_to_one():
     assert scan.adjust_ohlc(df.drop(columns=["Adj Close"])).equals(df.drop(columns=["Adj Close"]))
 
 
+def test_download_history_normalises_exchange_time_index(monkeypatch):
+    """Ticker.history() indexes in America/New_York; downstream compares naive dates."""
+    base = make_cup_and_handle()
+    ny = base.copy()
+    ny.index = ny.index.tz_localize("America/New_York")
+    ny["Adj Close"] = ny["Close"]
+    _install_fake_yfinance(monkeypatch, {"AAA": ny, "BBB": ny}, [])
+    out = scan.download_history(["AAA", "BBB"], workers=1)
+    assert out["AAA"].index.tz is None
+    assert out["AAA"].index[-1] == base.index[-1]
+    aligned, info = scan.align_last_bar(out)          # used to raise: naive vs aware compare
+    assert info["last_bar"] == str(base.index[-1].date())
+    assert scan.scan_symbol("AAA", aligned["AAA"]), "detectors still see the setup"
+
+
 def test_download_history_fills_close_from_quote(monkeypatch):
     base = make_cup_and_handle()
     d_last = base.index[-1]
