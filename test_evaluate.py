@@ -28,6 +28,11 @@ def test_classify_outcomes_and_r_multiples():
         {"outcome": "target", "bars": 2, "exit": 120.0, "r": 2.0}
     assert ev.classify(entry, stop, target, _bars((105, 99, 104), (100, 89, 95))) == \
         {"outcome": "stop", "bars": 2, "exit": 90.0, "r": -1.0}
+    # Gaps fill at the open, not at the level.
+    gap_down = _bars((105, 99, 104), (86, 84, 85))                     # opens at 85, below the 90 stop
+    assert ev.classify(entry, stop, target, gap_down) == {"outcome": "stop", "bars": 2, "exit": 85.0, "r": -1.5}
+    gap_up = _bars((105, 99, 104), (130, 124, 125))                    # opens at 125, above the 120 target
+    assert ev.classify(entry, stop, target, gap_up) == {"outcome": "target", "bars": 2, "exit": 125.0, "r": 2.5}
     both = ev.classify(entry, stop, target, _bars((125, 88, 100)))      # touched both: stop
     assert both["outcome"] == "stop" and both["r"] == -1.0
     open_ = ev.classify(entry, stop, target, _bars((105, 99, 104), (106, 100, 105), (107, 101, 106)), horizon=2)

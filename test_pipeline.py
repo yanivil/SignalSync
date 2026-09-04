@@ -48,6 +48,14 @@ def test_fetch_history_does_not_retry_a_delisted_symbol(fake_yfinance):
     assert yf.history_calls("GONE") == 1 and yf.sleeps == []
 
 
+def test_download_history_skips_a_malformed_frame_instead_of_aborting(fake_yfinance, cup_df, caplog):
+    broken = cup_df.reset_index(drop=True)              # integer index: no dates to normalise
+    fake_yfinance({"BAD": broken, "OK": cup_df})
+    with caplog.at_level("ERROR", logger="sp500scan"):
+        out = scan.download_history(["BAD", "OK"], workers=1)
+    assert set(out) == {"OK"} and "BAD: unusable history" in caplog.text
+
+
 def test_download_history_keeps_the_rest_of_the_universe_after_failures(fake_yfinance, cup_df):
     yf = fake_yfinance({"FLAKY": cup_df, "DEAD": cup_df, "OK": cup_df},
                        failures={"FLAKY": [Throttled("429")], "DEAD": [Throttled("429")] * 3})

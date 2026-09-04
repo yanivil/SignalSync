@@ -8,7 +8,7 @@ Every detector works on positional daily bars (`High`, `Low`, `Close` as numpy a
 |---|---|---|
 | ATR | simple rolling mean of true range over `ATR_LEN` = 14 bars, `min_periods=1` | bar 0 is High − Low; a flat series has ATR 0 |
 | Swing high / low (`find_pivots`) | bar *i* is a swing high if `high[i]` is the maximum of `[i−5, i+5]` **and** the first maximum in that window; swing lows likewise on `low` | O(n · order). The last 5 bars can never be pivots (no repainting), so any pattern whose last anchor is a pivot is seen up to 5 bars late. Flat stretches produce no pivots because the tie goes to the window's first bar. |
-| Trend context | `uptrend` = close > SMA200; `strong_downtrend` = close < 0.90 × SMA200 **and** SMA200 below its value 40 bars earlier. With fewer than 200 bars: SMA50 with a 0.85 factor. | continuation pattern requires `uptrend`; reversal patterns are vetoed by `strong_downtrend` |
+| Trend context | `uptrend` = close > SMA200; `strong_downtrend` = close < 0.90 × SMA200 **and** SMA200 below its value 40 bars earlier. With fewer than 200 bars, or when the SMA200 exists but not 40 bars ago (200–239 bars): SMA50 with a 0.85 factor. | continuation pattern requires `uptrend`; reversal patterns are vetoed by `strong_downtrend` |
 | Breakout state (`_status_from_break`) | first close above the trigger from the pattern's completion bar; `age` = bars since | `CONFIRMED` if `age ≤ MAX_BREAKOUT_AGE + lag`, last close still above the trigger and not more than 5 % above it; `WATCHLIST` if unbroken and last close ≥ 97 % of the trigger; otherwise `STALE` (dropped) |
 | Volume ratio | volume on the breakout bar / mean of the 50 bars before it | `None` before bar 20 or when the base is zero; adds +5 score when ≥ 1.3 |
 | Risk filter | `risk_pct = (entry − stop) / entry × 100`; rejected if > 15 or if `stop ≥ entry` | applies to every pattern |
@@ -78,7 +78,7 @@ Entry is the breakout close when it is above the trigger (and within 5 % of it),
 4. Point 5 vs. the extended 1-3 line: `overshoot = line13(p5) − low[5]` must satisfy `−0.5 × ATR ≤ overshoot ≤ 2.0 × ATR` (touch or false breakdown, not a real breakdown).
 5. Confirmation: first bar `j > p5` with `close[j] > line13(j)`; trigger = `line13(j)`. Confirmed if `age ≤ MAX_BREAKOUT_AGE + 5`, the last close is still above `line13(n−1)` and within 5 % of the trigger. Watchlist if unbroken, last close ≥ 97 % of `line13(n−1)` and above `low[5]`.
 
-**Levels.** `stop = low[5] − 0.25 × ATR[5]`. ETA is where lines 1-3 and 2-4 meet: solving `v1 + s13 (x − p1) = v2 + s24 (x − p2)` gives `x = [(v2 − s24·p2) − (v1 − s13·p1)] / (s13 − s24)` (denominator positive). Target (EPA) = line 1-4 at the ETA, `v1 + s14 × (ETA − p1)`, reported only when the ETA lies after point 5 and the target is above the entry; otherwise `null`.
+**Levels.** `stop = low[5] − 0.25 × ATR[5]`. ETA is where lines 1-3 and 2-4 meet: solving `v1 + s13 (x − p1) = v2 + s24 (x − p2)` gives `x = [(v2 − s24·p2) − (v1 − s13·p1)] / (s13 − s24)` (denominator positive). Target (EPA) = line 1-4 at the ETA, `v1 + s14 × (ETA − p1)`, reported only when the ETA lies after point 5 and within `WW_MAX_ETA_BARS` (250) of it, and the target is above the entry; otherwise `null`. Near-parallel lines would otherwise project the ETA, and the target, arbitrarily far out.
 
 **Score.** 50 + 15 × (1 − |overshoot| / (2 ATR)) + 10 × (1 − |ln((p3 − p1)/(p5 − p3))| / ln 3) + 10 × (1 − risk / 15) + 5 if close > SMA200 + 5 if volume ratio ≥ 1.3.
 

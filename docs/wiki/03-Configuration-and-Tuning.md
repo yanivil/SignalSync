@@ -35,7 +35,7 @@ All thresholds are module-level constants at the top of `scan.py`. Two of them (
 |---|---|---|---|
 | `TREND_STRONG_DOWN` | 0.90 | close below this fraction of a *falling* SMA200 = strong down-trend; reversal patterns are vetoed | 1.0 would veto any close below a falling SMA200 |
 | `TREND_SLOPE_LOOKBACK` | 40 | bars back used to decide whether the SMA200 is falling | shorter reacts faster to a roll-over, longer ignores wobble |
-| `TREND_STRONG_DOWN_SMA50` | 0.85 | the same test against SMA50 when fewer than 200 bars exist | |
+| `TREND_STRONG_DOWN_SMA50` | 0.85 | the same test against SMA50 when fewer than 200 bars exist, or when the SMA200's slope cannot be judged yet (200–239 bars) | |
 
 The up-trend requirement for the cup (close above SMA200) is not a constant.
 
@@ -73,6 +73,7 @@ Not configurable but relevant: the cup bottom must sit in the middle 60 % of the
 | `WW_MIN_LEN` / `WW_MAX_LEN` | 15 / 200 | point-1 to point-5 width | |
 | `WW_MAX_OVERSHOOT_ATR` | 2.0 | max undercut of line 1-3 by point 5 | more = accepts deeper false breakdowns; the −0.5 ATR "must reach the line" floor is fixed |
 | `WW_MAX_BARS_SINCE_P5` | 25 | point 5 must be within the last 25 bars | |
+| `WW_MAX_ETA_BARS` | 250 | lines 1-3 and 2-4 must meet within this many bars after point 5 for a target to be reported | guards against near-parallel lines projecting absurd targets |
 
 ## False-positive filters, in the order they act
 
