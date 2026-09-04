@@ -215,6 +215,24 @@ def test_cup_levels_follow_documented_formulas(cup_df):
     assert s.volume_ratio == scan._volume_ratio(cup_df, first_break)
 
 
+def test_ihs_neckline_ignores_wicks_on_the_anchor_bars(ihs_df):
+    """A long upper wick on the LS/head/RS bar must not become a neckline anchor."""
+    (base,) = scan.detect_inverse_hs(ihs_df, "IHS")
+    m = re.search(r"LS (\S+) @[\d.]+, head (\S+) @[\d.]+, RS (\S+) @", base.notes)
+    ls, h, rs = (_loc(ihs_df, m[k]) for k in (1, 2, 3))
+    high = ihs_df["High"].to_numpy()
+    spiked = ihs_df.copy()
+    # A wick on the LS bar just above the left half's rally peak.  The head
+    # and RS bars are left alone so ATR[h] (head-depth test) and ATR[rs]
+    # (stop) are unchanged and only the anchor choice is exercised.
+    spiked.loc[spiked.index[ls], "High"] = high[ls + 1:h].max() * 1.01
+    sh = spiked["High"].to_numpy()
+    assert np.argmax(sh[ls:h + 1]) == 0                   # the old inclusive slice would anchor on LS
+    (s,) = scan.detect_inverse_hs(spiked, "IHS")
+    assert s.notes == base.notes                          # neckline, trigger and levels unchanged
+    assert (s.entry, s.stop, s.target) == (base.entry, base.stop, base.target)
+
+
 def test_ihs_levels_follow_documented_formulas(ihs_df):
     (s,) = scan.detect_inverse_hs(ihs_df, "IHS")
     m = re.fullmatch(r"LS (\S+) @([\d.]+), head (\S+) @([\d.]+), RS (\S+) @([\d.]+), "
@@ -229,9 +247,10 @@ def test_ihs_levels_follow_documented_formulas(ihs_df):
     unit = scan.atr(ihs_df).to_numpy()
     assert h_v < ls_v - scan.IHS_MIN_HEAD_ATR * unit[h] and h_v < rs_v - scan.IHS_MIN_HEAD_ATR * unit[h]
     assert abs(ls_v - rs_v) <= scan.IHS_SHOULDER_SYM * min(ls_v - h_v, rs_v - h_v)
-    # Neckline through the highest highs of each half; slope bounded.
-    n1 = ls + int(np.argmax(high[ls:h + 1]))
-    n2 = h + int(np.argmax(high[h:rs + 1]))
+    # Neckline through the highest highs strictly between the anchors; slope bounded.
+    n1 = ls + 1 + int(np.argmax(high[ls + 1:h]))
+    n2 = h + 1 + int(np.argmax(high[h + 1:rs]))
+    assert ls < n1 < h < n2 < rs
     slope = (high[n2] - high[n1]) / (n2 - n1)
     assert (float(m[7]), float(m[8])) == (round(high[n1], 2), round(high[n2], 2))
     assert abs(slope * (rs - ls)) / close[h] <= scan.IHS_MAX_NECK_SLOPE

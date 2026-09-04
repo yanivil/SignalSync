@@ -6,6 +6,9 @@ All notable changes to this project are documented here. Format follows
 ## [Unreleased]
 
 ### Fixed
+- Inverse H&S neckline anchors are the rally peaks strictly between the
+  shoulders and the head; a long upper wick on a shoulder or head bar no
+  longer becomes an anchor. No change on the fixtures or 200 random walks.
 - Strong-down-trend veto silently switched off for symbols with 200-239
   bars of history (SMA200 existed but not 40 bars earlier); it now falls
   back to the SMA50 test used for short histories.
