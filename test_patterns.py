@@ -222,12 +222,12 @@ def test_ihs_neckline_ignores_wicks_on_the_anchor_bars(ihs_df):
     ls, h, rs = (_loc(ihs_df, m[k]) for k in (1, 2, 3))
     high = ihs_df["High"].to_numpy()
     spiked = ihs_df.copy()
-    # Wicks just above the rally peaks of each half, on the LS and head bars
-    # (the RS bar is left alone so ATR[rs], which sets the stop, is unchanged).
+    # A wick on the LS bar just above the left half's rally peak.  The head
+    # and RS bars are left alone so ATR[h] (head-depth test) and ATR[rs]
+    # (stop) are unchanged and only the anchor choice is exercised.
     spiked.loc[spiked.index[ls], "High"] = high[ls + 1:h].max() * 1.01
-    spiked.loc[spiked.index[h], "High"] = high[h + 1:rs].max() * 1.01
     sh = spiked["High"].to_numpy()
-    assert np.argmax(sh[ls:h + 1]) == 0 and np.argmax(sh[h:rs + 1]) == 0   # the old slices would anchor here
+    assert np.argmax(sh[ls:h + 1]) == 0                   # the old inclusive slice would anchor on LS
     (s,) = scan.detect_inverse_hs(spiked, "IHS")
     assert s.notes == base.notes                          # neckline, trigger and levels unchanged
     assert (s.entry, s.stop, s.target) == (base.entry, base.stop, base.target)
