@@ -192,20 +192,32 @@ def test_main_end_to_end(tmp_path, monkeypatch):
 # 2026-09-03 (2 symbols had the complete bar) while all 19 signals were computed
 # on 2026-09-02 (501 symbols had a volume-only row that dropna removed).
 # --------------------------------------------------------------------------- #
-def _batched_frame(frames: dict) -> pd.DataFrame:
-    """Mimic ``yf.download(group_by="ticker")``: columns (ticker, field), union index."""
-    return pd.concat(frames.values(), axis=1, keys=frames.keys(), names=["Ticker", "Price"])
-
-
-def _install_fake_yfinance(monkeypatch, raw: pd.DataFrame, calls: list):
+def _install_fake_yfinance(monkeypatch, frames: dict, calls: list, metas: dict | None = None):
+    """Fake ``yfinance.Ticker`` serving ``frames[sym]`` and chart meta ``metas[sym]``."""
     fake = types.ModuleType("yfinance")
 
-    def download(tickers, **kwargs):
-        calls.append((list(tickers), kwargs))
-        return raw
+    class FakeTicker:
+        def __init__(self, sym):
+            self.sym = sym
 
-    fake.download = download
+        def history(self, **kwargs):
+            calls.append((self.sym, kwargs))
+            if self.sym not in frames:
+                raise ValueError(f"{self.sym}: No data found, symbol may be delisted")
+            return frames[self.sym].copy()
+
+        def get_history_metadata(self):
+            return dict((metas or {}).get(self.sym, {}))
+
+    fake.Ticker = FakeTicker
     monkeypatch.setitem(sys.modules, "yfinance", fake)
+
+
+def _close_print(day, price: float) -> dict:
+    """Chart ``meta`` for a session on ``day`` that closed at ``price`` (16:00 New York)."""
+    t = pd.Timestamp(day).tz_localize("America/New_York") + pd.Timedelta(hours=16)
+    return {"regularMarketPrice": price, "regularMarketTime": int(t.timestamp()),
+            "exchangeTimezoneName": "America/New_York"}
 
 
 def test_download_history_drops_only_trailing_rows_without_close(monkeypatch):
@@ -217,15 +229,14 @@ def test_download_history_drops_only_trailing_rows_without_close(monkeypatch):
     late = base.iloc[:-2].copy()                # no row at all for the last two days
     short = base.iloc[-30:].copy()              # too little history -> excluded
     calls: list = []
-    _install_fake_yfinance(monkeypatch, _batched_frame(
-        {"AAA": partial, "BBB": partial, "CCC": complete, "LATE": late, "SHORT": short}), calls)
+    _install_fake_yfinance(monkeypatch,
+        {"AAA": partial, "BBB": partial, "CCC": complete, "LATE": late, "SHORT": short}, calls)
 
     out = scan.download_history(["AAA", "BBB", "CCC", "LATE", "SHORT", "MISSING"],
-                                period="2y", batch=100)
+                                period="2y", workers=2)
 
-    assert calls and calls[0][1]["group_by"] == "ticker"
-    assert set(out) == {"AAA", "BBB", "CCC", "LATE"}
-    # batch-index padding (all-NaN rows) is dropped but is not a "partial" bar
+    assert calls and calls[0][1]["auto_adjust"] is False  # adjustment is done by adjust_ohlc()
+    assert set(out) == {"AAA", "BBB", "CCC", "LATE"}      # MISSING raised, SHORT too short
     assert out["LATE"].index[-1] == base.index[-3]
     assert out["LATE"].attrs["partial_bars"] == []
     prev = base.index[-2]
@@ -242,8 +253,8 @@ def test_download_history_interior_nan_is_not_a_partial_bar(monkeypatch):
     base = make_cup_and_handle()
     holed = base.copy()
     holed.loc[holed.index[-10], "Close"] = np.nan  # a hole in the middle, newest bar intact
-    _install_fake_yfinance(monkeypatch, _batched_frame({"AAA": holed}), [])
-    out = scan.download_history(["AAA"])
+    _install_fake_yfinance(monkeypatch, {"AAA": holed}, [])
+    out = scan.download_history(["AAA"], workers=1)
     assert out["AAA"].index[-1] == base.index[-1]
     assert len(out["AAA"]) == len(base) - 1
     assert out["AAA"].attrs["partial_bars"] == []
@@ -290,23 +301,25 @@ def test_align_last_bar_when_every_symbol_is_complete():
     assert scan.align_last_bar({}) == ({}, {"last_bar": None})
 
 
+def _end_to_end_frames():
+    """Three synthetic setups whose newest row lacks a close, plus one complete symbol."""
+    cup, ihs, ww = make_cup_and_handle(), make_inverse_hs(), make_bullish_wolfe()
+    d_last = cup.index[-1]
+    frames = {}
+    for sym, df in (("CUP", cup), ("IHS", ihs), ("WW", ww)):
+        partial = df.copy()
+        partial.loc[d_last, ["Open", "High", "Low", "Close"]] = np.nan
+        frames[sym] = partial
+    frames["APH"] = cup.copy()       # one symbol already has the complete bar
+    return frames, d_last
+
+
 def test_main_reports_the_bar_actually_scanned(tmp_path, monkeypatch):
-    """Reproduction of 2026-09-04: most symbols have a volume-only newest row."""
+    """Reproduction of 2026-09-04 with no usable quote: most symbols' newest row is dropped."""
     import json
 
-    def fake_download(symbols, period="2y", batch=100):
-        cup, ihs, ww = make_cup_and_handle(), make_inverse_hs(), make_bullish_wolfe()
-        d_last = cup.index[-1]
-        frames = {}
-        for sym, df in (("CUP", cup), ("IHS", ihs), ("WW", ww)):
-            partial = df.copy()
-            partial.loc[d_last, ["Open", "High", "Low", "Close"]] = np.nan
-            frames[sym] = partial
-        frames["APH"] = cup.copy()       # one symbol already has the complete bar
-        return _batched_frame(frames)
-
-    monkeypatch.setitem(sys.modules, "yfinance",
-                        types.SimpleNamespace(download=lambda tickers, **kw: fake_download(tickers)))
+    frames, _ = _end_to_end_frames()
+    _install_fake_yfinance(monkeypatch, frames, [])            # no chart meta -> nothing filled
     monkeypatch.setattr(scan, "MAX_BREAKOUT_AGE", scan.MAX_BREAKOUT_AGE)  # main() mutates it
     out = tmp_path / "out"
     rc = scan.main(["--tickers", "CUP,IHS,WW,APH", "--out-dir", str(out), "--max-age", "2"])
@@ -318,6 +331,7 @@ def test_main_reports_the_bar_actually_scanned(tmp_path, monkeypatch):
     assert meta["skipped_bar"] == END
     assert meta["skipped_bar_partial"] == 3 and meta["skipped_bar_complete"] == 1
     assert meta["last_bar_symbols"] == 4 and meta["lagging_symbols"] == 0
+    assert meta["filled_close_symbols"] == 0
     assert data["signals"], "the previous bar still carries the synthetic setups"
     assert {s["last_date"] for s in data["signals"]} == {prev}
     assert meta["max_breakout_age"] == 2
@@ -326,6 +340,130 @@ def test_main_reports_the_bar_actually_scanned(tmp_path, monkeypatch):
     report = (out / "report.md").read_text()
     assert f"last bar {prev}" in report
     assert f"Newest bar {END} not scanned: complete for 1 symbols, still missing OHLC at Yahoo for 3." in report
+
+
+def test_main_scans_the_last_session_when_quotes_fill_the_close(tmp_path, monkeypatch):
+    """The normal 02:00 UTC case: closes come from the chart quote, so last_bar is the last session."""
+    import json
+
+    frames, d_last = _end_to_end_frames()
+    metas = {sym: _close_print(d_last, float(df["Close"].iloc[-1]))
+             for sym, df in ((s, globals()[f]()) for s, f in
+                             (("CUP", "make_cup_and_handle"), ("IHS", "make_inverse_hs"),
+                              ("WW", "make_bullish_wolfe")))}
+    _install_fake_yfinance(monkeypatch, frames, [], metas=metas)
+    monkeypatch.setattr(scan, "MAX_BREAKOUT_AGE", scan.MAX_BREAKOUT_AGE)
+    out = tmp_path / "out"
+    rc = scan.main(["--tickers", "CUP,IHS,WW,APH", "--out-dir", str(out), "--max-age", "2"])
+    assert rc == 0
+    data = json.loads((out / "signals.json").read_text())
+    meta = data["meta"]
+    assert meta["last_bar"] == END, meta
+    assert meta["filled_close_symbols"] == 3
+    assert meta["skipped_bar"] is None and meta["skipped_bar_partial"] == 0
+    assert meta["last_bar_symbols"] == 4 and meta["lagging_symbols"] == 0
+    assert {s["last_date"] for s in data["signals"]} == {END}
+    assert {s["ticker"] for s in data["signals"]} >= {"CUP", "IHS", "WW"}, data["signals"]
+
+
+# --------------------------------------------------------------------------- #
+# Filling the newest close from Yahoo's quote
+#
+# Why: after the US close Yahoo's chart row for that session has open/high/low
+# and volume but no close until ~08:00 UTC the next day (pre-market open),
+# while the chart meta already carries the closing print as
+# regularMarketPrice @ regularMarketTime.  The 02:00 UTC scan would otherwise
+# always run on the session before last.
+# --------------------------------------------------------------------------- #
+def _partial_last_row(base: pd.DataFrame, keep_ohl: bool = True) -> pd.DataFrame:
+    df = base.copy()
+    df["Adj Close"] = df["Close"]
+    cols = ["Close", "Adj Close"] if keep_ohl else ["Open", "High", "Low", "Close", "Adj Close"]
+    df.loc[df.index[-1], cols] = np.nan
+    return df
+
+
+def test_fill_missing_close_uses_closing_print():
+    base = make_cup_and_handle()
+    d_last = base.index[-1]
+    df = _partial_last_row(base)
+    df.loc[d_last, ["High", "Low"]] = [100.0, 90.0]
+    meta = _close_print(d_last, 101.5)                       # closed above the day's high
+    now = pd.Timestamp(meta["regularMarketTime"], unit="s", tz="UTC") + pd.Timedelta(hours=6)
+
+    out, day = scan.fill_missing_close(df, meta, now=now)
+
+    assert day == str(d_last.date())
+    assert out.loc[d_last, "Close"] == 101.5
+    assert out.loc[d_last, "Adj Close"] == 101.5
+    assert out.loc[d_last, "High"] == 101.5 and out.loc[d_last, "Low"] == 90.0
+    assert df["Close"].isna().iloc[-1]                       # input untouched
+
+
+def test_fill_missing_close_sets_open_when_whole_row_is_missing():
+    base = make_cup_and_handle()
+    d_last = base.index[-1]
+    df = _partial_last_row(base, keep_ohl=False)              # volume-only row
+    meta = _close_print(d_last, 99.0)
+    now = pd.Timestamp(meta["regularMarketTime"], unit="s", tz="UTC") + pd.Timedelta(hours=6)
+    out, day = scan.fill_missing_close(df, meta, now=now)
+    assert day == str(d_last.date())
+    assert list(out.loc[d_last, ["Open", "High", "Low", "Close"]]) == [99.0] * 4
+
+
+def test_fill_missing_close_guards():
+    base = make_cup_and_handle()
+    d_last = base.index[-1]
+    df = _partial_last_row(base)
+    meta = _close_print(d_last, 101.5)
+    closed_at = pd.Timestamp(meta["regularMarketTime"], unit="s", tz="UTC")
+
+    # live tick: last trade only minutes old -> not a closing print
+    assert scan.fill_missing_close(df, meta, now=closed_at + pd.Timedelta(minutes=10))[1] is None
+    # last trade on a different day than the row
+    stale = _close_print(base.index[-2], 101.5)
+    assert scan.fill_missing_close(df, stale, now=closed_at + pd.Timedelta(days=1))[1] is None
+    # no quote at all / nonsense price
+    assert scan.fill_missing_close(df, {}, now=closed_at + pd.Timedelta(hours=6))[1] is None
+    assert scan.fill_missing_close(df, {**meta, "regularMarketPrice": 0},
+                                   now=closed_at + pd.Timedelta(hours=6))[1] is None
+    # close already present -> untouched
+    full = base.copy()
+    out, day = scan.fill_missing_close(full, meta, now=closed_at + pd.Timedelta(hours=6))
+    assert day is None and out is full
+
+
+def test_adjust_ohlc_applies_ratio_and_defaults_missing_adjclose_to_one():
+    idx = pd.bdate_range("2026-01-05", periods=3)
+    df = pd.DataFrame({"Open": [10.0, 20.0, 30.0], "High": [11.0, 22.0, 33.0],
+                       "Low": [9.0, 18.0, 27.0], "Close": [10.0, 20.0, 30.0],
+                       "Adj Close": [5.0, 10.0, np.nan], "Volume": [1, 2, 3]}, index=idx)
+    out = scan.adjust_ohlc(df)
+    assert list(out.columns) == ["Open", "High", "Low", "Close", "Volume"]
+    assert list(out["Close"]) == [5.0, 10.0, 30.0]           # 0.5, 0.5, then 1.0
+    assert list(out["High"]) == [5.5, 11.0, 33.0]
+    # frames without Adj Close pass through
+    assert scan.adjust_ohlc(df.drop(columns=["Adj Close"])).equals(df.drop(columns=["Adj Close"]))
+
+
+def test_download_history_fills_close_from_quote(monkeypatch):
+    base = make_cup_and_handle()
+    d_last = base.index[-1]
+    partial = _partial_last_row(base)
+    meta = _close_print(d_last, float(base["Close"].iloc[-1]))
+    now = pd.Timestamp(meta["regularMarketTime"], unit="s", tz="UTC") + pd.Timedelta(hours=6)
+    _install_fake_yfinance(monkeypatch, {"AAA": partial, "BBB": partial}, [],
+                           metas={"AAA": meta})               # BBB: no quote on that date
+
+    out = scan.download_history(["AAA", "BBB"], workers=2, now=now)
+
+    assert out["AAA"].index[-1] == d_last
+    assert out["AAA"].loc[d_last, "Close"] == base["Close"].iloc[-1]
+    assert out["AAA"].attrs["filled_close"] == str(d_last.date())
+    assert out["AAA"].attrs["partial_bars"] == []
+    assert out["BBB"].index[-1] == base.index[-2]
+    assert out["BBB"].attrs["filled_close"] is None
+    assert out["BBB"].attrs["partial_bars"] == [str(d_last.date())]
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -92,6 +92,7 @@ BREAKOUT_AGE_LAG = {
 # (OHLC null), then the prices some hours later -- so early in the day a
 # handful of symbols carry a complete newest bar while the rest do not.
 LAST_BAR_MIN_FRACTION = 0.5
+FILL_CLOSE_MIN_AGE = dt.timedelta(hours=1)   # last trade must be this old to count as the closing print
 
 # Cup & Handle
 CUP_MIN_LEN, CUP_MAX_LEN = 30, 250       # bars from left rim to right rim
@@ -201,69 +202,163 @@ def load_sp500_symbols(csv_path: Optional[str] = None) -> List[str]:
     return [s for s in syms if s and s.upper() != "NAN"]
 
 
-def download_history(symbols: Sequence[str], period: str = "2y",
-                     batch: int = 100) -> dict:
-    """Download daily OHLCV for many symbols with yfinance, in batches.
+def adjust_ohlc(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply Yahoo's split/dividend adjustment to OHLC (what ``auto_adjust=True`` does).
 
-    :param symbols: Yahoo symbols.
-    :param period: yfinance period string (``"2y"`` gives ~500 daily bars).
-    :param batch: Symbols per request; Yahoo tolerates ~100 comfortably.
-    :returns: ``{symbol: DataFrame[Open, High, Low, Close, Volume]}`` with only
-        symbols that returned usable data.  Rows without a Close are dropped;
-        the dates of *trailing* rows dropped this way (Yahoo's not-yet-published
-        newest bar, which arrives with volume but null OHLC) are recorded in
-        ``df.attrs["partial_bars"]`` so :func:`align_last_bar` can report them.
-    :raises ImportError: if yfinance is not installed.
+    Why not let yfinance do it: yfinance multiplies the row by
+    ``Adj Close / Close`` and turns the whole row NaN when Yahoo has not
+    published ``adjclose`` yet, which is the case for the newest bar until the
+    next pre-market.  Nothing later can have adjusted the newest bar, so a
+    missing ratio is 1.0 by definition.
+
+    :param df: Frame with Open/High/Low/Close/Volume and optionally Adj Close.
+    :returns: Frame with Open/High/Low/Close/Volume, prices adjusted.
+    """
+    out = df.copy()
+    if "Adj Close" in out.columns:
+        ratio = (out["Adj Close"] / out["Close"]).fillna(1.0)
+        for c in ("Open", "High", "Low", "Close"):
+            out[c] = out[c] * ratio
+        out = out.drop(columns=["Adj Close"])
+    return out[["Open", "High", "Low", "Close", "Volume"]]
+
+
+def fill_missing_close(df: pd.DataFrame, meta: dict, now: Optional[pd.Timestamp] = None
+                       ) -> Tuple[pd.DataFrame, Optional[str]]:
+    """Complete the newest bar from Yahoo's last-trade quote when its close is missing.
+
+    Why: after the US close, Yahoo's chart row for that session carries
+    open/high/low/volume but a null close (and adjclose) until about 08:00 UTC
+    the next day, when US pre-market opens (observed 2026-09-04: 500/502
+    symbols still incomplete at 08:05 UTC, complete at 08:10 UTC).  The chart's
+    quote fields, however, already hold the closing print:
+    ``regularMarketPrice`` stamped ``regularMarketTime`` at 16:00 New York.
+    So when the newest row has no close, the last trade falls on that row's
+    date, and it happened at least ``FILL_CLOSE_MIN_AGE`` ago (a closing print,
+    not a live intraday tick), that price is used as the close.  High/Low are
+    widened to include it and a missing Open is set to it.
+
+    :param df: Raw per-symbol frame (may include ``Adj Close``).
+    :param meta: ``Ticker.get_history_metadata()`` (Yahoo chart ``meta``).
+    :param now: Current time (UTC); injectable for tests.
+    :returns: ``(frame, date)`` -- ``date`` is the ISO date filled, or ``None``.
+    """
+    if df.empty or not pd.isna(df["Close"].iloc[-1]):
+        return df, None
+    price, ts = meta.get("regularMarketPrice"), meta.get("regularMarketTime")
+    if price is None or ts is None:
+        return df, None
+    try:
+        price = float(price)
+        traded = pd.Timestamp(int(ts), unit="s", tz="UTC")
+    except (TypeError, ValueError, OverflowError):
+        return df, None
+    if not price > 0:
+        return df, None
+    last = pd.Timestamp(df.index[-1])
+    tz = last.tz or meta.get("exchangeTimezoneName") or "America/New_York"
+    if traded.tz_convert(tz).date() != last.date():
+        return df, None
+    now = now if now is not None else pd.Timestamp.now(tz="UTC")
+    if now - traded < FILL_CLOSE_MIN_AGE:
+        return df, None
+    out = df.copy()
+    idx = out.index[-1]
+    out.loc[idx, "Close"] = price
+    if "Adj Close" in out.columns and pd.isna(out.loc[idx, "Adj Close"]):
+        out.loc[idx, "Adj Close"] = price
+    out.loc[idx, "High"] = np.nanmax([out.loc[idx, "High"], price])
+    out.loc[idx, "Low"] = np.nanmin([out.loc[idx, "Low"], price])
+    if pd.isna(out.loc[idx, "Open"]):
+        out.loc[idx, "Open"] = price
+    return out, str(last.date())
+
+
+def _fetch_history(sym: str, period: str) -> Optional[Tuple[pd.DataFrame, dict]]:
+    """Download one symbol's raw daily history plus Yahoo's chart metadata.
+
+    :param sym: Yahoo symbol.
+    :param period: yfinance period string.
+    :returns: ``(frame, meta)`` or ``None`` if the symbol yielded nothing.
     """
     import yfinance as yf  # imported lazily so tests can run without it
 
+    tkr = yf.Ticker(sym)
+    for attempt in range(3):  # Yahoo occasionally throttles; retry with backoff
+        try:
+            df = tkr.history(period=period, interval="1d", auto_adjust=False,
+                             actions=False, raise_errors=True)
+            return df, (tkr.get_history_metadata() or {})
+        except Exception as exc:
+            msg = str(exc)
+            if "delisted" in msg.lower() or "no data" in msg.lower() or "Missing" in type(exc).__name__:
+                log.warning("%s: no data (%s)", sym, msg.splitlines()[0][:120])
+                return None
+            log.warning("%s attempt %d failed: %s", sym, attempt, msg.splitlines()[0][:120])
+            time.sleep(5 * (attempt + 1))
+    return None
+
+
+def download_history(symbols: Sequence[str], period: str = "2y", workers: int = 8,
+                     now: Optional[pd.Timestamp] = None) -> dict:
+    """Download daily OHLCV for many symbols with yfinance, in parallel.
+
+    Per-symbol ``Ticker.history`` (rather than the batched ``yf.download``)
+    so each symbol's chart metadata is available to :func:`fill_missing_close`;
+    yfinance issues one chart request per symbol either way.
+
+    :param symbols: Yahoo symbols.
+    :param period: yfinance period string (``"2y"`` gives ~500 daily bars).
+    :param workers: Parallel downloads.
+    :param now: Current time (UTC) for :func:`fill_missing_close`; tests inject it.
+    :returns: ``{symbol: DataFrame[Open, High, Low, Close, Volume]}`` with only
+        symbols that returned usable data.  Rows without a Close are dropped;
+        the dates of *trailing* rows dropped this way are recorded in
+        ``df.attrs["partial_bars"]`` so :func:`align_last_bar` can report them,
+        and ``df.attrs["filled_close"]`` is the date whose close was taken from
+        the quote (or ``None``).
+    :raises ImportError: if yfinance is not installed.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+
     out: dict = {}
     raw_last: dict = {}     # last index date before cleaning, per symbol (diagnostics)
-    for i in range(0, len(symbols), batch):
-        chunk = list(symbols[i:i + batch])
-        for attempt in range(3):  # Yahoo occasionally throttles; retry with backoff
-            try:
-                raw = yf.download(chunk, period=period, interval="1d",
-                                  group_by="ticker", auto_adjust=True,
-                                  progress=False, threads=True)
-                break
-            except Exception as exc:
-                log.warning("batch %d attempt %d failed: %s", i // batch, attempt, exc)
-                time.sleep(5 * (attempt + 1))
-        else:
+    filled = 0
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        results = list(pool.map(lambda s: (s, _fetch_history(s, period)), symbols))
+    for sym, res in results:
+        if res is None:
             continue
-        for sym in chunk:
-            try:
-                df = raw[sym] if isinstance(raw.columns, pd.MultiIndex) else raw
-            except KeyError:
-                continue
-            if df.empty:
-                continue
-            raw_last[sym] = df.index[-1]
-            has_close = df["Close"].notna().to_numpy()
-            if not has_close.any():
-                continue
-            last_ok = int(np.flatnonzero(has_close)[-1])
-            # Trailing rows without a Close: Yahoo's volume-only row for a bar
-            # whose prices are not published yet ("partial").  Rows that are
-            # NaN in every column are just batch-index padding for a symbol
-            # that has no row on that date at all (halted / delisted) and are
-            # not reported as partial.
-            tail = df.iloc[last_ok + 1:]
-            partial = [str(d.date()) for d, row in tail.iterrows() if row.notna().any()]
-            df = df[has_close]
-            log.debug("%s: last raw bar %s, last complete bar %s%s", sym,
-                      raw_last[sym].date(), df.index[-1].date(),
-                      f", trailing rows without Close: {partial}" if partial else "")
-            if len(df) >= 60:
-                clean = df[["Open", "High", "Low", "Close", "Volume"]].copy()
-                clean.attrs["partial_bars"] = partial
-                out[sym] = clean
+        df, meta = res
+        if df is None or df.empty or "Close" not in df.columns:
+            continue
+        raw_last[sym] = df.index[-1]
+        df, filled_day = fill_missing_close(df, meta, now=now)
+        df = adjust_ohlc(df)
+        has_close = df["Close"].notna().to_numpy()
+        if not has_close.any():
+            continue
+        last_ok = int(np.flatnonzero(has_close)[-1])
+        # Trailing rows without a Close that fill_missing_close could not
+        # complete (no quote on that date yet): reported as "partial".
+        tail = df.iloc[last_ok + 1:]
+        partial = [str(d.date()) for d, row in tail.iterrows() if row.notna().any()]
+        df = df[has_close]
+        log.debug("%s: last raw bar %s, last complete bar %s%s%s", sym,
+                  raw_last[sym].date(), df.index[-1].date(),
+                  f", close filled from quote for {filled_day}" if filled_day else "",
+                  f", trailing rows without Close: {partial}" if partial else "")
+        if len(df) >= 60:
+            clean = df.copy()
+            clean.attrs["partial_bars"] = partial
+            clean.attrs["filled_close"] = filled_day
+            out[sym] = clean
+            filled += 1 if filled_day else 0
     if out:
         hist_raw = _date_histogram(raw_last.values())
         hist_ok = _date_histogram(df.index[-1] for df in out.values())
-        log.info("last raw bar per symbol: %s; last complete bar per symbol: %s",
-                 hist_raw, hist_ok)
+        log.info("last raw bar per symbol: %s; last complete bar per symbol: %s; "
+                 "closes filled from quote: %d", hist_raw, hist_ok, filled)
     return out
 
 
@@ -1002,7 +1097,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         log.error("no price data downloaded")
         return 2
 
+    filled_close = sum(1 for df in data.values() if df.attrs.get("filled_close"))
     data, bar_info = align_last_bar(data)
+    bar_info["filled_close_symbols"] = filled_close
     log.info("last bar %s (%d symbols; %d lagging); newest complete bar per symbol: %s",
              bar_info["last_bar"], bar_info["last_bar_symbols"], bar_info["lagging_symbols"],
              bar_info["last_bar_histogram"])

@@ -96,16 +96,17 @@ it with a local file). Prices come from Yahoo Finance via
 
 ```json
 {"meta": {"run_date": "...", "universe": 503, "scanned": 502, "errors": 1,
-          "last_bar": "2026-09-02", "last_bar_symbols": 502, "lagging_symbols": 0,
-          "skipped_bar": "2026-09-03", "skipped_bar_complete": 2, "skipped_bar_partial": 500,
-          "last_bar_histogram": {"2026-09-03": 2, "2026-09-02": 500},
+          "last_bar": "2026-09-03", "last_bar_symbols": 502, "lagging_symbols": 0,
+          "filled_close_symbols": 500,
+          "skipped_bar": null, "skipped_bar_complete": 0, "skipped_bar_partial": 0,
+          "last_bar_histogram": {"2026-09-03": 502},
           "min_score": 60, "max_breakout_age": 3,
           "max_breakout_age_by_pattern": {"Cup & Handle": 3,
                                           "Inverse Head & Shoulders": 8,
                                           "Bullish Wolfe Wave": 8}},
  "signals": [{"ticker": "XYZ", "pattern": "Cup & Handle", "status": "CONFIRMED",
               "entry": 102.0, "stop": 93.31, "risk_pct": 8.52, "target": 128.11,
-              "score": 88, "last_close": 102.0, "last_date": "2026-09-02",
+              "score": 88, "last_close": 102.0, "last_date": "2026-09-03",
               "bars_since_break": 1, "volume_ratio": 1.47,
               "trend": "close above SMA200, SMA50 > SMA200, SMA200 rising/flat",
               "notes": "left rim 2026-03-04 @100.47, ..."}]}
@@ -113,11 +114,20 @@ it with a local file). Prices come from Yahoo Finance via
 
 ### Which bar is scanned (`meta.last_bar`)
 
-Yahoo publishes the previous session's daily row in two steps: first a
-volume-only row (open/high/low/close null), then the prices some hours later.
-At 07:30 UTC on 2026-09-04, 501 of 503 symbols still had the volume-only row
-for 2026-09-03 and only two (APH, HUBB) had the complete bar. Rows without a
-close are dropped per symbol, and then `align_last_bar()` picks the scan bar:
+After the US close, Yahoo's chart row for that session carries open, high,
+low and volume but no close (and no adjusted close) until about 08:00 UTC the
+next day, when US pre-market opens (on 2026-09-04, 500 of 502 symbols were
+still incomplete at 08:05 UTC and complete at 08:10 UTC). The chart's quote
+fields, however, already hold the closing print (`regularMarketPrice` stamped
+`regularMarketTime` 16:00 New York). `fill_missing_close()` therefore uses
+that price as the close when the newest row lacks one, the last trade falls on
+that row's date, and it is at least `FILL_CLOSE_MIN_AGE` (1 h) old, so a live
+intraday tick is never mistaken for a close; `meta.filled_close_symbols`
+counts the symbols completed this way. Prices are then split/dividend
+adjusted by `adjust_ohlc()` (a missing adjusted close on the newest bar means
+a ratio of 1.0, whereas yfinance's own `auto_adjust` would blank the row).
+Rows that still have no close are dropped per symbol, and then
+`align_last_bar()` picks the scan bar:
 
 * `last_bar` is the newest date on/after which at least `LAST_BAR_MIN_FRACTION`
   (50 %) of the symbols have a complete bar, i.e. the majority's newest
@@ -130,8 +140,10 @@ close are dropped per symbol, and then `align_last_bar()` picks the scan bar:
 * Symbols whose newest complete bar is *older* than `last_bar` (halted, late)
   are scanned on their own last bar and counted in `lagging_symbols`.
 
-So on a normal early-morning run `last_bar` is the session *before* the last
-one and `skipped_bar` is the last session. The daily-scan log prints the same
+So on a normal 02:00 UTC run `last_bar` is the last completed session, with
+most symbols' closes filled from the quote; if Yahoo has no quote for a symbol
+yet, it is reported as partial and the majority rule still decides the bar.
+The daily-scan log prints the same
 histogram (`last raw bar per symbol` / `last complete bar per symbol`), and
 `tools/debug_last_bar.py` (also runnable as the `debug-last-bar` workflow)
 dumps the per-symbol detail.
@@ -199,8 +211,7 @@ All thresholds are module-level constants at the top of `scan.py`:
 2. In the repo, *Actions* → *daily-scan* → *Run workflow* once to verify the
    runner can download data; it commits `output/report.md`.
 3. The Claude scheduled task (04:00 UTC daily) reads that file and e-mails
-   it. Because Yahoo has usually not published the last session's prices by
-   then, `meta.last_bar` is normally the session *before* the last one and
-   `meta.skipped_bar` is the last session (see "Which bar is scanned"); the
-   task should treat the file as stale only when `last_bar` is older than
-   that, or when `run_date` is not today.
+   it. `meta.last_bar` is normally the last completed session (its closes
+   come from Yahoo's quote, see "Which bar is scanned"); the task should treat
+   the file as stale when `last_bar` is older than that, or when `run_date`
+   is not today.
