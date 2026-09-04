@@ -30,12 +30,6 @@ All notable changes to this project are documented here. Format follows
   majority rule in `align_last_bar`, and an end-to-end reproduction of the
   2026-09-04 run; synthetic series now share one end date.
 
-### Changed
-- Workflows pin `actions/checkout` (v7.0.1) and `actions/setup-python`
-  (v7.0.0) to full commit SHAs: the repository's Actions policy now has
-  `sha_pinning_required`, and unpinned `@v4` / `@v5` references fail at
-  workflow start-up (observed from 2026-09-04 ~07:55 UTC).
-
 ### Changed (docs)
 - Repository is `yanivil/SignalSync`; README and PR draft updated accordingly.
 
