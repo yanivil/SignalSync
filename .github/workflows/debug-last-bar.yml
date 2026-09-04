@@ -58,7 +58,9 @@ jobs:
       - name: Dry-run scan (nothing is committed)
         run: |
           mkdir -p /tmp/scan-out
-          python scan.py --out-dir /tmp/scan-out ${{ github.event.inputs.tickers && format('--tickers {0}', github.event.inputs.tickers) || '' }} > /tmp/scan-out/report.txt 2> /tmp/scan-out/scan.log || true
+          ARGS=""
+          if [ -n "${{ github.event.inputs.tickers }}" ]; then ARGS="--tickers ${{ github.event.inputs.tickers }}"; fi
+          python scan.py --out-dir /tmp/scan-out $ARGS > /tmp/scan-out/report.txt 2> /tmp/scan-out/scan.log || true
           grep -E "INFO (last|bar|downloaded|universe)" /tmp/scan-out/scan.log || tail -20 /tmp/scan-out/scan.log
           python -c "import json; print(json.dumps(json.load(open('/tmp/scan-out/signals.json'))['meta'], indent=1))"
           head -8 /tmp/scan-out/report.md
