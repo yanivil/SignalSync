@@ -15,9 +15,9 @@ and applies four rules taken from the user's trading guide:
 2. Respect the wider trend                  -> a bullish setup is vetoed when the
    stock is in a strong down-trend (see ``trend_context``).
 3. Enter only after confirmation            -> a setup is CONFIRMED only when a
-   daily *close* has broken the trigger level; setups that are complete but
-   still unbroken are reported separately as WATCHLIST so nothing is entered
-   early.
+   daily *close* has broken the trigger level recently; setups that are
+   complete but unbroken, or that broke out and pulled back below the
+   trigger, are reported separately as WATCHLIST so nothing is entered early.
 4. Manage risk                              -> every alert carries an entry
    price, a stop-loss derived from the pattern structure, and the risk %.
 
@@ -43,7 +43,7 @@ import sys
 import time
 import urllib.request
 from dataclasses import dataclass, asdict
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -639,43 +639,59 @@ def _volume_ratio(df: pd.DataFrame, idx: int) -> Optional[float]:
     return round(float(vol[idx] / base.mean()), 2)
 
 
-def _status_from_break(close: np.ndarray, trigger: float, start: int,
-                       lag: int = 0) -> Tuple[str, Optional[int]]:
-    """Classify a setup by whether/when the close broke ``trigger``.
+def evaluate_breakout(close: np.ndarray, trigger_at: Callable[[int], float], start: int,
+                      pattern: str, floor: Optional[float] = None
+                      ) -> Tuple[str, Optional[int], float]:
+    """Classify a completed setup by the *current* run of closes above its trigger.
+
+    Shared by all three detectors; the trigger is a function of the bar index
+    so a constant level (cup: handle high) and sloping ones (H&S neckline,
+    Wolfe line 1-3) use the same state machine.
+
+    * Last close **above** today's trigger: ``age`` = bars since the *first*
+      close above the trigger from ``start`` on.  CONFIRMED if
+      ``age <= max_breakout_age(pattern)`` and the close is not more than
+      ``MAX_RUNAWAY`` above the trigger at that first break; otherwise STALE.
+      The clock deliberately does not restart on a re-break after a
+      pull-back: on synthetic noise, treating each re-cross as a fresh
+      breakout raised the confirmed false-positive rate from about 1 % to
+      5 % of series, because choppy prices cross a level repeatedly.  A
+      re-break inside the age window is still CONFIRMED (age from the first
+      break); beyond it the setup is STALE.
+    * Last close **at or below** today's trigger: WATCHLIST if it is within
+      ``WATCH_PROXIMITY`` of the trigger and above ``floor`` (the level whose
+      loss would void the pattern: right-shoulder low, point 5); otherwise
+      STALE.  This covers both "never broke out" and "broke out and pulled
+      back" -- a retest keeps the setup on the watchlist instead of vanishing.
 
     :param close: Close prices.
-    :param trigger: Level a close must exceed to confirm.
-    :param start: First bar index at which a break counts (after the pattern
-        completed).
-    :param lag: Extra bars of breakout age tolerated because the pattern's last
-        pivot only becomes visible ``PIVOT_ORDER`` bars after it prints (used
-        by the H&S and Wolfe detectors; 0 for the cup, whose handle low needs
-        no right-side confirmation).
-    :returns: ``("CONFIRMED", bars_since_break)``, ``("WATCHLIST", None)`` or
-        ``("STALE", bars_since_break)`` if the break is too old / price already
-        ran away (rule 3 + rule 4: no chasing).
+    :param trigger_at: ``bar index -> trigger level``.
+    :param start: First bar at which a break counts (the bar after the
+        pattern completed); a run cannot begin before it.
+    :param pattern: Pattern name, for :func:`max_breakout_age`.
+    :param floor: Watchlist rows need the close above this; ``None`` = no floor.
+    :returns: ``(status, age, trigger)`` -- ``age`` is ``None`` unless the close
+        is above the trigger; ``trigger`` is the level at the first break bar
+        when the close is above it, else today's level.
 
     Complexity: O(n - start).
     """
     n = len(close)
-    first_break = None
-    for i in range(max(start, 0), n):
-        if close[i] > trigger:
-            first_break = i
-            break
-    if first_break is None:
-        # Not broken.  Watchlist only if price is close to the trigger and has
-        # not collapsed away from it.
-        if close[-1] >= trigger * (1 - WATCH_PROXIMITY):
-            return "WATCHLIST", None
-        return "STALE", None
+    start = max(start, 0)
+    trigger_now = float(trigger_at(n - 1))
+    if not close[-1] > trigger_now:
+        near = close[-1] >= trigger_now * (1 - WATCH_PROXIMITY)
+        if near and (floor is None or close[-1] > floor):
+            return "WATCHLIST", None, trigger_now
+        return "STALE", None, trigger_now
+    first_break = next(i for i in range(start, n) if close[i] > trigger_at(i))   # exists: today qualifies
     age = n - 1 - first_break
-    if age > MAX_BREAKOUT_AGE + lag or close[-1] < trigger:
-        # Breakout happened too long ago or failed (closed back below trigger).
-        return "STALE", age
+    trigger = float(trigger_at(first_break))
+    if age > max_breakout_age(pattern):
+        return "STALE", age, trigger        # breakout too old (rule 3)
     if close[-1] > trigger * (1 + MAX_RUNAWAY):
-        return "STALE", age  # price already ran away; entering now is chasing
-    return "CONFIRMED", age
+        return "STALE", age, trigger        # price already ran away; entering now is chasing (rule 4)
+    return "CONFIRMED", age, trigger
 
 
 
@@ -876,8 +892,8 @@ def detect_cup_and_handle(df: pd.DataFrame, ticker: str) -> List[Signal]:
                 continue  # handle dipped into lower half of the cup
             if handle_depth > HANDLE_MAX_FRACTION_OF_CUP * depth:
                 continue
-            trigger = float(handle_high)
-            status, age = _status_from_break(close, trigger, start=handle_end + 1)
+            status, age, trigger = evaluate_breakout(close, lambda _i: float(handle_high),
+                                                     start=handle_end + 1, pattern="Cup & Handle")
             if status == "STALE":
                 continue
             entry = float(close[-1]) if status == "CONFIRMED" and close[-1] > trigger else float(trigger)
@@ -989,26 +1005,13 @@ def detect_inverse_hs(df: pd.DataFrame, ticker: str) -> List[Signal]:
         def neck_at(idx: int) -> float:
             return float(high[n1] + slope * (idx - n1))
 
-        # Confirmation: first close above the neckline after RS.
-        first_break = None
-        for j in range(rs + 1, n):
-            if close[j] > neck_at(j):
-                first_break = j
-                break
+        # Confirmation: closes above the (sloping) neckline after RS; a watch-
+        # list row must also hold above the right-shoulder low.
         trigger_now = neck_at(n - 1)
-        if first_break is None:
-            if close[-1] >= trigger_now * (1 - WATCH_PROXIMITY) and close[-1] > rs_v:
-                status, age, trigger = "WATCHLIST", None, trigger_now
-            else:
-                continue
-        else:
-            age = n - 1 - first_break
-            trigger = neck_at(first_break)
-            if age > max_breakout_age("Inverse Head & Shoulders") or close[-1] < neck_at(n - 1):
-                continue  # stale breakout or failed break (RS pivot lags PIVOT_ORDER bars)
-            if close[-1] > trigger * (1 + MAX_RUNAWAY):
-                continue  # ran away from the breakout level; chasing (rule 4)
-            status = "CONFIRMED"
+        status, age, trigger = evaluate_breakout(close, neck_at, start=rs + 1,
+                                                 pattern="Inverse Head & Shoulders", floor=rs_v)
+        if status == "STALE":
+            continue
         entry = float(close[-1]) if status == "CONFIRMED" and close[-1] > trigger else float(trigger)
         stop = float(rs_v - 0.25 * a_tr[rs])
         if stop >= entry:
@@ -1119,26 +1122,16 @@ def detect_bullish_wolfe(df: pd.DataFrame, ticker: str) -> List[Signal]:
             continue  # point 5 clearly failed to reach the line
         if overshoot > WW_MAX_OVERSHOOT_ATR * a_tr[p5]:
             continue  # broke down for real, not a Wolfe false break
-        # Confirmation: first close back above line 1-3 after point 5.
-        first_break = None
-        for j in range(p5 + 1, n):
-            if close[j] > v1 + s13 * (j - p1):
-                first_break = j
-                break
-        line_now = v1 + s13 * (n - 1 - p1)
-        if first_break is None:
-            if close[-1] >= line_now * (1 - WATCH_PROXIMITY) and close[-1] > v5:
-                status, age, trigger = "WATCHLIST", None, line_now
-            else:
-                continue
-        else:
-            age = n - 1 - first_break
-            trigger = v1 + s13 * (first_break - p1)
-            if age > max_breakout_age("Bullish Wolfe Wave") or close[-1] < line_now:
-                continue  # stale or failed (point-5 pivot lags PIVOT_ORDER bars)
-            if close[-1] > trigger * (1 + MAX_RUNAWAY):
-                continue  # ran away from the breakout level; chasing (rule 4)
-            status = "CONFIRMED"
+        # Confirmation: closes back above line 1-3 after point 5; a watchlist
+        # row must also hold above point 5.
+        def line13(idx: int) -> float:
+            return float(v1 + s13 * (idx - p1))
+
+        line_now = line13(n - 1)
+        status, age, trigger = evaluate_breakout(close, line13, start=p5 + 1,
+                                                 pattern="Bullish Wolfe Wave", floor=v5)
+        if status == "STALE":
+            continue
         entry = float(close[-1]) if status == "CONFIRMED" and close[-1] > trigger else float(trigger)
         stop = float(v5 - 0.25 * a_tr[p5])
         if stop >= entry:

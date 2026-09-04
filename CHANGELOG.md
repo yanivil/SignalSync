@@ -5,6 +5,16 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed (detectors)
+- One breakout evaluator (`evaluate_breakout`, trigger as a function of the
+  bar) replaces `_status_from_break` plus the two inline copies in the H&S
+  and Wolfe detectors. One behaviour change: a setup that broke out and
+  pulled back below its trigger stays on the watchlist while within 3 % of
+  it (it was dropped). The breakout clock still starts at the first close
+  above the trigger; restarting it on every re-break was tried and rejected
+  because it raised the confirmed false-positive rate on synthetic noise
+  from about 1 % to 5 % of series. Fixture outputs unchanged.
+
 ### Fixed
 - Inverse H&S neckline anchors are the rally peaks strictly between the
   shoulders and the head; a long upper wick on a shoulder or head bar no
