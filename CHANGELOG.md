@@ -5,6 +5,31 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed (detectors)
+- Cup & Handle rejects V-shaped bases: the convex-quadratic roundness fit
+  must now explain the cup lows at least as well as the best two-legged V fit
+  (`_v_shape_r2`, `CUP_MAX_V_ADVANTAGE` = 0). Calibrated on reference shapes
+  (half-sine +0.04, flat dish +0.37, clean V −0.06); watch the first live runs.
+- Trend-gate thresholds are constants: `TREND_STRONG_DOWN` (0.90),
+  `TREND_SLOPE_LOOKBACK` (40), `TREND_STRONG_DOWN_SMA50` (0.85). Behaviour unchanged.
+- `--csv` pointing at a missing file now logs a warning before falling back
+  to the pinned GitHub list.
+
+### Added (tooling)
+- `tools/evaluate_signals.py` + `evaluate-signals` workflow: replay every
+  committed `CONFIRMED` signal against later prices (target / stop / open,
+  R multiples, hit rate); `test_evaluate.py` covers the classification and
+  the git log reader.
+- `tests` workflow: lint, tests and coverage on pull requests and pushes to
+  `main` (previously the suite only ran inside the nightly scan).
+- `sync-wiki` workflow plus `docs/wiki/Home.md` and `_Sidebar.md`: the
+  GitHub wiki is mirrored from `docs/wiki/`.
+- README badges point at the real workflows; the coverage badge is gone
+  (coverage is printed in the `tests` workflow log).
+
+### Removed
+- `PR_DRAFT.md` (stale description of the first PR).
+
 ### Fixed
 - Report footer claimed entries are "capped 3% above trigger"; the rule is
   that closes more than `MAX_RUNAWAY` (5 %) above the trigger are dropped as

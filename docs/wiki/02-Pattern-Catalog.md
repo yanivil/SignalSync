@@ -19,7 +19,7 @@ Entry is the breakout close when it is above the trigger (and within 5 % of it),
 
 | Pattern | Anchors | Width (bars) | Core geometric tests | Trigger | Stop | Target |
 |---|---|---|---|---|---|---|
-| Cup & Handle | swing highs A, B; lowest low between; handle after B | 30–250 cup, 5–40 handle | rim B within 5 % of A; depth 12–50 % of A; bottom in the middle 60 %; ≥ 25 % advance into A; convex-quadratic R² ≥ 0.60; handle ≤ 12 % deep, ≤ ½ cup depth, above the cup midpoint; close > SMA200 | close > handle high | handle low − 0.25 ATR | entry + (A − bottom) |
+| Cup & Handle | swing highs A, B; lowest low between; handle after B | 30–250 cup, 5–40 handle | rim B within 5 % of A; depth 12–50 % of A; bottom in the middle 60 %; ≥ 25 % advance into A; convex-quadratic R² ≥ 0.60 and ≥ the best V fit; handle ≤ 12 % deep, ≤ ½ cup depth, above the cup midpoint; close > SMA200 | close > handle high | handle low − 0.25 ATR | entry + (A − bottom) |
 | Inverse H&S | consecutive swing lows LS, H, RS; neckline through the highest high of each half | 20–200 | H ≥ 1 ATR below both shoulders; shoulder gap ≤ 50 % of the shallower depth; left/right duration ratio within 2.5×; neckline tilt ≤ 15 % of price over the width; ≥ 10 % decline into LS; not a strong down-trend | close > neckline value on that bar | RS − 0.25 ATR | entry + (trigger − H) |
 | Bullish Wolfe Wave | swing lows 1, 3, 5; swing highs 2, 4 | 15–200 (1→5), 5 within the last 25 bars | 3 < 1, 5 < 3, 4 < 2, 1 < 4 < 2; line 2-4 falls faster than 1-3 (converging); point 5 within [−0.5, +2] ATR of the extended 1-3 line; not a strong down-trend | close > line 1-3 after point 5 | point 5 − 0.25 ATR | line 1-4 at the ETA |
 
@@ -31,8 +31,9 @@ Entry is the breakout close when it is above the trigger (and within 5 % of it),
 2. Bottom: lowest low in `[A, B]`; `depth = (high[A] − bottom) / high[A]` must be in `[0.12, 0.50]`; bottom position `(idx − A) / (B − A)` in `[0.20, 0.80]`.
 3. Prior advance: lowest low in the 120 bars before A must be ≥ 25 % below `high[A]`.
 4. Roundness: `R²` of a convex (a > 0) quadratic least-squares fit of the lows over `[A, B]` must be ≥ 0.60. An arch (a ≤ 0) scores 0.
-5. Handle (`_find_handle`): runs from `B+1` to the bar before the first close above the handle's running high, capped at 40 bars or the end of data, and must last ≥ 5 bars (a close above the running high within the first 5 bars is still "the handle forming"). Handle depth `(high[B] − handle_low) / high[B]` ≤ 0.12, ≤ 0.50 × cup depth, and the handle low must stay above `bottom + 0.5 × (high[B] − bottom)`.
-6. Trigger = handle high (≤ rim B by construction). Confirmation is scanned from the bar after the handle ends.
+5. U versus V: the best two-legged fit `a + b·|x − c|` (b > 0, vertex `c` searched within ±10 % of the width around the lowest low) may not beat the parabola's R² by more than `CUP_MAX_V_ADVANTAGE` (0). On reference shapes the parabola wins by +0.04 on a half-sine, +0.37 on a flat dish and +0.01 on a lopsided sine, and loses by 0.06 on a clean V, so a sharp reversal is rejected while any rounded or flat base passes.
+6. Handle (`_find_handle`): runs from `B+1` to the bar before the first close above the handle's running high, capped at 40 bars or the end of data, and must last ≥ 5 bars (a close above the running high within the first 5 bars is still "the handle forming"). Handle depth `(high[B] − handle_low) / high[B]` ≤ 0.12, ≤ 0.50 × cup depth, and the handle low must stay above `bottom + 0.5 × (high[B] − bottom)`.
+7. Trigger = handle high (≤ rim B by construction). Confirmation is scanned from the bar after the handle ends.
 
 **Levels.** `stop = handle_low − 0.25 × ATR[handle_low]`; `target = entry + (high[A] − bottom)` (measured move).
 
@@ -40,7 +41,7 @@ Entry is the breakout close when it is above the trigger (and within 5 % of it),
 
 **Edge cases and known behaviour**
 
-* A clean, symmetric **V-bottom passes** the roundness test (R² ≈ 0.93): one parabola explains `|x|` well. The test rejects ragged, multi-legged or lopsided bases, not Vs. V-shaped cups are screened only by the bottom-position and depth rules. If you tighten this, update `test_patterns.py::test_u_shape_r2_parabola_arch_v_and_degenerate` too.
+* The roundness R² alone would pass a clean symmetric V (a parabola explains `|x|` with R² ≈ 0.93); the U-versus-V comparison is what rejects it. The threshold is calibrated on reference shapes (`test_patterns.py::test_v_shape_r2_separates_rounded_bases_from_sharp_reversals`), not on market data, so watch the first live runs for cups that disappear from the report and revisit `CUP_MAX_V_ADVANTAGE` if rounded bases are being lost.
 * A single wick spike inside the handle (e.g. a −20 % low) fails the handle depth rule; a spike inside the cup body fails the position/roundness rules; spikes before the pattern are irrelevant.
 * Zero-volume sessions never invalidate a cup; they only remove the +5 volume bonus (ratio `None` or `0.0`).
 * Missing interior bars shift nothing: detectors are positional. Levels are unchanged when rows are removed, the roundness score may move slightly.
@@ -89,4 +90,4 @@ Entry is the breakout close when it is above the trigger (and within 5 % of it),
 
 ## What the negative controls establish
 
-`test_patterns.py` and `test_scan.py` pin these facts: flat bars, a straight line and a seeded random walk produce nothing; on 200 random walks of 500 bars the three detectors fire on 1.5 % of series; each single-rule mutation of a textbook fixture (no prior advance, no handle, handle too deep, cup too shallow, rim mismatch, runaway, stale, below SMA200; shallow head, asymmetric shoulders, strong down-trend; point 4 above 2, real breakdown, no rebound) is rejected; and an unadjusted 2:1 split breaks detection until `adjust_ohlc` restores the geometry.
+`test_patterns.py` and `test_scan.py` pin these facts: flat bars, a straight line and a seeded random walk produce nothing; on 200 random walks of 500 bars the three detectors fire on 1.5 % of series; each single-rule mutation of a textbook fixture (no prior advance, no handle, handle too deep, cup too shallow, rim mismatch, runaway, stale, below SMA200, symmetric V bottom; shallow head, asymmetric shoulders, strong down-trend; point 4 above 2, real breakdown, no rebound) is rejected; and an unadjusted 2:1 split breaks detection until `adjust_ohlc` restores the geometry.

@@ -29,7 +29,15 @@ All thresholds are module-level constants at the top of `scan.py`. Two of them (
 | `FILL_CLOSE_MIN_AGE` | 1 h | how old the last trade must be to count as the closing print | | |
 | `CONSTITUENTS_COMMIT` | 2026-08-20 hash | pinned upstream commit of the constituent CSV | | |
 
-The trend gate is not a constant: `trend_context` hard-codes "close > SMA200" for the up-trend and "close < 0.90 × SMA200 with SMA200 below its value 40 bars ago" for the strong-down-trend veto (0.85 × SMA50 when fewer than 200 bars exist).
+## Trend gate
+
+| Constant | Default | Meaning | Tuning note |
+|---|---|---|---|
+| `TREND_STRONG_DOWN` | 0.90 | close below this fraction of a *falling* SMA200 = strong down-trend; reversal patterns are vetoed | 1.0 would veto any close below a falling SMA200 |
+| `TREND_SLOPE_LOOKBACK` | 40 | bars back used to decide whether the SMA200 is falling | shorter reacts faster to a roll-over, longer ignores wobble |
+| `TREND_STRONG_DOWN_SMA50` | 0.85 | the same test against SMA50 when fewer than 200 bars exist | |
+
+The up-trend requirement for the cup (close above SMA200) is not a constant.
 
 ## Cup & Handle
 
@@ -39,7 +47,8 @@ The trend gate is not a constant: `trend_context` hard-codes "close > SMA200" fo
 | `CUP_MIN_DEPTH` / `CUP_MAX_DEPTH` | 0.12 / 0.50 | depth as a fraction of the left rim | the score peaks at 25 % |
 | `CUP_RIM_TOL` | 0.05 | right rim within 5 % of the left rim | wider tolerance admits ascending/descending cups |
 | `CUP_PRIOR_ADVANCE` | 0.25 | required rise into the left rim (120-bar look-back) | the main "it must be continuing something" filter |
-| `CUP_MIN_ROUNDNESS` | 0.60 | R² of the convex quadratic fit of cup lows | rejects ragged bases; does **not** reject a clean V (R² ≈ 0.93) |
+| `CUP_MIN_ROUNDNESS` | 0.60 | R² of the convex quadratic fit of cup lows | rejects ragged bases; on its own it would pass a clean V (R² ≈ 0.93) |
+| `CUP_MAX_V_ADVANTAGE` | 0.0 | how much the best two-legged V fit's R² may exceed the parabola's | 0 = the U must explain the lows at least as well as a V; negative values demand a clear U; ~0.07 would re-admit clean Vs |
 | `HANDLE_MIN_LEN` / `HANDLE_MAX_LEN` | 5 / 40 | handle length in bars | below 5 bars a close above the running high is treated as the handle still forming |
 | `HANDLE_MAX_DEPTH` | 0.12 | handle pull-back vs. the right rim | O'Neil's 12 % |
 | `HANDLE_MAX_FRACTION_OF_CUP` | 0.50 | handle depth vs. cup depth | |
@@ -70,7 +79,7 @@ Not configurable but relevant: the cup bottom must sit in the middle 60 % of the
 1. **Trend gate** — the cheapest filter; runs before any pivot search. Cups need an up-trend; reversal patterns are vetoed in a strong down-trend.
 2. **Geometry** — the width/depth/symmetry/slope rules above. Each is a hard reject.
 3. **Prior move** — a cup must continue a ≥ 25 % advance, an inverse H&S must reverse a ≥ 10 % decline.
-4. **Roundness** (cup only) — R² ≥ 0.60.
+4. **Roundness** (cup only) — R² ≥ 0.60 and the parabola must fit at least as well as a V.
 5. **Confirmation state** — stale (> age limit), failed (closed back below the trigger) and runaway (> 5 % above) breakouts are dropped; unbroken setups more than 3 % below the trigger are dropped.
 6. **Risk** — stop above entry or risk > 15 % is dropped.
 7. **Score** — everything surviving with a score below `MIN_SCORE` is dropped.

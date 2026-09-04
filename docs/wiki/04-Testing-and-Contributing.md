@@ -10,7 +10,7 @@ python -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt 
 python -m pytest -q
 ```
 
-The whole suite is offline and deterministic (synthetic price paths, an in-memory `yfinance` stand-in, `time.sleep` replaced) and runs in about two seconds. `-s` shows the random-walk false-positive rate. CI runs the same command before every scheduled scan (`.github/workflows/daily-scan.yml`).
+The whole suite is offline and deterministic (synthetic price paths, an in-memory `yfinance` stand-in, `time.sleep` replaced) and runs in about two seconds. `-s` shows the random-walk false-positive rate. The `tests` workflow runs lint (`ruff check --select E,F,W --line-length 120 .`), the suite and a coverage report on every pull request and push to `main`; the daily scan runs the suite again before scanning.
 
 ## Suite layout
 
@@ -19,6 +19,7 @@ The whole suite is offline and deterministic (synthetic price paths, an in-memor
 | `test_scan.py` | the original suite: one textbook fixture per pattern, the 200-series random-walk sweep, short/NaN robustness, symbol normalisation, CLI end-to-end with the download mocked, last-bar alignment, quote-based close filling, adjustment, exchange-time index normalisation |
 | `test_patterns.py` | primitives against hand-computed values (pivots and their tie rule, ATR, roundness R², the breakout state table, trend states, volume ratio); every entry/stop/target/risk recomputed independently from the anchors in `notes` and the documented formulas; single-rule mutations that must be rejected; flat/line/random controls; missing bars, zero volume, wick spikes, an unadjusted split; determinism |
 | `test_pipeline.py` | retry policy of the per-symbol download (back-off, no final sleep, delisted not retried), universe loading from CSV and the no-source error, and the end-to-end mini universe (CSV → download with one throttled and one delisted symbol → alignment → detection → JSON schema, ordering, report formatting, `--min-score`, exit code 2) |
+| `test_evaluate.py` | `tools/evaluate_signals.py`: outcome classification (target / stop / open / no data, R multiples, horizon), summary statistics, and the git signal log built from a temporary repository (de-duplication on first confirmed appearance, unreadable commits skipped) |
 | `conftest.py` | fixtures: fresh fixture frames, `flat_df`, `mini_universe`, and `fake_yfinance(frames, metas, failures)` which installs a fake `yfinance` module and records history calls and sleeps |
 
 ### Fixture builders
@@ -55,4 +56,16 @@ The whole suite is offline and deterministic (synthetic price paths, an in-memor
 
 ## Branching and CI
 
-Work on a feature branch and open a PR to `main`; scheduled workflows run only from the default branch. Actions are pinned to full commit SHAs (repo policy) and updated by Dependabot. The `debug-last-bar` workflow is a read-only diagnostic you can dispatch against any branch.
+Work on a feature branch and open a PR to `main`; the `tests` workflow must pass. Scheduled workflows run only from the default branch. Actions are pinned to full commit SHAs (repo policy) and updated by Dependabot.
+
+| Workflow | Trigger | Purpose |
+|---|---|---|
+| `tests` | pull requests, pushes to `main` | lint, tests, coverage |
+| `daily-scan` | 02:00 UTC daily, manual | tests, full scan, commit `output/` |
+| `debug-last-bar` | manual, pushes touching its files | read-only per-symbol bar diagnostics |
+| `evaluate-signals` | manual | replay every committed `CONFIRMED` signal against later prices; Markdown table in the job summary |
+| `sync-wiki` | pushes to `main` touching `docs/wiki/`, manual | mirror `docs/wiki/` into the GitHub wiki |
+
+## Measuring signal outcomes
+
+`tools/evaluate_signals.py` reads every version of `output/signals.json` from git history (the daily scan commits one per run), keeps the first appearance of each `CONFIRMED` signal keyed on `(ticker, pattern, stop)`, fetches the bars that followed, and classifies each as `target` (High reached the target before Low touched the stop), `stop`, `open` (neither within the horizon, marked to the last close) or `no_data`. R multiples are `(exit − entry) / (entry − stop)`. Run it on GitHub (`gh workflow run evaluate-signals.yml -f horizon=60`) because market-data hosts may be blocked locally.

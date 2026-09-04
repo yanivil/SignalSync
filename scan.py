@@ -74,6 +74,13 @@ MIN_SCORE = 60           # reporting threshold for the 0-100 quality score
 MAX_BREAKOUT_AGE = 3     # a breakout older than this many bars is stale
 MAX_RUNAWAY = 0.05       # close more than 5% above trigger = chasing, not an entry
 WATCH_PROXIMITY = 0.03   # unbroken setups within 3% of trigger -> watchlist
+# Trend context (rule 2).  "Strong down-trend" = close this far below a
+# *falling* SMA200; the slope is judged against the SMA's value
+# TREND_SLOPE_LOOKBACK bars earlier (~2 months: long enough to ignore
+# day-to-day wobble, short enough to notice a roll-over).
+TREND_STRONG_DOWN = 0.90         # close < 90% of a falling SMA200 -> bullish setups vetoed
+TREND_SLOPE_LOOKBACK = 40        # bars back used to decide whether the SMA200 is falling
+TREND_STRONG_DOWN_SMA50 = 0.85   # same test against SMA50 when fewer than 200 bars exist
 # Extra breakout age tolerated per pattern, in bars.  The H&S right shoulder
 # and Wolfe point 5 are swing lows, which only become visible PIVOT_ORDER bars
 # after they print, so a breakout can already be up to PIVOT_ORDER bars old the
@@ -103,6 +110,7 @@ HANDLE_MAX_DEPTH = 0.12                  # handle pull-back from right rim (O'Ne
 HANDLE_MAX_FRACTION_OF_CUP = 0.50        # handle depth vs cup depth
 CUP_PRIOR_ADVANCE = 0.25                 # >= 25% rise into the left rim (prior uptrend)
 CUP_MIN_ROUNDNESS = 0.60                 # R^2 of a U-shaped (convex) quadratic fit to cup lows
+CUP_MAX_V_ADVANTAGE = 0.0                # best V fit may beat the U fit's R^2 by at most this (0 = U must win)
 
 # Inverse Head & Shoulders
 IHS_MIN_LEN, IHS_MAX_LEN = 20, 200       # bars from left shoulder to right shoulder
@@ -189,6 +197,9 @@ def load_sp500_symbols(csv_path: Optional[str] = None) -> List[str]:
         with open(csv_path, "r", encoding="utf-8") as fh:
             text = fh.read()
     else:
+        if csv_path:
+            log.warning("--csv %s not found; falling back to the pinned GitHub constituent list",
+                        csv_path)
         try:
             with urllib.request.urlopen(CONSTITUENTS_URL, timeout=30) as resp:
                 text = resp.read().decode("utf-8")
@@ -539,8 +550,9 @@ def trend_context(df: pd.DataFrame) -> Tuple[str, bool, bool]:
 
     Rule 2 of the guide ("ignoring the wider trend") is implemented as:
 
-    * ``strong_downtrend`` = close below a *falling* 200-day SMA by more than
-      10 %.  Bullish setups are vetoed in that state.
+    * ``strong_downtrend`` = close below ``TREND_STRONG_DOWN`` (90 %) of a
+      200-day SMA that is lower than ``TREND_SLOPE_LOOKBACK`` bars ago.
+      Bullish setups are vetoed in that state.
     * ``uptrend`` = close above the 200-day SMA (required for the Cup & Handle,
       which is a continuation pattern; optional bonus for reversal patterns).
 
@@ -555,20 +567,19 @@ def trend_context(df: pd.DataFrame) -> Tuple[str, bool, bool]:
     c = float(close.iloc[-1])
     s50 = float(sma50.iloc[-1]) if not math.isnan(sma50.iloc[-1]) else None
     s200 = float(sma200.iloc[-1]) if not math.isnan(sma200.iloc[-1]) else None
-    # The SMA200 slope is judged against its value 40 bars (~2 months) earlier:
-    # long enough to ignore day-to-day wobble, short enough to notice a roll-over.
-    s200_prev = (float(sma200.iloc[-40]) if len(sma200) > 40
-                 and not math.isnan(sma200.iloc[-40]) else None)
+    k = TREND_SLOPE_LOOKBACK
+    s200_prev = (float(sma200.iloc[-k]) if len(sma200) > k
+                 and not math.isnan(sma200.iloc[-k]) else None)
 
     if s200 is None:  # not enough history for a 200-day view; fall back to 50
         uptrend = s50 is not None and c > s50
-        strong_down = s50 is not None and c < 0.85 * s50
+        strong_down = s50 is not None and c < TREND_STRONG_DOWN_SMA50 * s50
         desc = f"close {'above' if uptrend else 'below'} SMA50 (SMA200 n/a)"
         return desc, uptrend, strong_down
 
     falling200 = s200_prev is not None and s200 < s200_prev
     uptrend = c > s200
-    strong_down = (c < 0.90 * s200) and falling200
+    strong_down = (c < TREND_STRONG_DOWN * s200) and falling200
     parts = [f"close {'above' if uptrend else 'below'} SMA200"]
     if s50 is not None:
         parts.append(f"SMA50 {'>' if s50 > s200 else '<'} SMA200")
@@ -640,8 +651,8 @@ def _u_shape_r2(lows: np.ndarray) -> float:
     Note what this does and does not reject: it measures how much of the lows'
     variance *one parabola* explains, so a ragged, multi-legged or lopsided
     base scores poorly, but a clean symmetric V still scores about 0.93 (a
-    parabola fits ``|x|`` well).  V-shaped cups are therefore only screened by
-    the bottom-position and depth rules, not by this test.
+    parabola fits ``|x|`` well).  V-shaped cups are rejected separately by
+    comparing this value with :func:`_v_shape_r2`.
 
     :param lows: Low prices from left rim to right rim inclusive.
     :returns: Coefficient of determination in [0, 1].
@@ -658,6 +669,46 @@ def _u_shape_r2(lows: np.ndarray) -> float:
     ss_res = float(((lows - fit) ** 2).sum())
     ss_tot = float(((lows - lows.mean()) ** 2).sum())
     return max(0.0, 1 - ss_res / ss_tot) if ss_tot > 0 else 0.0
+
+
+def _v_shape_r2(lows: np.ndarray, bottom_rel: int) -> float:
+    """Best R^2 of a two-legged V (``a + b*|x - c|``, ``b > 0``) fitted to the cup lows.
+
+    The vertex ``c`` is searched within +-10 % of the cup width around the
+    lowest low.  Compared with :func:`_u_shape_r2`: a rounded or flat-bottomed
+    base is explained better by the parabola, a sharp reversal better by the V.
+    On reference shapes the margin is about +0.04 for a half-sine, +0.37 for a
+    flat dish and -0.06 for a clean V, so ``CUP_MAX_V_ADVANTAGE = 0`` separates
+    them.
+
+    :param lows: Low prices from left rim to right rim inclusive.
+    :param bottom_rel: Index of the lowest low within ``lows``.
+    :returns: Best coefficient of determination in [0, 1]; 0 for degenerate input.
+
+    Complexity: O(m * k) for m lows and k ~ m/5 vertex candidates (closed-form
+    least squares per candidate, no polyfit).
+    """
+    m = len(lows)
+    if m < 5:
+        return 0.0
+    y = lows.astype(float)
+    ss_tot = float(((y - y.mean()) ** 2).sum())
+    if ss_tot == 0:
+        return 0.0
+    x = np.arange(m, dtype=float)
+    half = max(3, m // 10)
+    best = 0.0
+    for c in range(max(1, bottom_rel - half), min(m - 2, bottom_rel + half) + 1):
+        d = np.abs(x - c)
+        var_d = float(((d - d.mean()) ** 2).sum())
+        if var_d == 0:
+            continue
+        b = float(((d - d.mean()) * (y - y.mean())).sum()) / var_d
+        if b <= 0:
+            continue  # legs would open downward: not a V
+        fit = y.mean() + b * (d - d.mean())
+        best = max(best, 1 - float(((y - fit) ** 2).sum()) / ss_tot)
+    return best
 
 
 def _find_handle(high: np.ndarray, low: np.ndarray, close: np.ndarray, b: int,
@@ -705,7 +756,9 @@ def detect_cup_and_handle(df: pd.DataFrame, ticker: str) -> List[Signal]:
     * Cup bottom is the lowest low between them, 12-50 % below ``A`` and located
       in the middle 60 % of the cup (U-shape rather than a V at one edge).
     * Prior advance of >= 25 % into the left rim and a convex-quadratic
-      roundness fit (R^2 >= ``CUP_MIN_ROUNDNESS``) of the cup lows.
+      roundness fit (R^2 >= ``CUP_MIN_ROUNDNESS``) of the cup lows, which must
+      also explain the lows at least as well as the best two-legged V fit
+      (``CUP_MAX_V_ADVANTAGE``): sharp V reversals are not bases.
     * Handle: 5-40 bars after ``B``, its low stays above the cup's mid-point and
       within 12 % of ``B``; handle depth <= half the cup depth.
     * Trigger: close above the handle high (which is <= B).  Stop: handle low
@@ -756,11 +809,16 @@ def detect_cup_and_handle(df: pd.DataFrame, ticker: str) -> List[Signal]:
             if (rim_a - pre_low) / pre_low < CUP_PRIOR_ADVANCE:
                 continue
             # Roundness: fit a convex quadratic to the cup lows; a ragged or
-            # lopsided base scores poorly (a clean V still passes, see
-            # _u_shape_r2).  This is the main defence against "seeing" cups in
-            # random price movement (rule 1).
+            # lopsided base scores poorly.  This is the main defence against
+            # "seeing" cups in random price movement (rule 1).
             roundness = _u_shape_r2(seg_low)
             if roundness < CUP_MIN_ROUNDNESS:
+                continue
+            # A sharp V is explained better by two straight legs than by a
+            # parabola.  Require the U fit to be at least as good as the best V
+            # fit (vertex near the bottom); otherwise this is a spike reversal,
+            # not a base (O'Neil: V-shaped cups fail far more often).
+            if _v_shape_r2(seg_low, bottom_rel) - roundness > CUP_MAX_V_ADVANTAGE:
                 continue
             # Handle: the stretch after rim B up to (not including) the first
             # close above the handle's own high.  It must last >= HANDLE_MIN_LEN
