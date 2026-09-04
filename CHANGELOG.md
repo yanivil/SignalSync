@@ -5,6 +5,9 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed (docs)
+- Repository is `yanivil/SignalSync`; README and PR draft updated accordingly.
+
 ### Added
 - `scan.py`: S&P 500 daily-bar scanner with three detectors — Cup & Handle,
   Inverse Head & Shoulders, Bullish Wolfe Wave — each producing entry, stop,

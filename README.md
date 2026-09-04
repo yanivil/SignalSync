@@ -1,4 +1,4 @@
-# S&P 500 Pattern Scanner
+# SignalSync — S&P 500 Pattern Scanner
 
 Daily scanner that checks every S&P 500 constituent (daily bars) for three
 bullish chart patterns and reports actionable setups with an entry price and a
@@ -57,7 +57,7 @@ logs/                          dated reports and logs from local runs (git-ignor
 
 ```
 GitHub Actions (02:00 UTC daily)          Claude scheduled task (04:00 UTC = 07:00 Israel*)
-  checkout → pip install → pytest           curl raw.githubusercontent.com/<owner>/<repo>/main/output/signals.json
+  checkout → pip install → pytest           curl raw.githubusercontent.com/yanivil/SignalSync/main/output/signals.json
   python scan.py  (yfinance, open internet) check meta.last_bar is the latest trading day
   git commit output/report.md + signals.json  e-mail the tables via Gmail + push notification
 ```
@@ -149,7 +149,7 @@ All thresholds are module-level constants at the top of `scan.py`:
 
 ## Scheduling & first-time setup
 
-1. Create a public GitHub repo (e.g. `yanivil/sp500-pattern-scanner`) and push
+1. The public GitHub repo is `yanivil/SignalSync`; push
    this project (feature branch → PR → merge to `main`; scheduled workflows
    only run from the default branch).
 2. In the repo, *Actions* → *daily-scan* → *Run workflow* once to verify the

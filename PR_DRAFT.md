@@ -1,6 +1,6 @@
 # PR: Daily S&P 500 pattern scanner (Cup & Handle, inverse H&S, bullish Wolfe Wave)
 
-**Branch:** `feature/sp500-pattern-scanner` → `main`
+**Branch:** `feature/sp500-pattern-scanner` → `main` (repo `yanivil/SignalSync`)
 
 ## Context / Why
 Yaniv wants a 07:00 (Israel) daily alert listing S&P 500 stocks showing a
