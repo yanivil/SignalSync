@@ -42,11 +42,11 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      - name: Install dependencies (hash-checked)
+        run: pip install --require-hashes -r requirements.txt
 
       - name: Run tests (fast, no network)
-        run: pip install pytest && python -m pytest -q
+        run: pip install --require-hashes -r requirements-dev.txt && python -m pytest -q
 
       - name: Run scan
         # Exit code 2 = no price data (Yahoo outage).  We still want the

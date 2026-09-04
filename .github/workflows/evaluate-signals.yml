@@ -27,9 +27,11 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      - name: Install dependencies (hash-checked)
+        run: pip install --require-hashes -r requirements.txt
       - name: Evaluate
+        env:
+          HORIZON: ${{ github.event.inputs.horizon || '60' }}   # via env, never spliced into the script
         run: |
-          python tools/evaluate_signals.py --horizon "${{ github.event.inputs.horizon || '60' }}" \
+          python tools/evaluate_signals.py --horizon "$HORIZON" \
             --json evaluation.json | tee -a "$GITHUB_STEP_SUMMARY"

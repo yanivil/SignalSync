@@ -39,10 +39,10 @@ The whole scanner is one module, [`scan.py`](scan.py): constants at the top, the
 
 ## Quickstart
 
-Requirements: Python 3.12+, `pandas`, `numpy`, `yfinance` (pinned lower bounds in [`requirements.txt`](requirements.txt)). No API keys: the constituent list comes from a pinned public GitHub dataset and prices from Yahoo Finance via yfinance.
+Requirements: Python 3.12, `pandas`, `numpy`, `yfinance`. [`requirements.txt`](requirements.txt) is hash-pinned (compiled from `requirements.in`); `requirements-dev.txt` adds pytest and ruff. No API keys: the constituent list comes from a pinned public GitHub dataset and prices from Yahoo Finance via yfinance.
 
 ```bash
-python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt pytest
+python3 -m venv .venv && . .venv/bin/activate && pip install --require-hashes -r requirements.txt -r requirements-dev.txt
 ```
 
 ```bash
@@ -128,6 +128,9 @@ tools/evaluate_signals.py            replay past CONFIRMED signals against later
 .github/workflows/sync-wiki.yml      mirrors docs/wiki/ into the GitHub wiki
 run_daily.sh                         local wrapper (venv, dependency checksum, dated logs)
 output/                              latest signals.json + report.md, committed by CI
+requirements.in / requirements.txt   runtime deps: lower bounds, and the hash-pinned compile used by every install
+requirements-dev.in / -dev.txt       pytest, pytest-cov, ruff, likewise hash-pinned
+SECURITY.md                          how to report a vulnerability
 docs/wiki/                           documentation, mirrored into the GitHub wiki
 ```
 

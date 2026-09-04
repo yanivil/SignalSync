@@ -3,7 +3,7 @@
 ## Running the tests
 
 ```bash
-python -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt pytest
+python -m venv .venv && . .venv/bin/activate && pip install --require-hashes -r requirements.txt -r requirements-dev.txt
 ```
 
 ```bash
@@ -53,6 +53,14 @@ The whole suite is offline and deterministic (synthetic price paths, an in-memor
 * Tests never touch the network. Mock at the `yfinance` module boundary with the `fake_yfinance` fixture, not inside `scan`.
 * `scan.main()` rewrites `MIN_SCORE` and `MAX_BREAKOUT_AGE`; the autouse fixture in `conftest.py` restores them, so tests may call `main()` freely.
 * Keep `CHANGELOG.md` current (Keep-a-Changelog format) and record real-market observations (dates, counts) in comments when a behaviour was derived from one.
+
+## Dependencies
+
+`requirements.txt` and `requirements-dev.txt` are compiled with hashes from `requirements.in` / `requirements-dev.in` (pip-tools), and every workflow and `run_daily.sh` install with `--require-hashes`, so a new upstream release can never enter a run until it has been compiled in here and merged through a pull request. Dependabot proposes those bumps weekly. To change a dependency, edit the `.in` file and recompile:
+
+```bash
+pip install pip-tools && pip-compile --generate-hashes --strip-extras -o requirements.txt requirements.in && pip-compile --generate-hashes --strip-extras -c requirements.txt -o requirements-dev.txt requirements-dev.in
+```
 
 ## Branching and CI
 

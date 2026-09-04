@@ -5,6 +5,16 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Security
+- Dependencies are hash-pinned: `requirements.txt` / `requirements-dev.txt`
+  are compiled from `.in` files with pip-tools and every workflow and
+  `run_daily.sh` install with `--require-hashes`. The nightly job (which
+  pushes to `main` with a write token) previously resolved 23 packages
+  fresh from PyPI on each run.
+- Workflow-dispatch inputs in `debug-last-bar` and `evaluate-signals` are
+  passed through `env:` instead of being interpolated into `run:` scripts.
+- `SECURITY.md` added; `.gitignore` covers `.env*`, `.coverage`, `htmlcov/`.
+
 ### Changed (delivery)
 - The report is e-mailed by a Claude desktop scheduled task at 08:45 Israel
   time (local-time cron, so no clock-change adjustment), replacing the
