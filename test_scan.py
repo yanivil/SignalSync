@@ -12,20 +12,28 @@ Run:  python3 -m pytest test_scan.py -q      or      python3 test_scan.py
 
 from __future__ import annotations
 
+import sys
+import types
+
 import numpy as np
 import pandas as pd
 
 import scan
 
+# All synthetic series end on the same business day, as real symbols do; the
+# last-bar alignment in scan.main() would otherwise treat the longest series
+# as "running ahead" and truncate it.
+END = "2025-06-02"
+
 
 def _ohlc_from_path(path: np.ndarray, seed: int = 0, noise: float = 0.004,
-                    start: str = "2024-01-01") -> pd.DataFrame:
+                    end: str = END) -> pd.DataFrame:
     """Turn a close path into a plausible OHLCV frame.
 
     :param path: Close prices.
     :param seed: RNG seed for the intrabar noise.
     :param noise: Intrabar range as a fraction of price.
-    :param start: First business day.
+    :param end: Last business day.
     :returns: OHLCV DataFrame indexed by business days.
     """
     rng = np.random.default_rng(seed)
@@ -35,7 +43,7 @@ def _ohlc_from_path(path: np.ndarray, seed: int = 0, noise: float = 0.004,
     hi = np.maximum(open_, close) * (1 + np.abs(rng.normal(0, noise, n)))
     lo = np.minimum(open_, close) * (1 - np.abs(rng.normal(0, noise, n)))
     vol = rng.integers(1_000_000, 2_000_000, n).astype(float)
-    idx = pd.bdate_range(start, periods=n)
+    idx = pd.bdate_range(end=end, periods=n)
     return pd.DataFrame({"Open": open_, "High": hi, "Low": lo, "Close": close, "Volume": vol}, index=idx)
 
 
@@ -150,6 +158,7 @@ def test_main_end_to_end(tmp_path, monkeypatch):
         return {"CUP": make_cup_and_handle(), "IHS": make_inverse_hs(), "WW": make_bullish_wolfe()}
 
     monkeypatch.setattr(scan, "download_history", fake_download)
+    monkeypatch.setattr(scan, "MAX_BREAKOUT_AGE", scan.MAX_BREAKOUT_AGE)  # main() mutates it
     out = tmp_path / "out"
     rc = scan.main(["--tickers", "CUP,IHS,WW", "--out-dir", str(out)])
     assert rc == 0
@@ -161,6 +170,162 @@ def test_main_end_to_end(tmp_path, monkeypatch):
     assert "## Confirmed breakouts" in report and "## Watchlist" in report
     for s in data["signals"]:
         assert s["stop"] < s["entry"] and 0 < s["risk_pct"] <= 15
+    # meta.last_bar is the bar the signals were actually computed on.
+    meta = data["meta"]
+    assert meta["last_bar"] == END
+    assert all(s["last_date"] == END for s in data["signals"])
+    assert meta["last_bar_symbols"] == 3 and meta["lagging_symbols"] == 0
+    assert meta["skipped_bar"] is None
+    # The effective breakout-age limit is stated per pattern, not just the base value.
+    assert meta["max_breakout_age"] == scan.MAX_BREAKOUT_AGE
+    assert meta["max_breakout_age_by_pattern"] == {
+        "Cup & Handle": 3, "Inverse Head & Shoulders": 8, "Bullish Wolfe Wave": 8}
+    assert "Cup & Handle 3, Inverse Head & Shoulders 8, Bullish Wolfe Wave 8" in report
+    assert "older than 3 bars are dropped" not in report
+
+
+# --------------------------------------------------------------------------- #
+# Last-bar handling
+#
+# Why: Yahoo publishes the previous session's daily row in two steps (volume
+# first, OHLC hours later).  On 2026-09-04 the scan reported last_bar
+# 2026-09-03 (2 symbols had the complete bar) while all 19 signals were computed
+# on 2026-09-02 (501 symbols had a volume-only row that dropna removed).
+# --------------------------------------------------------------------------- #
+def _batched_frame(frames: dict) -> pd.DataFrame:
+    """Mimic ``yf.download(group_by="ticker")``: columns (ticker, field), union index."""
+    return pd.concat(frames.values(), axis=1, keys=frames.keys(), names=["Ticker", "Price"])
+
+
+def _install_fake_yfinance(monkeypatch, raw: pd.DataFrame, calls: list):
+    fake = types.ModuleType("yfinance")
+
+    def download(tickers, **kwargs):
+        calls.append((list(tickers), kwargs))
+        return raw
+
+    fake.download = download
+    monkeypatch.setitem(sys.modules, "yfinance", fake)
+
+
+def test_download_history_drops_only_trailing_rows_without_close(monkeypatch):
+    base = make_cup_and_handle()
+    d_last = base.index[-1]
+    partial = base.copy()                      # Yahoo's not-yet-published bar:
+    partial.loc[d_last, ["Open", "High", "Low", "Close"]] = np.nan   # volume only
+    complete = base.copy()
+    late = base.iloc[:-2].copy()                # no row at all for the last two days
+    short = base.iloc[-30:].copy()              # too little history -> excluded
+    calls: list = []
+    _install_fake_yfinance(monkeypatch, _batched_frame(
+        {"AAA": partial, "BBB": partial, "CCC": complete, "LATE": late, "SHORT": short}), calls)
+
+    out = scan.download_history(["AAA", "BBB", "CCC", "LATE", "SHORT", "MISSING"],
+                                period="2y", batch=100)
+
+    assert calls and calls[0][1]["group_by"] == "ticker"
+    assert set(out) == {"AAA", "BBB", "CCC", "LATE"}
+    # batch-index padding (all-NaN rows) is dropped but is not a "partial" bar
+    assert out["LATE"].index[-1] == base.index[-3]
+    assert out["LATE"].attrs["partial_bars"] == []
+    prev = base.index[-2]
+    for sym in ("AAA", "BBB"):
+        assert out[sym].index[-1] == prev, sym
+        assert out[sym].attrs["partial_bars"] == [str(d_last.date())]
+        assert not out[sym]["Close"].isna().any()
+    assert out["CCC"].index[-1] == d_last
+    assert out["CCC"].attrs["partial_bars"] == []
+    assert list(out["CCC"].columns) == ["Open", "High", "Low", "Close", "Volume"]
+
+
+def test_download_history_interior_nan_is_not_a_partial_bar(monkeypatch):
+    base = make_cup_and_handle()
+    holed = base.copy()
+    holed.loc[holed.index[-10], "Close"] = np.nan  # a hole in the middle, newest bar intact
+    _install_fake_yfinance(monkeypatch, _batched_frame({"AAA": holed}), [])
+    out = scan.download_history(["AAA"])
+    assert out["AAA"].index[-1] == base.index[-1]
+    assert len(out["AAA"]) == len(base) - 1
+    assert out["AAA"].attrs["partial_bars"] == []
+
+
+def test_align_last_bar_uses_majority_bar_and_truncates_leaders():
+    base = make_cup_and_handle()
+    d_last, d_prev = base.index[-1], base.index[-2]
+    majority = {}
+    for sym in ("A", "B", "C"):
+        df = base.iloc[:-1].copy()              # newest complete bar = d_prev ...
+        df.attrs["partial_bars"] = [str(d_last.date())]   # ... d_last arrived volume-only
+        majority[sym] = df
+    leader = base.copy()                        # already has the complete d_last bar
+    leader.attrs["partial_bars"] = []
+    lagging = base.iloc[:-3].copy()             # e.g. halted; three bars behind
+    lagging.attrs["partial_bars"] = []
+    data = {**majority, "LEAD": leader, "LAG": lagging}
+
+    aligned, info = scan.align_last_bar(data)
+
+    assert info["last_bar"] == str(d_prev.date())
+    assert set(aligned) == set(data)
+    assert aligned["LEAD"].index[-1] == d_prev          # nothing runs ahead of last_bar
+    assert aligned["LAG"].index[-1] == base.index[-4]   # lagging symbols are kept as-is
+    assert info["last_bar_symbols"] == 4 and info["lagging_symbols"] == 1
+    assert info["skipped_bar"] == str(d_last.date())
+    assert info["skipped_bar_complete"] == 1 and info["skipped_bar_partial"] == 3
+    assert info["last_bar_histogram"] == {str(d_last.date()): 1, str(d_prev.date()): 3,
+                                          str(base.index[-4].date()): 1}
+    # every symbol's signals are now computed on a bar <= last_bar
+    for df in aligned.values():
+        assert df.index[-1] <= d_prev
+
+
+def test_align_last_bar_when_every_symbol_is_complete():
+    base = make_cup_and_handle()
+    data = {s: base.copy() for s in ("A", "B", "C")}
+    aligned, info = scan.align_last_bar(data)
+    assert info["last_bar"] == str(base.index[-1].date())
+    assert info["skipped_bar"] is None
+    assert info["last_bar_symbols"] == 3 and info["lagging_symbols"] == 0
+    assert all(len(aligned[s]) == len(base) for s in data)
+    assert scan.align_last_bar({}) == ({}, {"last_bar": None})
+
+
+def test_main_reports_the_bar_actually_scanned(tmp_path, monkeypatch):
+    """Reproduction of 2026-09-04: most symbols have a volume-only newest row."""
+    import json
+
+    def fake_download(symbols, period="2y", batch=100):
+        cup, ihs, ww = make_cup_and_handle(), make_inverse_hs(), make_bullish_wolfe()
+        d_last = cup.index[-1]
+        frames = {}
+        for sym, df in (("CUP", cup), ("IHS", ihs), ("WW", ww)):
+            partial = df.copy()
+            partial.loc[d_last, ["Open", "High", "Low", "Close"]] = np.nan
+            frames[sym] = partial
+        frames["APH"] = cup.copy()       # one symbol already has the complete bar
+        return _batched_frame(frames)
+
+    monkeypatch.setitem(sys.modules, "yfinance",
+                        types.SimpleNamespace(download=lambda tickers, **kw: fake_download(tickers)))
+    monkeypatch.setattr(scan, "MAX_BREAKOUT_AGE", scan.MAX_BREAKOUT_AGE)  # main() mutates it
+    out = tmp_path / "out"
+    rc = scan.main(["--tickers", "CUP,IHS,WW,APH", "--out-dir", str(out), "--max-age", "2"])
+    assert rc == 0
+    data = json.loads((out / "signals.json").read_text())
+    meta = data["meta"]
+    prev = str(pd.bdate_range(end=END, periods=2)[0].date())
+    assert meta["last_bar"] == prev, meta
+    assert meta["skipped_bar"] == END
+    assert meta["skipped_bar_partial"] == 3 and meta["skipped_bar_complete"] == 1
+    assert meta["last_bar_symbols"] == 4 and meta["lagging_symbols"] == 0
+    assert data["signals"], "the previous bar still carries the synthetic setups"
+    assert {s["last_date"] for s in data["signals"]} == {prev}
+    assert meta["max_breakout_age"] == 2
+    assert meta["max_breakout_age_by_pattern"] == {
+        "Cup & Handle": 2, "Inverse Head & Shoulders": 7, "Bullish Wolfe Wave": 7}
+    report = (out / "report.md").read_text()
+    assert f"last bar {prev}" in report
+    assert f"Newest bar {END} not scanned: complete for 1 symbols, still missing OHLC at Yahoo for 3." in report
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -1,0 +1,66 @@
+# Manual diagnostic: which daily bar does each symbol end on, before and after
+# NaN cleaning?  Runs tools/debug_last_bar.py on a GitHub runner (open
+# internet) and prints the result; commits nothing.  Trigger with
+#   gh workflow run debug-last-bar.yml --ref <branch> [-f tickers=XOM,CL]
+# It also runs on pushes that touch its own files (GitHub only registers a
+# workflow for manual dispatch once it has run or landed on the default branch).
+name: debug-last-bar
+
+on:
+  push:
+    paths:
+      - tools/debug_last_bar.py
+      - .github/workflows/debug-last-bar.yml
+  workflow_dispatch:
+    inputs:
+      tickers:
+        description: "comma separated symbols (empty = full S&P 500)"
+        required: false
+        default: ""
+      verbose:
+        description: "yfinance DEBUG logging"
+        required: false
+        default: "false"
+
+permissions:
+  contents: read
+
+jobs:
+  debug:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Raw Yahoo chart JSON for XOM (last 3 bars, best effort)
+        run: |
+          curl -s -A "Mozilla/5.0" "https://query2.finance.yahoo.com/v8/finance/chart/XOM?range=5d&interval=1d" \
+            | python -c "
+          import json,sys,datetime as dt
+          r=json.load(sys.stdin)['chart']['result'][0]
+          q=r['indicators']['quote'][0]
+          print('meta.regularMarketTime', dt.datetime.utcfromtimestamp(r['meta'].get('regularMarketTime',0)), 'currentTradingPeriod', r['meta'].get('currentTradingPeriod',{}).get('regular'))
+          for i,ts in enumerate(r['timestamp'][-3:]):
+              j=len(r['timestamp'])-3+i
+              print(dt.datetime.utcfromtimestamp(ts), {k:q[k][j] for k in ('open','high','low','close','volume')}, 'adjclose', r['indicators'].get('adjclose',[{}])[0].get('adjclose',[None]*len(r['timestamp']))[j])
+          " || echo "raw fetch failed"
+      - name: Diagnose last bar per symbol
+        run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.tickers }}" ]; then ARGS="$ARGS --tickers ${{ github.event.inputs.tickers }}"; fi
+          if [ "${{ github.event.inputs.verbose }}" = "true" ]; then ARGS="$ARGS -v"; fi
+          python tools/debug_last_bar.py $ARGS
+      - name: Dry-run scan (nothing is committed)
+        run: |
+          mkdir -p /tmp/scan-out
+          ARGS=""
+          if [ -n "${{ github.event.inputs.tickers }}" ]; then ARGS="--tickers ${{ github.event.inputs.tickers }}"; fi
+          python scan.py --out-dir /tmp/scan-out $ARGS > /tmp/scan-out/report.txt 2> /tmp/scan-out/scan.log || true
+          grep -E "INFO (last|bar|downloaded|universe)" /tmp/scan-out/scan.log || tail -20 /tmp/scan-out/scan.log
+          python -c "import json; print(json.dumps(json.load(open('/tmp/scan-out/signals.json'))['meta'], indent=1))"
+          head -8 /tmp/scan-out/report.md

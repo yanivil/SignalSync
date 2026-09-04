@@ -9,7 +9,11 @@
 # repo and e-mails it.
 #
 # Schedule: 02:00 UTC daily = ~2 hours before the Claude task at 04:00 UTC,
-# and ~6 hours after the US close, so the previous session's bar is final.
+# and ~6 hours after the US close.  Note: Yahoo's daily row for that session
+# is usually still volume-only (OHLC null) at this hour -- observed for
+# 501/503 symbols at 07:28 UTC on 2026-09-04, prices arrived ~07:55 UTC -- so
+# scan.py normally scans the session before it and reports that in
+# meta.last_bar / meta.skipped_bar.
 # Scheduled workflows only run on the default branch (main).
 # ---------------------------------------------------------------------------
 name: daily-scan
