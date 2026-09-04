@@ -1,12 +1,26 @@
 {
   "meta": {
-    "run_date": "2026-09-04 07:53",
+    "run_date": "2026-09-04 08:05",
     "universe": 503,
     "scanned": 502,
     "errors": 1,
-    "last_bar": "2026-09-03",
+    "last_bar": "2026-09-02",
+    "last_bar_symbols": 502,
+    "lagging_symbols": 0,
+    "skipped_bar": "2026-09-03",
+    "skipped_bar_complete": 2,
+    "skipped_bar_partial": 500,
+    "last_bar_histogram": {
+      "2026-09-03": 2,
+      "2026-09-02": 500
+    },
     "min_score": 60,
-    "max_breakout_age": 3
+    "max_breakout_age": 3,
+    "max_breakout_age_by_pattern": {
+      "Cup & Handle": 3,
+      "Inverse Head & Shoulders": 8,
+      "Bullish Wolfe Wave": 8
+    }
   },
   "signals": [
     {

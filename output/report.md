@@ -1,6 +1,7 @@
-# S&P 500 pattern scan — 2026-09-04 07:53
+# S&P 500 pattern scan — 2026-09-04 08:05
 
-Scanned 502 of 503 symbols (daily bars, last bar 2026-09-03). Min quality score 60. Breakouts older than 3 bars are dropped.
+Scanned 502 of 503 symbols (daily bars, last bar 2026-09-02). Min quality score 60. Breakouts older than the per-pattern limit are dropped (bars: Cup & Handle 3, Inverse Head & Shoulders 8, Bullish Wolfe Wave 8; H&S and Wolfe get 5 extra bars because their last pivot is only visible 5 bars after it prints).
+Newest bar 2026-09-03 not scanned: complete for 2 symbols, still missing OHLC at Yahoo for 500.
 Data errors: 1
 
 ## Confirmed breakouts (actionable): 4
