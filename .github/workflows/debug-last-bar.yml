@@ -2,9 +2,15 @@
 # NaN cleaning?  Runs tools/debug_last_bar.py on a GitHub runner (open
 # internet) and prints the result; commits nothing.  Trigger with
 #   gh workflow run debug-last-bar.yml --ref <branch> [-f tickers=XOM,CL]
+# It also runs on pushes that touch its own files (GitHub only registers a
+# workflow for manual dispatch once it has run or landed on the default branch).
 name: debug-last-bar
 
 on:
+  push:
+    paths:
+      - tools/debug_last_bar.py
+      - .github/workflows/debug-last-bar.yml
   workflow_dispatch:
     inputs:
       tickers:
