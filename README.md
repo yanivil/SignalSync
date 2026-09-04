@@ -3,6 +3,7 @@
 [![tests](https://github.com/yanivil/SignalSync/actions/workflows/tests.yml/badge.svg)](https://github.com/yanivil/SignalSync/actions/workflows/tests.yml)
 [![daily scan](https://github.com/yanivil/SignalSync/actions/workflows/daily-scan.yml/badge.svg)](https://github.com/yanivil/SignalSync/actions/workflows/daily-scan.yml)
 [![python](https://img.shields.io/badge/python-3.12%2B-blue)](#)
+[![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 **SignalSync scans every S&P 500 constituent on daily bars for three bullish chart patterns and reports only confirmed, risk-defined setups with an entry, a structural stop and a reference target.**
 
@@ -142,3 +143,7 @@ docs/wiki/                           documentation, mirrored into the GitHub wik
 * Signal outcomes have not been measured yet. `tools/evaluate_signals.py` (the `evaluate-signals` workflow) replays every committed `CONFIRMED` signal against later prices; run it once enough history has accumulated.
 * Yahoo Finance data is unofficial. Symbols with fewer than 60 bars are skipped and counted in `meta.errors`.
 * There is no persistent price cache: every run re-downloads two years of history for the whole universe.
+
+## License
+
+[MIT](LICENSE). The scanner is a heuristic screener provided as is, without warranty; nothing it outputs is trading advice.
