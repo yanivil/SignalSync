@@ -95,20 +95,40 @@ def test_v_shape_r2_separates_rounded_bases_from_sharp_reversals():
     assert scan._v_shape_r2(np.array([1.0, 0.0, 1.0]), 1) == 0.0    # fewer than 5 points
 
 
-@pytest.mark.parametrize("close, start, lag, expected", [
-    ([90, 95, 101.0], 0, 0, ("CONFIRMED", 0)),          # broke on the last bar
-    ([90, 101, 101.0], 0, 0, ("CONFIRMED", 1)),         # broke one bar ago
-    ([90, 95, 98.0], 0, 0, ("WATCHLIST", None)),        # within WATCH_PROXIMITY (3 %)
-    ([90, 95, 96.9], 0, 0, ("STALE", None)),            # just outside 3 %
-    ([90, 101, 101, 101, 101, 101.0], 0, 0, ("STALE", 4)),      # older than MAX_BREAKOUT_AGE
-    ([90, 101, 101, 101, 101, 101.0], 0, 5, ("CONFIRMED", 4)),  # ... unless the pivot lag allows it
-    ([90, 101, 106.0], 0, 0, ("STALE", 1)),             # > MAX_RUNAWAY above trigger: chasing
-    ([90, 101, 104.9], 0, 0, ("CONFIRMED", 1)),         # 4.9 % is still an entry
-    ([90, 101, 99.0], 0, 0, ("STALE", 1)),              # failed break (closed back below)
-    ([101, 90, 95, 98.0], 1, 0, ("WATCHLIST", None)),   # breaks before `start` do not count
+CUP, IHS = "Cup & Handle", "Inverse Head & Shoulders"     # lag 0 and lag PIVOT_ORDER
+
+
+@pytest.mark.parametrize("close, start, pattern, expected", [
+    ([90, 95, 101.0], 0, CUP, ("CONFIRMED", 0)),          # broke on the last bar
+    ([90, 101, 101.0], 0, CUP, ("CONFIRMED", 1)),         # broke one bar ago
+    ([90, 95, 98.0], 0, CUP, ("WATCHLIST", None)),        # within WATCH_PROXIMITY (3 %)
+    ([90, 95, 96.9], 0, CUP, ("STALE", None)),            # just outside 3 %
+    ([90, 101, 101, 101, 101, 101.0], 0, CUP, ("STALE", 4)),      # older than MAX_BREAKOUT_AGE
+    ([90, 101, 101, 101, 101, 101.0], 0, IHS, ("CONFIRMED", 4)),  # ... unless the pivot lag allows it
+    ([90, 101, 106.0], 0, CUP, ("STALE", 1)),             # > MAX_RUNAWAY above trigger: chasing
+    ([90, 101, 104.9], 0, CUP, ("CONFIRMED", 1)),         # 4.9 % is still an entry
+    ([90, 101, 99.8], 0, CUP, ("WATCHLIST", None)),       # broke out, pulled back: a retest stays listed
+    ([90, 101, 96.0], 0, CUP, ("STALE", None)),           # pulled back too far
+    ([90, 101, 99, 101.0], 0, CUP, ("CONFIRMED", 2)),     # re-break inside the window: age from the first break
+    ([90, 101, 101, 101, 101, 99, 101.0], 0, CUP, ("STALE", 5)),      # re-break after the window: chop, not a breakout
+    ([101, 90, 95, 98.0], 1, CUP, ("WATCHLIST", None)),   # breaks before `start` do not count
+    ([101, 101, 101.0], 1, CUP, ("CONFIRMED", 1)),        # a run cannot begin before `start`
 ])
-def test_status_from_break_state_table(close, start, lag, expected):
-    assert scan._status_from_break(np.array(close, float), 100.0, start, lag=lag) == expected
+def test_evaluate_breakout_state_table(close, start, pattern, expected):
+    status, age, trigger = scan.evaluate_breakout(np.array(close, float), lambda _i: 100.0, start, pattern)
+    assert (status, age) == expected and trigger == 100.0
+
+
+def test_evaluate_breakout_sloping_trigger_and_floor():
+    neck = lambda i: 100.0 - 0.5 * i                      # falling neckline: 100, 99.5, 99.0, 98.5  # noqa: E731
+    # A flat 99.0 close only clears the line on bar 3 (99.0 is not > 99.0 on bar 2).
+    assert scan.evaluate_breakout(np.array([90.0, 99.0, 99.0, 99.0]), neck, 0, IHS) == ("CONFIRMED", 0, 98.5)
+    # 99.7 clears the line from bar 1 on: the run is three bars old, trigger = line at the break bar.
+    assert scan.evaluate_breakout(np.array([90.0, 99.7, 99.7, 99.7]), neck, 0, IHS) == ("CONFIRMED", 2, 99.5)
+    # Pulled back below today's line but within 3 % of it: watchlist at today's level ...
+    assert scan.evaluate_breakout(np.array([90.0, 99.7, 99.7, 96.0]), neck, 0, IHS) == ("WATCHLIST", None, 98.5)
+    # ... unless it also lost the floor (right-shoulder low / point 5).
+    assert scan.evaluate_breakout(np.array([90.0, 99.7, 99.7, 96.0]), neck, 0, IHS, floor=97.5) == ("STALE", None, 98.5)
 
 
 def test_trend_context_states(cup_df, flat_df):

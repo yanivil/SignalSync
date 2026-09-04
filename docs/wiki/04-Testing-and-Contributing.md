@@ -37,7 +37,7 @@ The whole suite is offline and deterministic (synthetic price paths, an in-memor
 2. **Detector** `detect_<name>(df: pd.DataFrame, ticker: str) -> List[Signal]` that:
    * bails out early on insufficient bars and on the trend gate,
    * builds anchors from `find_pivots`, applies hard geometric rejects, then computes trigger, entry, stop, target and a 0–100 score with the same 50-base convention,
-   * uses `_status_from_break` (or the same three-way logic) so `CONFIRMED` / `WATCHLIST` / stale semantics match,
+   * uses `evaluate_breakout` with the trigger as a function of the bar index (constant or sloping) and the pattern's floor, so `CONFIRMED` / `WATCHLIST` / stale semantics match,
    * enforces `stop < entry` and `risk_pct ≤ 15`,
    * writes parseable anchor dates and levels into `notes`,
    * returns `_dedupe(signals)`.
