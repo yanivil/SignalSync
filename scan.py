@@ -761,7 +761,10 @@ def detect_cup_and_handle(df: pd.DataFrame, ticker: str) -> List[Signal]:
       (``CUP_MAX_V_ADVANTAGE``): sharp V reversals are not bases.
     * Handle: 5-40 bars after ``B``, its low stays above the cup's mid-point and
       within 12 % of ``B``; handle depth <= half the cup depth.
-    * Trigger: close above the handle high (which is <= B).  Stop: handle low
+    * Trigger: close above the handle's highest high.  Rim B is a swing high,
+      so nothing within ``PIVOT_ORDER`` bars of it can exceed it, but a wick
+      above B later in the handle raises the trigger above the rim (the setup
+      then needs a close above that wick: conservative).  Stop: handle low
       minus 0.25 ATR.
     * Requires close above the 200-day SMA (continuation pattern needs an uptrend).
 
@@ -804,7 +807,9 @@ def detect_cup_and_handle(df: pd.DataFrame, ticker: str) -> List[Signal]:
             if not (0.20 <= pos <= 0.80):
                 continue  # bottom hugging one rim -> not a rounded cup
             # Prior up-trend into the left rim: a cup is a *continuation* base,
-            # so the stock must have advanced meaningfully before rim A.
+            # so the stock must have advanced meaningfully before rim A.  The
+            # test is the *rise* from the 120-bar low to rim A (>= 25 %), not
+            # the low's distance below the rim (which would be a 33 % rise).
             pre_low = float(low[max(0, a - 120):a + 1].min())
             if (rim_a - pre_low) / pre_low < CUP_PRIOR_ADVANCE:
                 continue
@@ -937,7 +942,8 @@ def detect_inverse_hs(df: pd.DataFrame, ticker: str) -> List[Signal]:
         # trend line rather than a neckline.
         if abs(slope * width) / close[h] > IHS_MAX_NECK_SLOPE:
             continue
-        # Prior decline into the left shoulder.
+        # Prior decline into the left shoulder, measured as a share of the
+        # 60-bar high (slightly stricter than "10 % above the shoulder low").
         look = high[max(0, ls - 60):ls + 1]
         if (look.max() - ls_v) / look.max() < IHS_PRIOR_DECLINE:
             continue
@@ -1220,7 +1226,9 @@ def render_markdown(signals: List[Signal], meta: Mapping[str, Any]) -> str:
         lines.append("")
     lines.append(f"_Heuristic scan, not advice. Entry = trigger level, or the breakout close when it "
                  f"is above the trigger (closes more than {MAX_RUNAWAY:.0%} above the trigger are dropped "
-                 f"as chasing). Stop = structural level minus 0.25 ATR. Verify on a chart before trading._")
+                 f"as chasing). Stop = structural level minus 0.25 ATR. Entry is the last close: a trade "
+                 f"happens at the next open, so re-check that the open is still within {MAX_RUNAWAY:.0%} "
+                 f"of the trigger and recompute risk from the fill. Verify on a chart before trading._")
     return "\n".join(lines)
 
 
