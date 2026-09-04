@@ -5,6 +5,18 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+- The newest daily bar's close is filled from Yahoo's last-trade quote
+  (`fill_missing_close()`): after the US close the chart row has no close
+  until ~08:00 UTC, but `regularMarketPrice`/`regularMarketTime` already hold
+  the closing print. The 02:00 UTC scan therefore runs on the last completed
+  session instead of the one before it. Guards: the trade must fall on the
+  row's date and be at least `FILL_CLOSE_MIN_AGE` (1 h) old.
+  `meta.filled_close_symbols` reports how many symbols were completed this way.
+- History is downloaded per symbol with `Ticker.history(auto_adjust=False)`
+  (so the chart metadata is available) and adjusted by `adjust_ohlc()`, which
+  treats a missing adjusted close as ratio 1.0 instead of blanking the row.
+
 ### Security
 - The S&P 500 constituent CSV is now fetched from a pinned commit of
   `datasets/s-and-p-500-companies` (`CONSTITUENTS_COMMIT`) instead of the

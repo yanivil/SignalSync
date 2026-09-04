@@ -9,11 +9,11 @@
 # repo and e-mails it.
 #
 # Schedule: 02:00 UTC daily = ~2 hours before the Claude task at 04:00 UTC,
-# and ~6 hours after the US close.  Note: Yahoo's daily row for that session
-# is usually still volume-only (OHLC null) at this hour -- observed for
-# 501/503 symbols at 07:28 UTC on 2026-09-04, prices arrived ~07:55 UTC -- so
-# scan.py normally scans the session before it and reports that in
-# meta.last_bar / meta.skipped_bar.
+# and ~6 hours after the US close.  Note: Yahoo's chart row for that session
+# has no close until ~08:00 UTC (US pre-market open) -- observed 2026-09-04:
+# 500/502 symbols incomplete at 08:05 UTC, complete at 08:10 UTC -- so scan.py
+# fills the close from the chart's last-trade quote (fill_missing_close) and
+# reports how many symbols needed that in meta.filled_close_symbols.
 # Scheduled workflows only run on the default branch (main).
 # ---------------------------------------------------------------------------
 name: daily-scan
