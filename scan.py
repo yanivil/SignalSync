@@ -223,6 +223,18 @@ def adjust_ohlc(df: pd.DataFrame) -> pd.DataFrame:
     return out[["Open", "High", "Low", "Close", "Volume"]]
 
 
+def _as_utc(ts) -> pd.Timestamp:
+    """Yahoo's ``regularMarketTime`` as a UTC Timestamp.
+
+    yfinance >= 1.x converts it to a tz-aware ``pd.Timestamp`` in
+    ``get_history_metadata()``; the raw chart meta carries epoch seconds.
+    """
+    if isinstance(ts, (int, float)) or (isinstance(ts, str) and ts.strip().lstrip("-").isdigit()):
+        return pd.Timestamp(int(ts), unit="s", tz="UTC")
+    t = pd.Timestamp(ts)
+    return t.tz_convert("UTC") if t.tzinfo is not None else t.tz_localize("UTC")
+
+
 def fill_missing_close(df: pd.DataFrame, meta: dict, now: Optional[pd.Timestamp] = None
                        ) -> Tuple[pd.DataFrame, Optional[str]]:
     """Complete the newest bar from Yahoo's last-trade quote when its close is missing.
@@ -250,7 +262,7 @@ def fill_missing_close(df: pd.DataFrame, meta: dict, now: Optional[pd.Timestamp]
         return df, None
     try:
         price = float(price)
-        traded = pd.Timestamp(int(ts), unit="s", tz="UTC")
+        traded = _as_utc(ts)
     except (TypeError, ValueError, OverflowError):
         return df, None
     if not price > 0:
@@ -283,11 +295,14 @@ def _fetch_history(sym: str, period: str) -> Optional[Tuple[pd.DataFrame, dict]]
     """
     import yfinance as yf  # imported lazily so tests can run without it
 
+    try:  # make yfinance raise instead of logging + returning an empty frame
+        yf.config.debug.hide_exceptions = False
+    except Exception:
+        pass
     tkr = yf.Ticker(sym)
     for attempt in range(3):  # Yahoo occasionally throttles; retry with backoff
         try:
-            df = tkr.history(period=period, interval="1d", auto_adjust=False,
-                             actions=False, raise_errors=True)
+            df = tkr.history(period=period, interval="1d", auto_adjust=False, actions=False)
             return df, (tkr.get_history_metadata() or {})
         except Exception as exc:
             msg = str(exc)

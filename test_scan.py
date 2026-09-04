@@ -236,6 +236,7 @@ def test_download_history_drops_only_trailing_rows_without_close(monkeypatch):
                                 period="2y", workers=2)
 
     assert calls and calls[0][1]["auto_adjust"] is False  # adjustment is done by adjust_ohlc()
+    assert "raise_errors" not in calls[0][1]               # deprecated in yfinance 1.7
     assert set(out) == {"AAA", "BBB", "CCC", "LATE"}      # MISSING raised, SHORT too short
     assert out["LATE"].index[-1] == base.index[-3]
     assert out["LATE"].attrs["partial_bars"] == []
@@ -398,6 +399,23 @@ def test_fill_missing_close_uses_closing_print():
     assert out.loc[d_last, "Adj Close"] == 101.5
     assert out.loc[d_last, "High"] == 101.5 and out.loc[d_last, "Low"] == 90.0
     assert df["Close"].isna().iloc[-1]                       # input untouched
+
+
+def test_fill_missing_close_accepts_yfinance_timestamp_meta():
+    """yfinance 1.7 hands back regularMarketTime as a tz-aware Timestamp, not epoch seconds."""
+    base = make_cup_and_handle()
+    d_last = base.index[-1]
+    df = _partial_last_row(base)
+    meta = _close_print(d_last, 101.5)
+    stamped = pd.Timestamp(meta["regularMarketTime"], unit="s", tz="UTC").tz_convert("America/New_York")
+    now = stamped + pd.Timedelta(hours=6)
+    for ts in (stamped, stamped.tz_convert("UTC"), str(int(stamped.timestamp())),
+               float(stamped.timestamp())):
+        out, day = scan.fill_missing_close(df, {**meta, "regularMarketTime": ts}, now=now)
+        assert day == str(d_last.date()), ts
+        assert out.loc[d_last, "Close"] == 101.5
+    # garbage timestamp -> no fill, no exception
+    assert scan.fill_missing_close(df, {**meta, "regularMarketTime": "yesterday"}, now=now)[1] is None
 
 
 def test_fill_missing_close_sets_open_when_whole_row_is_missing():
