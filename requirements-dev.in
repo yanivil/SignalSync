@@ -1,0 +1,5 @@
+# Development / CI tools.  requirements-dev.txt is compiled from this file
+# with hashes, constrained to the runtime pins in requirements.txt.
+pytest
+pytest-cov
+ruff

@@ -28,7 +28,7 @@ fi
 REQ_SUM=$(sha256sum requirements.txt | cut -d' ' -f1)
 if [ ! -f "$VENV/.req.sum" ] || [ "$(cat "$VENV/.req.sum")" != "$REQ_SUM" ]; then
   pip install -q --upgrade pip
-  pip install -q -r requirements.txt
+  pip install -q --require-hashes -r requirements.txt
   echo "$REQ_SUM" > "$VENV/.req.sum"
 fi
 
