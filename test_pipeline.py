@@ -71,7 +71,23 @@ def test_download_history_keeps_the_rest_of_the_universe_after_failures(fake_yfi
 def test_load_symbols_from_csv_handles_header_variants_and_junk(tmp_path):
     p = tmp_path / "c.csv"
     p.write_text("Ticker,Name\nbrk.b,Berkshire\n AAPL ,Apple\n,blank\nAAPL,dup\n")
-    assert scan.load_sp500_symbols(str(p)) == ["AAPL", "brk-b"]   # first column when no 'Symbol'
+    assert scan.load_sp500_symbols(str(p)) == ["AAPL", "BRK-B"]   # first column when no 'Symbol'; upper-cased
+
+
+def test_load_symbols_rejects_an_oversized_download(monkeypatch):
+    import io
+
+    class Big(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+    monkeypatch.setattr(scan.urllib.request, "urlopen",
+                        lambda *a, **k: Big(b"Symbol\n" + b"A\n" * (scan.CONSTITUENTS_MAX_BYTES // 2 + 1)))
+    with pytest.raises(RuntimeError, match="exceeds"):
+        scan.load_sp500_symbols()
 
 
 def test_load_symbols_without_any_source_raises_and_warns_about_missing_csv(monkeypatch, tmp_path, caplog):

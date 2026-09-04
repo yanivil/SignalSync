@@ -471,6 +471,42 @@ def test_fat_tailed_noise_false_positive_rate():
     assert fired / 200 < 0.05, fired
 
 
+def test_w_shaped_base_is_not_a_cup_across_its_full_span():
+    """Two bowls with a rally to the rim between them: the full span fails roundness.
+
+    The lows of a W are not one parabola (R^2 ~ 0.06 here).  The second bowl
+    on its own does qualify as a cup, which is equivalent to O'Neil's
+    double-bottom buy point at the middle peak, so a signal may still appear
+    anchored on the rally high; what must never appear is a cup spanning both
+    bowls.
+    """
+    pre = _uptrend_prefix(220, 60, 100)
+    t = np.linspace(0, np.pi, 50)
+    w = np.concatenate([100 - 25 * np.sin(t), 99 - 24 * np.sin(t)])
+    handle = np.concatenate([np.linspace(100, 94, 8), np.linspace(94, 97, 7)])
+    df = _ohlc_from_path(np.concatenate([pre, w, handle, np.array([101.5, 102.0])]), seed=3)
+    assert scan._u_shape_r2(df["Low"].to_numpy()[220:320]) < scan.CUP_MIN_ROUNDNESS
+    for s in scan.detect_cup_and_handle(df, "W"):
+        left_rim = pd.Timestamp(re.search(r"left rim (\S+)", s.notes)[1])
+        # anchored on the middle rally (bar ~269), never on rim A (~220) or the first bottom (~245)
+        assert left_rim >= df.index[260], s.notes
+
+
+def test_zero_price_bars_are_rejected_without_errors(cup_df, caplog):
+    """Bad-data zeros never raise: inside the pattern they void it, far before it they do not matter."""
+    prices = cup_df.columns.get_indexer(["Open", "High", "Low", "Close"])
+    def zeroed(rows):
+        df = cup_df.copy()
+        df.iloc[rows, prices] = 0.0
+        return df
+
+    with caplog.at_level("ERROR", logger="sp500scan"):
+        assert len(scan.scan_symbol("Z", zeroed(slice(10, 20)))) == 1      # long before the pattern
+        assert scan.scan_symbol("Z", zeroed(slice(-60, -50))) == []        # inside the cup
+        assert scan.scan_symbol("Z", zeroed(-1)) == []                     # on the last bar
+    assert "failed on" not in caplog.text                     # no detector raised
+
+
 def test_flat_line_and_random_walk_controls_are_silent(flat_df):
     assert scan.scan_symbol("FLAT", flat_df) == []
     assert scan.atr(flat_df).iloc[-1] == 0.0
