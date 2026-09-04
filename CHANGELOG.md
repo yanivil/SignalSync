@@ -5,6 +5,12 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed (delivery)
+- The report is e-mailed by a Claude desktop scheduled task at 08:45 Israel
+  time (local-time cron, so no clock-change adjustment), replacing the
+  04:00 UTC task. Docs and the workflow header updated; the e-mail marks
+  stale and weekend reports.
+
 ### Changed (detectors)
 - Cup & Handle rejects V-shaped bases: the convex-quadratic roundness fit
   must now explain the cup lows at least as well as the best two-legged V fit

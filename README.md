@@ -32,7 +32,7 @@ flowchart LR
     H & I & J --> K[score ≥ 60<br/>CONFIRMED / WATCHLIST<br/>de-duplicate]
     K --> L[output/signals.json]
     K --> M[output/report.md]
-    L & M --> N[GitHub Actions commit<br/>→ scheduled e-mail / push]
+    L & M --> N[GitHub Actions commit<br/>→ 08:45 Israel e-mail<br/>Claude desktop task]
 ```
 
 The whole scanner is one module, [`scan.py`](scan.py): constants at the top, then data loading, indicators, the three detectors, and reporting. See the wiki for the full walk-through.

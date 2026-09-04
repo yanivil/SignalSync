@@ -95,13 +95,13 @@ Signals are sorted `CONFIRMED` first, then by score descending. `output/report.m
 ## 5. Scheduling
 
 ```
-GitHub Actions (02:00 UTC daily, main only)      Claude scheduled task (04:00 UTC)
-  checkout → pip install → pytest -q              fetch raw output/signals.json from GitHub
-  python scan.py -v (open internet)               check meta.run_date is today and last_bar is the last session
-  commit output/report.md + signals.json          e-mail / push the tables
+GitHub Actions (02:00 UTC daily, main only)      Claude desktop scheduled task (08:45 Israel time, daily)
+  checkout → pip install → pytest -q              fetch raw output/signals.json + report.md from GitHub
+  python scan.py -v (open internet)               fresh? run_date is today and last_bar is the last US session
+  commit output/report.md + signals.json          e-mail the Confirmed / Watchlist tables via Gmail
 ```
 
-* The scan runs on GitHub because both Claude environments sit behind a network policy that blocks market-data hosts; GitHub and PyPI are reachable from both. The repo must stay public (or the task needs a token) for `raw.githubusercontent.com` to serve the report.
+* The scan runs on GitHub because the Claude environments sit behind a network policy that blocks market-data hosts; GitHub and PyPI are reachable from both. The repo must stay public (or the task needs a token) for `raw.githubusercontent.com` to serve the report.
 * Exit code 2 (no data) is captured, still committed if the files changed, and then fails the job so the failure is visible.
-* Israel is UTC+3 until 25 Oct 2026, then UTC+2: the Claude task must move from 04:00 to 05:00 UTC after the clock change; the workflow can stay at 02:00.
+* Delivery is a scheduled task in the Claude desktop app on the user's Mac (`signalsync-daily-email`, 08:45 local time). Its cron runs in local time, so the Israel clock change needs no adjustment. It only fires while the desktop app is open; if the app is closed at 08:45 the run happens at the next launch. A stale report (older run, or `last_bar` not the previous US session) is sent with a "STALE" prefix rather than silently. Weekend runs re-send Friday's session marked "Weekend".
 * Dependabot keeps the pinned action SHAs and Python lower bounds current (weekly).

@@ -5,11 +5,11 @@
 # user's Mac are both behind a network policy that blocks every market-data
 # host, but GitHub runners have open internet and GitHub itself is reachable
 # from Claude.  So the runner does the data pull + scan and commits the report;
-# the Claude scheduled task (07:00 Israel) reads output/report.md from the
-# repo and e-mails it.
+# a scheduled task in the Claude desktop app (08:45 Israel time) reads
+# output/signals.json + report.md from the repo and e-mails the tables.
 #
-# Schedule: 02:00 UTC daily = ~2 hours before the Claude task at 04:00 UTC,
-# and ~6 hours after the US close.  Note: Yahoo's chart row for that session
+# Schedule: 02:00 UTC daily = ~3.5 hours before the 08:45 Israel e-mail, and
+# ~6 hours after the US close.  Note: Yahoo's chart row for that session
 # has no close until ~08:00 UTC (US pre-market open) -- observed 2026-09-04:
 # 500/502 symbols incomplete at 08:05 UTC, complete at 08:10 UTC -- so scan.py
 # fills the close from the chart's last-trade quote (fill_missing_close) and
