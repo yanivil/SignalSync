@@ -796,7 +796,8 @@ def detect_cup_and_handle(df: pd.DataFrame, ticker: str) -> List[Signal]:
       (``CUP_MAX_V_ADVANTAGE``): sharp V reversals are not bases.
     * Handle: 5-40 bars after ``B``, its low stays above the cup's mid-point and
       within 12 % of ``B``; handle depth <= half the cup depth.
-    * Trigger: close above the handle's highest high.  Rim B is a swing high,
+    * Trigger: close above the handle's highest high -- O'Neil's buy point is
+      the handle peak, not the cup rim.  Rim B is a swing high,
       so nothing within ``PIVOT_ORDER`` bars of it can exceed it, but a wick
       above B later in the handle raises the trigger above the rim (the setup
       then needs a close above that wick: conservative).  Stop: handle low
@@ -966,11 +967,13 @@ def detect_inverse_hs(df: pd.DataFrame, ticker: str) -> List[Signal]:
         ratio = (h - ls) / max(rs - h, 1)
         if ratio > IHS_TIME_SYM or ratio < 1 / IHS_TIME_SYM:
             continue
-        # Neckline anchors: highest high between LS-H and between H-RS.
-        n1 = ls + int(np.argmax(high[ls:h + 1]))
-        n2 = h + int(np.argmax(high[h:rs + 1]))
-        if n2 == n1:
-            continue
+        # Neckline anchors: highest high strictly *between* LS-H and H-RS.
+        # The anchor bars themselves are excluded: a long upper wick on a
+        # shoulder or head bar is not a rally peak.  Consecutive swing lows
+        # are always > PIVOT_ORDER bars apart, so both interiors are non-empty
+        # and n1 < h < n2 holds by construction.
+        n1 = ls + 1 + int(np.argmax(high[ls + 1:h]))
+        n2 = h + 1 + int(np.argmax(high[h + 1:rs]))
         slope = (high[n2] - high[n1]) / (n2 - n1)
         # Neckline tilt = its total rise/fall over the pattern width, as a
         # fraction of the head price.  Beyond IHS_MAX_NECK_SLOPE (15 %) it is a
