@@ -1543,7 +1543,9 @@ def render_markdown(signals: List[Signal], meta: Mapping[str, Any],
                  f"(0 = broke out on the last bar). Heuristic scan, not advice. "
                  f"Entry = trigger level, or the breakout close when it "
                  f"is above the trigger (closes more than {MAX_RUNAWAY:.0%} above the trigger are dropped "
-                 f"as chasing). Stop = structural level minus 0.25 ATR. Entry is the last close: a trade "
+                 f"as chasing). Stop = structural level minus 0.25 ATR, treated as an intraday touch in the "
+                 f"backtest; exiting on a close at or below it scored higher in replay. "
+                 f"Entry is the last close: a trade "
                  f"happens at the next open, so re-check that the open is still within {MAX_RUNAWAY:.0%} "
                  f"of the trigger and recompute risk from the fill. Verify on a chart before trading._")
     return "\n".join(lines)

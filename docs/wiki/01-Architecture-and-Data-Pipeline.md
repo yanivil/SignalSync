@@ -82,7 +82,7 @@ Yahoo publishes the newest daily bar per symbol at different times (volume first
 |---|---|
 | `status` | `CONFIRMED` (a close broke the trigger within the per-pattern age limit, today's close is still above it, and the breakout bar had the required volume) or `WATCHLIST` (pattern complete, close at or below the trigger but within 5 % of it, whether it never broke out or broke out and pulled back; or a breakout close without the required volume, marked "breakout without volume" in `notes`) |
 | `entry` | the trigger level, or the breakout close when it is above the trigger (closes more than 5 % above are dropped as chasing) |
-| `stop` | structural level minus 0.25 ATR(14) |
+| `stop` | structural level minus 0.25 ATR(14). A level, not an order type: the backtest scores it as an intraday touch; the year-long grid shows exiting on a close at or below it instead lifts mean R (tuned profile +0.30 → +0.35), so the choice of a resting order versus a close-based mental stop is the trader's |
 | `risk_pct` | `(entry − stop) / entry × 100`; setups above 15 % are rejected |
 | `target` | measured-move reference; `null` for a Wolfe whose lines do not converge ahead |
 | `score` | 0–100 quality score, minimum `min_score` |
