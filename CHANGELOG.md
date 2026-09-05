@@ -5,6 +5,31 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed (detectors: engine specification adopted as the "spec" rule profile)
+- Rules now follow the chart-pattern engine specification; the previous
+  rules are kept as `RULE_PROFILES["legacy"]` (`--profile legacy`, replayed
+  alongside by the backtest). Spec profile: cup 20-300 bars, rim within 15 %
+  of the cup depth, bottom in the middle 50 %, decline <= 50 % of the
+  preceding advance, R^2 >= 0.70, handle <= 25 bars and never longer than
+  the cup, SMA50 > SMA200 or a 20 % rise over 60 bars as the trend filter,
+  12 % risk cap, target measured from the right rim; H&S shoulders within
+  30 % of the head height, side durations within 40 %, SMA50 < SMA200 or a
+  one-head-height decline as the trend filter, target measured at the head
+  bar, no strong-down-trend veto; Wolfe sweet zone (point 5 below line 1-3
+  and above the line through 3 parallel to 2-4) and leg rhythm within 30 %.
+- Volume confirmation: a breakout close is CONFIRMED only with >= 1.4x
+  (cup) / 1.3x (H&S) the 20-bar average volume; otherwise the row stays on
+  the watchlist marked "breakout without volume".
+- Two spec statements are deliberately not followed and documented: the
+  Wolfe convergence inequality is written reversed in the spec, and the
+  spec's point ordering would put point 4 below point 1 (the code keeps
+  Investopedia's channel rule).
+- Fixtures: the textbook cup now follows a 40->100 advance (its 25-point
+  decline retraces 42 %), the H&S breakout bars carry volume, and Wolfe
+  point 5 sits inside the sweet zone.
+- Backtest: `--profile`, and the grid replays the other profile in full
+  instead of the veto-off pass (the veto is now a profile difference).
+
 ### Changed (detectors)
 - Wolfe targets more than `WW_MAX_TARGET_GAIN` (+100 %) above the entry are
   dropped; the replay found +590 % and +120 % projections.

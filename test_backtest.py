@@ -94,16 +94,17 @@ def test_breakout_level_target_applies_to_cups_only(mini_universe):
     assert bt.variant_target({**cup, "target": None}, "breakout") is None
 
 
-def test_veto_off_pass_runs_reversal_detectors_only_and_restores_constants(mini_universe):
+def test_profile_pass_replays_the_other_rule_set_and_restores_the_active_one(mini_universe):
     rows = bt.walk_forward(mini_universe, days=5, horizon=10)
-    before = (scan.TREND_STRONG_DOWN, scan.TREND_STRONG_DOWN_SMA50)
-    v = bt.veto_off_pass(mini_universe, 5, 10, rows)
-    assert (scan.TREND_STRONG_DOWN, scan.TREND_STRONG_DOWN_SMA50) == before      # overrides undone
-    assert v["veto_on"]["signals"] == sum(1 for r in rows if r["pattern"] != "Cup & Handle")
-    assert v["veto_off"]["signals"] >= v["veto_on"]["signals"]                    # never fewer
-    assert all(r["pattern"] != "Cup & Handle" for r in v["admitted_rows"])
-    md = bt.render(rows, bt.breakdown(rows), 5, 10, None, v)
-    assert "## Strong-down-trend veto" in md and "| veto on (baseline) |" in md
+    assert scan.ACTIVE_PROFILE == "spec"
+    other = bt.profile_pass(mini_universe, 5, 10, "legacy")
+    assert scan.ACTIVE_PROFILE == "spec" and scan.CUP_MAX_RETRACE == 0.5          # restored
+    assert other["profile"] == "legacy" and other["stats"]["overall"]["signals"] >= 1
+    legacy_targets = {r["ticker"]: r["target"] for r in other["rows"] if r["pattern"] == "Cup & Handle"}
+    spec_targets = {r["ticker"]: r["target"] for r in rows if r["pattern"] == "Cup & Handle"}
+    assert spec_targets and legacy_targets and spec_targets != legacy_targets      # left-rim vs right-rim measure
+    md = bt.render(rows, bt.breakdown(rows), 5, 10, None, other)
+    assert "## Rule profile comparison: spec (above) vs legacy (below)" in md and "| legacy: all |" in md
 
 
 def test_breakdown_and_render():

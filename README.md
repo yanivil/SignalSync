@@ -12,11 +12,11 @@ It is a heuristic screener, not trading advice. Every hit should be checked on a
 
 | Pattern | Type | Confirmation trigger | Stop-loss | Reference target |
 |---|---|---|---|---|
-| Cup & Handle | continuation | daily close above the handle high | handle low − 0.25 ATR | entry + cup depth |
-| Inverse Head & Shoulders | reversal | daily close above the neckline | right-shoulder low − 0.25 ATR | entry + (neckline − head) |
+| Cup & Handle | continuation | daily close above the handle high on ≥ 1.4× average volume | handle low − 0.25 ATR | entry + (right rim − cup bottom) |
+| Inverse Head & Shoulders | reversal | daily close above the neckline on ≥ 1.3× average volume | right-shoulder low − 0.25 ATR | entry + (neckline at the head − head) |
 | Bullish Wolfe Wave | reversal | daily close back above the 1-3 line after point 5 | point-5 low − 0.25 ATR | line 1-4 at the ETA |
 
-Four rules shape every detector: **no forced patterns** (strict geometry plus a 0–100 quality score, minimum 60), **respect the wider trend** (SMA50/SMA200 gate), **enter only after confirmation** (close-based triggers, `CONFIRMED` vs `WATCHLIST`, no chasing beyond 5 %), and **always define risk** (setups with a stop more than 15 % away are rejected).
+Four rules shape every detector: **no forced patterns** (strict geometry plus a 0–100 quality score, minimum 60), **respect the wider trend** (SMA50/SMA200 filters), **enter only after confirmation** (close-based triggers with volume, `CONFIRMED` vs `WATCHLIST`, no chasing beyond 5 %), and **always define risk** (setups with a stop more than 12 % away for cups, 15 % for the others, are rejected). The rules follow the engine specification adopted on 2026-09-05; the previous rule set is kept as the `legacy` profile (`--profile legacy`) so the two can be replayed side by side.
 
 ## Pipeline
 
@@ -72,6 +72,7 @@ python -m pytest -q                         # whole test suite, offline, about t
 | `--period` | `2y` | yfinance history period (about 500 daily bars) |
 | `--min-score` | `60` | minimum quality score to report |
 | `--max-age` | `3` | max bars since the confirming close (H&S and Wolfe get +5 for pivot lag) |
+| `--profile` | `spec` | rule profile: `spec` (current) or `legacy` (rules until 2026-09-05) |
 | `--out-dir` | `output` | where `signals.json` and `report.md` are written |
 
 Exit codes: `0` ok, `2` no price data at all (network problem).
@@ -143,6 +144,7 @@ docs/wiki/                           documentation, mirrored into the GitHub wik
 * Pattern recognition is heuristic. Thresholds follow common practice (O'Neil, Bulkowski, Wolfe) but there is no industry standard; expect some false positives and misses.
 * Swing points are only recognised 5 bars after they print, so Inverse H&S and Wolfe confirmations can be reported up to 5 bars late.
 * Cup bases must be explained at least as well by a parabola as by a two-legged V; the rule is calibrated on reference shapes, not on market data (see the pattern catalog).
+* The spec profile requires breakout volume (1.4× for cups, 1.3× for H&S) and caps a cup at half its preceding advance, so it confirms far fewer setups than the legacy rules; breakouts without volume appear on the watchlist marked as such.
 * Signal quality is measured by replay, not proven live: `tools/backtest.py` (the `backtest` workflow) runs the scanner walk-forward over past sessions on today's constituents (survivorship bias), and `tools/evaluate_signals.py` scores the signals the nightly job actually committed.
 * Yahoo Finance data is unofficial. Symbols with fewer than 60 bars are skipped and counted in `meta.errors`.
 * There is no persistent price cache: every run re-downloads two years of history for the whole universe.

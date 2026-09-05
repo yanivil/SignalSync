@@ -69,7 +69,7 @@ Yahoo publishes the newest daily bar per symbol at different times (volume first
           "last_bar": "2026-09-03", "last_bar_symbols": 502, "lagging_symbols": 0,
           "skipped_bar": null, "skipped_bar_complete": 0, "skipped_bar_partial": 0,
           "last_bar_histogram": {"2026-09-03": 502}, "filled_close_symbols": 0,
-          "min_score": 60, "max_breakout_age": 3,
+          "profile": "spec", "min_score": 60, "max_breakout_age": 3,
           "max_breakout_age_by_pattern": {"Cup & Handle": 3, "Inverse Head & Shoulders": 8, "Bullish Wolfe Wave": 8}},
  "signals": [{"ticker": "CL", "pattern": "Bullish Wolfe Wave", "status": "CONFIRMED",
               "entry": 90.09, "stop": 88.67, "risk_pct": 1.58, "target": 107.98, "score": 84,
@@ -80,7 +80,7 @@ Yahoo publishes the newest daily bar per symbol at different times (volume first
 
 | Field | Meaning |
 |---|---|
-| `status` | `CONFIRMED` (a close broke the trigger within the per-pattern age limit and today's close is still above it) or `WATCHLIST` (pattern complete, close at or below the trigger but within 5 % of it, whether it never broke out or broke out and pulled back) |
+| `status` | `CONFIRMED` (a close broke the trigger within the per-pattern age limit, today's close is still above it, and the breakout bar had the required volume) or `WATCHLIST` (pattern complete, close at or below the trigger but within 5 % of it, whether it never broke out or broke out and pulled back; or a breakout close without the required volume, marked "breakout without volume" in `notes`) |
 | `entry` | the trigger level, or the breakout close when it is above the trigger (closes more than 5 % above are dropped as chasing) |
 | `stop` | structural level minus 0.25 ATR(14) |
 | `risk_pct` | `(entry − stop) / entry × 100`; setups above 15 % are rejected |
@@ -88,7 +88,7 @@ Yahoo publishes the newest daily bar per symbol at different times (volume first
 | `score` | 0–100 quality score, minimum `min_score` |
 | `bars_since_break` | 0 = the confirming close is the last bar; `null` for watchlist rows |
 | `volume_ratio` | breakout-day volume / trailing 50-bar average; `null` when unavailable |
-| `notes` | anchor dates and levels used by the detector (parseable, see tests) |
+| `notes` | anchor dates and levels used by the detector (parseable, see tests); "breakout without volume (x.xx×)" when a breakout was watch-listed for lack of volume |
 
 Signals are sorted `CONFIRMED` first, then by score descending. `output/report.md` renders the same rows as two Markdown tables (Ticker, Pattern, Entry, Stop, Risk %, Target, Score, Age, Vol×, Trend, Details) with a header stating the scanned bar, effective age limits, skipped/lagging counts and data errors. **Age** is `bars_since_break / limit`, e.g. `1/3` for a cup that broke out yesterday and will be dropped after two more sessions; `-` for watchlist rows.
 
