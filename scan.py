@@ -1260,14 +1260,20 @@ def render_markdown(signals: List[Signal], meta: Mapping[str, Any]) -> str:
             lines.append("_none_")
             lines.append("")
             continue
-        lines.append("| Ticker | Pattern | Entry | Stop | Risk % | Target | Score | Vol× | Trend | Details |")
-        lines.append("|---|---|---|---|---|---|---|---|---|---|")
+        lines.append("| Ticker | Pattern | Entry | Stop | Risk % | Target | Score | Age | Vol× | Trend | Details |")
+        lines.append("|---|---|---|---|---|---|---|---|---|---|---|")
         for s in rows:
+            # Age = bars since the breakout close / the pattern's limit, so a reader
+            # can see whether a confirmed row is fresh (0/3) or about to expire (3/3).
+            age = (f"{s.bars_since_break}/{max_breakout_age(s.pattern)}"
+                   if s.bars_since_break is not None else "-")
             lines.append(f"| {s.ticker} | {s.pattern} | {s.entry} | {s.stop} | {s.risk_pct} | "
-                         f"{s.target if s.target else '-'} | {s.score} | "
+                         f"{s.target if s.target else '-'} | {s.score} | {age} | "
                          f"{s.volume_ratio if s.volume_ratio else '-'} | {s.trend} | {s.notes} |")
         lines.append("")
-    lines.append(f"_Heuristic scan, not advice. Entry = trigger level, or the breakout close when it "
+    lines.append(f"_Age = bars since the breakout close / the limit after which the row is dropped "
+                 f"(0 = broke out on the last bar). Heuristic scan, not advice. "
+                 f"Entry = trigger level, or the breakout close when it "
                  f"is above the trigger (closes more than {MAX_RUNAWAY:.0%} above the trigger are dropped "
                  f"as chasing). Stop = structural level minus 0.25 ATR. Entry is the last close: a trade "
                  f"happens at the next open, so re-check that the open is still within {MAX_RUNAWAY:.0%} "

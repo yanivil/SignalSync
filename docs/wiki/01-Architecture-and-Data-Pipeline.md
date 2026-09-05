@@ -90,7 +90,7 @@ Yahoo publishes the newest daily bar per symbol at different times (volume first
 | `volume_ratio` | breakout-day volume / trailing 50-bar average; `null` when unavailable |
 | `notes` | anchor dates and levels used by the detector (parseable, see tests) |
 
-Signals are sorted `CONFIRMED` first, then by score descending. `output/report.md` renders the same rows as two Markdown tables with a header stating the scanned bar, effective age limits, skipped/lagging counts and data errors.
+Signals are sorted `CONFIRMED` first, then by score descending. `output/report.md` renders the same rows as two Markdown tables (Ticker, Pattern, Entry, Stop, Risk %, Target, Score, Age, Vol×, Trend, Details) with a header stating the scanned bar, effective age limits, skipped/lagging counts and data errors. **Age** is `bars_since_break / limit`, e.g. `1/3` for a cup that broke out yesterday and will be dropped after two more sessions; `-` for watchlist rows.
 
 ## 5. Scheduling
 

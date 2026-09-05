@@ -5,6 +5,11 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- `Age` column in the report tables: bars since the breakout close over the
+  pattern's limit (`1/3`), so a confirmed row shows whether it is fresh or
+  about to expire; `-` for watchlist rows. Footer explains it.
+
 ### Fixed
 - `daily-scan` rebases on `main` before pushing, so a PR merged while the
   scan runs no longer fails the run with a non-fast-forward push.
