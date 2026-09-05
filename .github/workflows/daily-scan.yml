@@ -55,7 +55,9 @@ jobs:
         # commit step to record that, so capture the code instead of failing.
         run: |
           set +e
-          python scan.py --out-dir output -v
+          # --profile legacy until the spec rules are tuned (2026-09-05 replay: spec confirmed
+          # 22 signals in a year vs 354; see docs/wiki/03-Configuration-and-Tuning.md#rule-profiles)
+          python scan.py --out-dir output -v --profile legacy
           echo "scan_exit=$?" >> "$GITHUB_ENV"
 
       - name: Commit report

@@ -72,7 +72,7 @@ python -m pytest -q                         # whole test suite, offline, about t
 | `--period` | `2y` | yfinance history period (about 500 daily bars) |
 | `--min-score` | `60` | minimum quality score to report |
 | `--max-age` | `3` | max bars since the confirming close (H&S and Wolfe get +5 for pivot lag) |
-| `--profile` | `spec` | rule profile: `spec` (current) or `legacy` (rules until 2026-09-05) |
+| `--profile` | `spec` | rule profile: `spec` (the specification), `tuned` (spec with four rules relaxed on replay evidence) or `legacy` (rules until 2026-09-05). The nightly job currently runs `legacy`; see the tuning page. |
 | `--out-dir` | `output` | where `signals.json` and `report.md` are written |
 
 Exit codes: `0` ok, `2` no price data at all (network problem).

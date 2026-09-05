@@ -5,6 +5,16 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed (operations)
+- The nightly scan runs `--profile legacy` until a profile is chosen on
+  replay evidence: over a year the spec profile confirmed 22 signals against
+  354, and a rule ablation showed four spec rules (volume confirmation, IHS
+  side symmetry, Wolfe leg rhythm, cup rollback) removing signals that were
+  better than the ones kept.
+- New `tuned` rule profile: the spec with those four rules relaxed (volume
+  as a bonus, side symmetry off, rhythm +-60 %, rollback 61.8 %).
+- Backtest `--ablate`: leave-one-rule-out over the spec profile.
+
 ### Changed (detectors: engine specification adopted as the "spec" rule profile)
 - Rules now follow the chart-pattern engine specification; the previous
   rules are kept as `RULE_PROFILES["legacy"]` (`--profile legacy`, replayed
