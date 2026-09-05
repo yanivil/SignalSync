@@ -15,6 +15,7 @@ import json
 import dataclasses
 import urllib.error
 
+import pandas as pd
 import pytest
 
 import scan
@@ -163,15 +164,80 @@ def test_end_to_end_mini_universe(tmp_path, universe_csv, fake_yfinance, mini_un
     rows = [ln for ln in report.splitlines() if ln.startswith("| ") and not ln.startswith("| Ticker")]
     assert len(rows) == len(signals)
     for ln in rows:
-        assert ln.count("|") == 12, ln                       # 11 columns
+        assert ln.count("|") == 13, ln                       # 12 columns
     by_row = {ln.split(" | ")[0].lstrip("| "): ln for ln in rows}
     for s in signals:                                        # Age column: bars/limit for confirmed, '-' otherwise
-        age_cell = by_row[s["ticker"]].split(" | ")[7]
-        assert age_cell == (f"{s['bars_since_break']}/{scan.max_breakout_age(s['pattern'])}"
+        cells = by_row[s["ticker"]].split(" | ")
+        assert cells[8] == (f"{s['bars_since_break']}/{scan.max_breakout_age(s['pattern'])}"
                             if s["status"] == "CONFIRMED" else "-"), by_row[s["ticker"]]
+        assert float(cells[3]) == s["max_buy"] and s["max_buy"] > s["entry"] * 0.99   # Max buy = trigger + 5 %
+    assert "## Closed since the last report" in report and data["closed"] == []   # first run: nothing to close
     for s in signals:
-        assert f"| {s['ticker']} | {s['pattern']} | {s['entry']} | {s['stop']} |" in report
+        assert f"| {s['ticker']} | {s['pattern']} | {s['entry']} | {s['max_buy']} | {s['stop']} |" in report
     assert f"{scan.MAX_RUNAWAY:.0%} above the trigger" in report   # footer states the real rule
+
+
+def _frame(*rows, start="2026-03-02"):
+    idx = pd.bdate_range(start, periods=len(rows))
+    return pd.DataFrame({"Open": [r[0] for r in rows], "High": [r[1] for r in rows],
+                         "Low": [r[2] for r in rows], "Close": [r[3] for r in rows]}, index=idx)
+
+
+def test_close_out_classifies_every_vanished_setup():
+    prev = lambda t, status, entry=100.0, stop=95.0, target=110.0, age=1: {  # noqa: E731
+        "ticker": t, "pattern": "Cup & Handle", "status": status, "entry": entry, "stop": stop,
+        "target": target, "last_date": "2026-02-27", "bars_since_break": age if status == "CONFIRMED" else None}
+    previous = [prev("HIT", "CONFIRMED"), prev("STOP", "CONFIRMED"), prev("BOTH", "CONFIRMED"),
+                prev("OLD", "CONFIRMED", age=2), prev("FADE", "WATCHLIST"), prev("GONE", "WATCHLIST"),
+                prev("STILL", "CONFIRMED"), prev("NODATA", "WATCHLIST"), prev("NOBARS", "WATCHLIST")]
+    data = {
+        "HIT": _frame((101, 104, 100, 103), (104, 111, 103, 108)),          # high reaches 110 on bar 2
+        "STOP": _frame((100, 101, 96, 97), (97, 98, 93, 94.5)),             # close 94.5 <= 95 on bar 2
+        "BOTH": _frame((100, 112, 90, 94)),                                 # touches both: stop wins
+        "OLD": _frame((100, 102, 99, 101), (101, 103, 100, 102)),           # age 2 + 2 bars = 4 > limit 3
+        "FADE": _frame((100, 101, 95.5, 96), (96, 97, 95.2, 94.0)),        # ends at or below the stop: FAILED
+        "GONE": _frame((100, 101, 98, 99)),                                 # near the entry, no event
+        "STILL": _frame((100, 101, 99, 100)),
+        "NOBARS": _frame((100, 101, 99, 100), start="2026-02-27"),          # no bars after last_date
+    }
+    current = [scan.Signal("STILL", "Cup & Handle", "CONFIRMED", 100, 95, 5, 110, 70, 100, "2026-03-03",
+                           2, None, "", "")]
+    closed = {c["ticker"]: c for c in scan.close_out(previous, current, data)}
+    assert "STILL" not in closed
+    assert closed["HIT"]["outcome"] == "TARGET_REACHED" and "2026-03-03" in closed["HIT"]["detail"]
+    assert closed["STOP"]["outcome"] == "FAILED" and "94.50" in closed["STOP"]["detail"]
+    assert closed["BOTH"]["outcome"] == "FAILED"                              # same bar: conservative
+    assert closed["OLD"]["outcome"] == "EXPIRED" and "4 bars old" in closed["OLD"]["detail"]
+    assert closed["FADE"]["outcome"] == "FAILED"                              # 94.0 <= stop 95: stop before fade
+    assert closed["GONE"]["outcome"] == "DROPPED" and closed["GONE"]["detail"] == "pattern no longer qualifies"
+    assert closed["NODATA"]["outcome"] == "DROPPED" and closed["NODATA"]["detail"] == "no price data"
+    assert closed["NOBARS"]["outcome"] == "DROPPED" and "no bars" in closed["NOBARS"]["detail"]
+    # A genuine fade: close 6 % below the entry but above the stop.
+    faded = scan.close_out([prev("F2", "WATCHLIST", entry=100.0, stop=90.0)], [], {"F2": _frame((100, 101, 94, 94))})
+    assert faded[0]["outcome"] == "FADED" and "5%" in faded[0]["detail"]
+
+
+def test_second_run_reports_what_happened_to_yesterdays_rows(tmp_path, universe_csv, fake_yfinance, mini_universe):
+    fake_yfinance(mini_universe)
+    rc, first, _ = _run(tmp_path, universe_csv)
+    assert rc == 0 and first["closed"] == []
+    cup_target = next(s["target"] for s in first["signals"] if s["ticker"] == "CUP")
+    # Three more sessions for everyone; CUP spikes through its target on the first of them.
+    later = {}
+    for sym, df in mini_universe.items():
+        last = df.iloc[-1]
+        extra = pd.DataFrame({c: [last[c]] * 3 for c in df.columns},
+                             index=pd.bdate_range(df.index[-1], periods=4)[1:])
+        if sym == "CUP":
+            extra.loc[extra.index[0], "High"] = cup_target * 1.01
+        later[sym] = pd.concat([df, extra])
+    fake_yfinance(later)
+    rc, second, report = _run(tmp_path, universe_csv)
+    assert rc == 0 and second["meta"]["previous_run"] == first["meta"]["run_date"]
+    closed = {c["ticker"]: c for c in second["closed"]}
+    assert "CUP" in closed and closed["CUP"]["outcome"] == "TARGET_REACHED" and closed["CUP"]["was"] == "CONFIRMED"
+    assert "## Closed since the last report" in report
+    assert "| CUP | Cup & Handle | CONFIRMED | TARGET_REACHED | " in report
 
 
 def test_end_to_end_min_score_filters_and_is_reported(tmp_path, universe_csv, fake_yfinance, mini_universe):

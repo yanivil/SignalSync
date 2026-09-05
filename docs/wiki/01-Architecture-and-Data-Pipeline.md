@@ -89,8 +89,19 @@ Yahoo publishes the newest daily bar per symbol at different times (volume first
 | `bars_since_break` | 0 = the confirming close is the last bar; `null` for watchlist rows |
 | `volume_ratio` | breakout-day volume / trailing 50-bar average; `null` when unavailable |
 | `notes` | anchor dates and levels used by the detector (parseable, see tests); "breakout without volume (x.xx×)" when a breakout was watch-listed for lack of volume |
+| `max_buy` | trigger × 1.05: if the next open is above it the setup no longer qualifies (the same 5 % runaway rule the scanner applies to closes) |
 
-Signals are sorted `CONFIRMED` first, then by score descending. `output/report.md` renders the same rows as two Markdown tables (Ticker, Pattern, Entry, Stop, Risk %, Target, Score, Age, Vol×, Trend, Details) with a header stating the scanned bar, effective age limits, skipped/lagging counts and data errors. **Age** is `bars_since_break / limit`, e.g. `1/3` for a cup that broke out yesterday and will be dropped after two more sessions; `-` for watchlist rows.
+Signals are sorted `CONFIRMED` first, then by score descending. `output/report.md` renders the same rows as two Markdown tables (Ticker, Pattern, Entry, Max buy, Stop, Risk %, Target, Score, Age, Vol×, Trend, Details) with a header stating the scanned bar, effective age limits, skipped/lagging counts and data errors. **Age** is `bars_since_break / limit`, e.g. `1/3` for a cup that broke out yesterday and will be dropped after two more sessions; `-` for watchlist rows.
+
+**Closed since the last report.** A stateless scan only knows what qualifies today, so each run also reads the previous committed `signals.json` (the nightly job has it in the checkout) and explains every row that disappeared, using the bars since that row's `last_date`. The list is `closed` in `signals.json` (ticker, pattern, was, since, entry, stop, target, outcome, detail) and a third table in the report; `meta.previous_run` names the report it was compared with.
+
+| Outcome | Rule |
+|---|---|
+| `TARGET_REACHED` | a high at or above the target |
+| `FAILED` | a close at or below the stop (the spec's invalidation; a bar touching both levels counts as FAILED) |
+| `EXPIRED` | a confirmed breakout aged past `max_breakout_age` |
+| `FADED` | the close fell more than `WATCH_PROXIMITY` (5 %) below the entry |
+| `DROPPED` | none of the above: the pattern itself no longer qualifies, or no price data |
 
 ## 5. Scheduling
 

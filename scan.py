@@ -259,6 +259,7 @@ class Signal:
     volume_ratio: Optional[float]
     trend: str
     notes: str = ""
+    max_buy: Optional[float] = None      # trigger x (1 + MAX_RUNAWAY): above this at the open, do not chase
 
 
 # --------------------------------------------------------------------------- #
@@ -1061,7 +1062,8 @@ def detect_cup_and_handle(df: pd.DataFrame, ticker: str) -> List[Signal]:
                      f"trigger {trigger:.2f}{volume_note}")
             signals.append(Signal(ticker, "Cup & Handle", status, round(entry, 2), round(stop, 2),
                                   round(risk, 2), round(target, 2), score, round(float(close[-1]), 2),
-                                  str(dates[-1].date()), age, vr, desc, notes))
+                                  str(dates[-1].date()), age, vr, desc, notes,
+                                  max_buy=round(float(trigger) * (1 + MAX_RUNAWAY), 2)))
     return _dedupe(signals)
 
 
@@ -1203,7 +1205,7 @@ def detect_inverse_hs(df: pd.DataFrame, ticker: str) -> List[Signal]:
         signals.append(Signal(ticker, "Inverse Head & Shoulders", status, round(entry, 2),
                               round(stop, 2), round(risk, 2), round(float(entry + height), 2),
                               score, round(float(close[-1]), 2), str(dates[-1].date()), age, vr,
-                              desc, notes))
+                              desc, notes, max_buy=round(float(trigger) * (1 + MAX_RUNAWAY), 2)))
     return _dedupe(signals)
 
 
@@ -1361,7 +1363,8 @@ def detect_bullish_wolfe(df: pd.DataFrame, ticker: str) -> List[Signal]:
                  + volume_note)
         signals.append(Signal(ticker, "Bullish Wolfe Wave", status, round(entry, 2), round(stop, 2),
                               round(risk, 2), round(target, 2) if target else None, score,
-                              round(float(close[-1]), 2), str(dates[-1].date()), age, vr, desc, notes))
+                              round(float(close[-1]), 2), str(dates[-1].date()), age, vr, desc, notes,
+                                  max_buy=round(float(trigger) * (1 + MAX_RUNAWAY), 2)))
     return _dedupe(signals)
 
 
@@ -1403,7 +1406,72 @@ def scan_symbol(sym: str, df: pd.DataFrame, detectors: Optional[Sequence[Callabl
     return out
 
 
-def render_markdown(signals: List[Signal], meta: Mapping[str, Any]) -> str:
+def close_out(previous: Sequence[Mapping[str, Any]], current: Sequence[Signal],
+              data: Mapping[str, pd.DataFrame]) -> List[Dict[str, Any]]:
+    """Explain every setup listed in the previous report that is absent from this one.
+
+    The spec's lifecycle has ``FAILED`` and ``TARGET_REACHED`` states; a stateless
+    daily scan only knows what qualifies *today*, so this compares the previous
+    committed ``signals.json`` with today's signals and classifies each row that
+    disappeared using the bars since its ``last_date``:
+
+    * ``FAILED``          -- a close at or below the stop (the spec's invalidation)
+    * ``TARGET_REACHED``  -- a high at or above the target
+    * ``EXPIRED``         -- a confirmed breakout aged past ``max_breakout_age``
+    * ``FADED``           -- the close fell more than ``WATCH_PROXIMITY`` below the entry
+    * ``DROPPED``         -- none of the above: the pattern itself no longer qualifies
+                             (or there is no price data)
+
+    A bar that touches both levels counts as ``FAILED`` (conservative, like the
+    backtest).  Presence is keyed on ``(ticker, pattern)`` so a structure that is
+    re-anchored a bar later is not reported as closed.
+
+    :param previous: ``signals`` list from the previous ``signals.json``.
+    :param current: Today's signals.
+    :param data: ``{symbol: OHLCV frame}`` through today.
+    :returns: One dict per closed setup: ticker, pattern, was, since, entry, stop,
+        target, outcome, detail.
+
+    Complexity: O(previous * bars since).
+    """
+    still = {(s.ticker, s.pattern) for s in current}
+    out: List[Dict[str, Any]] = []
+    for p in previous:
+        if (p["ticker"], p["pattern"]) in still:
+            continue
+        row: Dict[str, Any] = {"ticker": p["ticker"], "pattern": p["pattern"], "was": p["status"],
+                               "since": p["last_date"], "entry": p["entry"], "stop": p["stop"],
+                               "target": p.get("target"), "outcome": "DROPPED", "detail": ""}
+        df = data.get(p["ticker"])
+        bars = df[df.index > pd.Timestamp(p["last_date"])] if df is not None else None
+        if bars is None or bars.empty:
+            row["detail"] = "no bars since the last report" if df is not None else "no price data"
+            out.append(row)
+            continue
+        for d, hi, cl in zip(bars.index, bars["High"], bars["Close"]):
+            if cl <= p["stop"]:
+                row.update(outcome="FAILED", detail=f"close {cl:.2f} on {d.date()} at or below stop {p['stop']}")
+                break
+            if p.get("target") is not None and hi >= p["target"]:
+                row.update(outcome="TARGET_REACHED", detail=f"high {hi:.2f} on {d.date()} reached target {p['target']}")
+                break
+        else:
+            age = p.get("bars_since_break")
+            limit = max_breakout_age(p["pattern"])
+            last_close = float(bars["Close"].iloc[-1])
+            if p["status"] == "CONFIRMED" and age is not None and age + len(bars) > limit:
+                row.update(outcome="EXPIRED", detail=f"breakout {age + len(bars)} bars old, limit {limit}")
+            elif last_close < p["entry"] * (1 - WATCH_PROXIMITY):
+                row.update(outcome="FADED",
+                           detail=f"close {last_close:.2f} more than {WATCH_PROXIMITY:.0%} below entry {p['entry']}")
+            else:
+                row["detail"] = "pattern no longer qualifies"
+        out.append(row)
+    return out
+
+
+def render_markdown(signals: List[Signal], meta: Mapping[str, Any],
+                    closed: Optional[Sequence[Mapping[str, Any]]] = None) -> str:
     """Render the Markdown report.
 
     :param signals: All signals.
@@ -1439,18 +1507,35 @@ def render_markdown(signals: List[Signal], meta: Mapping[str, Any]) -> str:
             lines.append("_none_")
             lines.append("")
             continue
-        lines.append("| Ticker | Pattern | Entry | Stop | Risk % | Target | Score | Age | Vol× | Trend | Details |")
-        lines.append("|---|---|---|---|---|---|---|---|---|---|---|")
+        lines.append("| Ticker | Pattern | Entry | Max buy | Stop | Risk % | Target | Score | Age | Vol× | "
+                     "Trend | Details |")
+        lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|")
         for s in rows:
             # Age = bars since the breakout close / the pattern's limit, so a reader
             # can see whether a confirmed row is fresh (0/3) or about to expire (3/3).
             age = (f"{s.bars_since_break}/{max_breakout_age(s.pattern)}"
                    if s.bars_since_break is not None else "-")
-            lines.append(f"| {s.ticker} | {s.pattern} | {s.entry} | {s.stop} | {s.risk_pct} | "
-                         f"{s.target if s.target else '-'} | {s.score} | {age} | "
+            lines.append(f"| {s.ticker} | {s.pattern} | {s.entry} | {s.max_buy if s.max_buy else '-'} | {s.stop} | "
+                         f"{s.risk_pct} | {s.target if s.target else '-'} | {s.score} | {age} | "
                          f"{s.volume_ratio if s.volume_ratio else '-'} | {s.trend} | {s.notes} |")
         lines.append("")
-    lines.append(f"_Age = bars since the breakout close / the limit after which the row is dropped "
+    if closed is not None:
+        since = meta.get("previous_run") or "the last report"
+        lines.append(f"## Closed since the last report ({since}): {len(closed)}")
+        lines.append("")
+        if not closed:
+            lines.append("_none_")
+            lines.append("")
+        else:
+            lines.append("| Ticker | Pattern | Was | Outcome | Entry | Stop | Target | Detail |")
+            lines.append("|---|---|---|---|---|---|---|---|")
+            order = {"TARGET_REACHED": 0, "FAILED": 1, "EXPIRED": 2, "FADED": 3, "DROPPED": 4}
+            for c in sorted(closed, key=lambda c: (order[c["outcome"]], c["ticker"])):
+                lines.append(f"| {c['ticker']} | {c['pattern']} | {c['was']} | {c['outcome']} | {c['entry']} | "
+                             f"{c['stop']} | {c['target'] if c['target'] is not None else '-'} | {c['detail']} |")
+            lines.append("")
+    lines.append(f"_Max buy = trigger + {MAX_RUNAWAY:.0%}: if the open is above it the setup no longer qualifies. "
+                 f"Age = bars since the breakout close / the limit after which the row is dropped "
                  f"(0 = broke out on the last bar). Heuristic scan, not advice. "
                  f"Entry = trigger level, or the breakout close when it "
                  f"is above the trigger (closes more than {MAX_RUNAWAY:.0%} above the trigger are dropped "
@@ -1515,9 +1600,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "profile": ACTIVE_PROFILE, "min_score": MIN_SCORE, "max_breakout_age": MAX_BREAKOUT_AGE,
             "max_breakout_age_by_pattern": {p: max_breakout_age(p) for p in BREAKOUT_AGE_LAG}}
     os.makedirs(args.out_dir, exist_ok=True)
-    with open(os.path.join(args.out_dir, "signals.json"), "w", encoding="utf-8") as fh:
-        json.dump({"meta": meta, "signals": [asdict(s) for s in signals]}, fh, indent=2)
-    md = render_markdown(signals, meta)
+    out_path = os.path.join(args.out_dir, "signals.json")
+    previous: List[Dict[str, Any]] = []
+    if os.path.exists(out_path):
+        try:
+            with open(out_path, encoding="utf-8") as fh:
+                prev_doc = json.load(fh)
+            previous = list(prev_doc.get("signals", []))
+            meta["previous_run"] = prev_doc.get("meta", {}).get("run_date")
+        except (OSError, ValueError) as exc:  # a corrupt previous file must not stop today's report
+            log.warning("previous signals.json unreadable, no close-out: %s", exc)
+    closed = close_out(previous, signals, data)
+    log.info("closed since the last report: %d (%s)", len(closed),
+             ", ".join(f"{c['ticker']} {c['outcome']}" for c in closed) or "none")
+    with open(out_path, "w", encoding="utf-8") as fh:
+        json.dump({"meta": meta, "signals": [asdict(s) for s in signals], "closed": closed}, fh, indent=2)
+    md = render_markdown(signals, meta, closed)
     with open(os.path.join(args.out_dir, "report.md"), "w", encoding="utf-8") as fh:
         fh.write(md)
     print(md)
