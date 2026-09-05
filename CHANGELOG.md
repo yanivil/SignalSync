@@ -5,6 +5,12 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- `tools/backtest.py` + `backtest` workflow: walk-forward replay of the
+  scanner over the last N sessions (first-seen confirmed signals, next-open
+  fills, gap filter, outcomes and R multiples overall / per pattern / per
+  score bucket). `test_backtest.py` pins no-look-ahead and the fill rules.
+
 ### Changed
 - `WATCH_PROXIMITY` 3 % → 5 %: a setup stays on the watchlist while its close
   is within 5 % below the trigger. At 3 %, ten of the 17 watchlist rows of
