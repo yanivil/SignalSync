@@ -127,6 +127,7 @@ CUP_REQUIRE_CLOSE_ABOVE_SMA200 = False   # legacy gate: close above the SMA200
 CUP_MIN_ROUNDNESS = 0.70                 # R^2 of a U-shaped (convex) quadratic fit to cup lows (spec 0.70)
 CUP_MAX_V_ADVANTAGE = 0.0                # best V fit may beat the U fit's R^2 by at most this (0 = U must win)
 CUP_TARGET_BASE = "right_rim"            # measured move from the bottom to: right_rim (spec) | left_rim | trigger
+CUP_TRIGGER = "handle_high"              # breakout level: handle_high (O'Neil's buy point) | rim_b (clear the rim too)
 
 # Inverse Head & Shoulders
 IHS_MIN_LEN, IHS_MAX_LEN = 20, 200       # bars from left shoulder to right shoulder
@@ -1015,7 +1016,10 @@ def detect_cup_and_handle(df: pd.DataFrame, ticker: str) -> List[Signal]:
                 continue  # handle dipped into lower half of the cup
             if handle_depth > HANDLE_MAX_FRACTION_OF_CUP * depth:
                 continue
-            status, age, trigger = evaluate_breakout(close, lambda _i: float(handle_high),
+            # Trigger: the handle peak (O'Neil's buy point) or, if configured, the
+            # higher of the handle peak and rim B so the close must clear the rim too.
+            level = float(max(handle_high, rim_b)) if CUP_TRIGGER == "rim_b" else float(handle_high)
+            status, age, trigger = evaluate_breakout(close, lambda _i: level,
                                                      start=handle_end + 1, pattern="Cup & Handle")
             if status == "STALE":
                 continue

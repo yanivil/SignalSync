@@ -6,6 +6,9 @@ All notable changes to this project are documented here. Format follows
 ## [Unreleased]
 
 ### Added
+- `CUP_TRIGGER` (`handle_high`, default | `rim_b`): optional rim-clearing
+  cup entry, for replay comparison. Backtest `--set KEY=VALUE` (workflow
+  input `overrides`) overrides any scan constant for one replay.
 - `Max buy` column and `max_buy` field: trigger + 5 %, the open above which
   a setup no longer qualifies.
 - "Closed since the last report": every row of the previous committed

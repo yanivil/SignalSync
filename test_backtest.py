@@ -7,6 +7,7 @@ import os
 import sys
 
 import pandas as pd
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "tools"))
 import backtest as bt  # noqa: E402
@@ -103,6 +104,17 @@ def test_ablation_relaxes_one_rule_at_a_time_and_restores_it(mini_universe):
     assert all(r["signals"] >= 0 and r["delta"] == r["signals"] - table[0]["signals"] for r in table)
     md = bt.render_ablation(table, 3, 5)
     assert "# Rule ablation" in md and "| spec (all rules) | - |" in md
+
+
+def test_apply_override_parses_literals_and_rejects_unknown_keys(monkeypatch):
+    monkeypatch.setattr(scan, "WW_TIME_SYM_TOL", scan.WW_TIME_SYM_TOL)
+    monkeypatch.setattr(scan, "CUP_TRIGGER", scan.CUP_TRIGGER)
+    assert bt.apply_override("WW_TIME_SYM_TOL=0.45") == ("WW_TIME_SYM_TOL", 0.45) and scan.WW_TIME_SYM_TOL == 0.45
+    assert bt.apply_override("CUP_TRIGGER=rim_b") == ("CUP_TRIGGER", "rim_b") and scan.CUP_TRIGGER == "rim_b"
+    assert bt.apply_override("WW_TIME_SYM_TOL=None")[1] is None
+    for bad in ("NOPE=1", "_SPEC_VALUES={}", "no-equals"):
+        with pytest.raises(ValueError):
+            bt.apply_override(bad)
 
 
 def test_profile_pass_replays_the_other_rule_set_and_restores_the_active_one(mini_universe):
