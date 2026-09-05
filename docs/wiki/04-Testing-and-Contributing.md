@@ -69,7 +69,7 @@ Work on a feature branch and open a PR to `main`; the `tests` workflow must pass
 | Workflow | Trigger | Purpose |
 |---|---|---|
 | `tests` | pull requests, pushes to `main` | lint, tests, coverage |
-| `daily-scan` | 02:00 UTC daily, manual | tests, full scan, commit `output/` |
+| `daily-scan` | 01:17 UTC daily, manual | tests, full scan, commit `output/` |
 | `debug-last-bar` | manual, pushes touching its files | read-only per-symbol bar diagnostics |
 | `evaluate-signals` | manual | replay every committed `CONFIRMED` signal against later prices; Markdown table in the job summary |
 | `sync-wiki` | pushes to `main` touching `docs/wiki/`, manual | mirror `docs/wiki/` into the GitHub wiki |

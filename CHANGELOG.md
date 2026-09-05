@@ -5,6 +5,11 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+- Nightly scan cron moved from 02:00 to 01:17 UTC: off the top of the hour,
+  where GitHub delays scheduled runs most (the 2026-09-05 run started 4.5 h
+  late), and with more margin before the 08:45 Israel e-mail.
+
 ### Added
 - `Age` column in the report tables: bars since the breakout close over the
   pattern's limit (`1/3`), so a confirmed row shows whether it is fresh or

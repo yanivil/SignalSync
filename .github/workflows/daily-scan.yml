@@ -8,8 +8,10 @@
 # a scheduled task in the Claude desktop app (08:45 Israel time) reads
 # output/signals.json + report.md from the repo and e-mails the tables.
 #
-# Schedule: 02:00 UTC daily = ~3.5 hours before the 08:45 Israel e-mail, and
-# ~6 hours after the US close.  Note: Yahoo's chart row for that session
+# Schedule: 01:17 UTC daily = ~4.5 hours before the 08:45 Israel e-mail, and
+# ~5 hours after the US close.  Off the top of the hour on purpose: GitHub
+# delays scheduled workflows most at :00 (observed 2026-09-05: the 02:00 run
+# started at 06:36, after the e-mail had gone out with a STALE flag).  Note: Yahoo's chart row for that session
 # has no close until ~08:00 UTC (US pre-market open) -- observed 2026-09-04:
 # 500/502 symbols incomplete at 08:05 UTC, complete at 08:10 UTC -- so scan.py
 # fills the close from the chart's last-trade quote (fill_missing_close) and
@@ -20,7 +22,7 @@ name: daily-scan
 
 on:
   schedule:
-    - cron: "0 2 * * *"
+    - cron: "17 1 * * *"
   workflow_dispatch:        # manual "Run workflow" button for testing
 
 permissions:

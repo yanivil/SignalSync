@@ -95,7 +95,7 @@ Signals are sorted `CONFIRMED` first, then by score descending. `output/report.m
 ## 5. Scheduling
 
 ```
-GitHub Actions (02:00 UTC daily, main only)      Claude desktop scheduled task (08:45 Israel time, daily)
+GitHub Actions (01:17 UTC daily, main only)      Claude desktop scheduled task (08:45 Israel time, daily)
   checkout → pip install → pytest -q              fetch raw output/signals.json + report.md from GitHub
   python scan.py -v (open internet)               fresh? run_date is today and last_bar is the last US session
   commit output/report.md + signals.json          e-mail the Confirmed / Watchlist tables via Gmail
@@ -103,5 +103,6 @@ GitHub Actions (02:00 UTC daily, main only)      Claude desktop scheduled task (
 
 * The scan runs on GitHub because the Claude environments sit behind a network policy that blocks market-data hosts; GitHub and PyPI are reachable from both. The repo must stay public (or the task needs a token) for `raw.githubusercontent.com` to serve the report.
 * Exit code 2 (no data) is captured, still committed if the files changed, and then fails the job so the failure is visible.
+* The cron is deliberately off the top of the hour: GitHub delays scheduled workflows most at :00 (on 2026-09-05 the 02:00 run started at 06:36 UTC, after the e-mail had already gone out flagged STALE). Delays can still happen; the STALE flag in the e-mail is the safety net.
 * Delivery is a scheduled task in the Claude desktop app on the user's Mac (`signalsync-daily-email`, 08:45 local time). Its cron runs in local time, so the Israel clock change needs no adjustment. It only fires while the desktop app is open; if the app is closed at 08:45 the run happens at the next launch. A stale report (older run, or `last_bar` not the previous US session) is sent with a "STALE" prefix rather than silently. Weekend runs re-send Friday's session marked "Weekend".
 * Dependabot keeps the pinned action SHAs and Python lower bounds current (weekly).
