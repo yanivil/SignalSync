@@ -16,17 +16,17 @@ gh workflow run backtest.yml -f profile=spec   # replays spec, and legacy alongs
 
 `apply_profile(name)` switches the constants at run time; `signals.json` records the profile in `meta.profile`. A value of `None` switches an optional rule off. In the tables below, **spec** is the default and **legacy** the alternative.
 
-A third profile, **tuned**, is the spec with the four rules changed that the 2026-09-05 rule ablation showed were removing good signals: volume confirmation off (back to a score bonus), IHS side-duration symmetry off, Wolfe leg rhythm loosened to ±60 %, cup rollback cap at the spec's own 61.8 % maximum. Everything else in it is the spec.
+A third profile, **tuned**, is the spec with the four rules changed that the 2026-09-05 rule ablation showed were removing good signals: volume confirmation off (back to a score bonus), IHS side-duration symmetry off, Wolfe leg rhythm loosened to ±45 %, cup rollback cap at the spec's own 61.8 % maximum. Everything else in it is the spec. The Wolfe rhythm value was chosen on a three-point replay: ±30 % kept 8 Wolfe signals a year at +0.37 R, ±45 % 28 at +0.13 R, ±60 % 43 at +0.02 R; ±45 % lifts the whole tuned profile to 177 signals at +0.34 R.
 
 | Profile | What it is | Confirmed signals | Hit rate | Mean R | +5 % first | IHS | Wolfe | Cup |
 |---|---|---|---|---|---|---|---|---|
 | legacy | rules until 2026-09-05 | 354 | 33 % | +0.06 | 64 % | 87 at +0.20 R | 142 at −0.11 R | 125 at +0.16 R |
 | spec | the engine specification as written | 22 | 53 % | +0.14 | 76 % | 10 at 0.00 R | 8 at +0.37 R | 4 at +0.03 R |
-| **tuned** | spec with the four relaxations above | **192** | **49 %** | **+0.30** | 71 % | 129 at +0.40 R | 43 at +0.02 R | 20 at +0.23 R |
+| **tuned** | spec with the four relaxations above (Wolfe rhythm ±45 %) | **177** | **50 %** | **+0.34** | 72 % | 129 at +0.40 R | 28 at +0.13 R | 20 at +0.23 R |
 
-Year-long walk-forward replay, 250 sessions to 2026-09-04, horizon 60 bars, next-open fills, intraday stops (`backtest` workflow runs 33968691768 and 33973275310). Read with the usual caveats: today's constituents only, one year, one regime.
+Year-long walk-forward replay, 250 sessions to 2026-09-04, horizon 60 bars, next-open fills, intraday stops (`backtest` workflow runs 33968691768, 33973275310 and 33985398488). Read with the usual caveats: today's constituents only, one year, one regime.
 
-**The nightly scan runs `--profile tuned`**, chosen on this evidence on 2026-09-05; the default in code stays `spec`. Change the flag in `.github/workflows/daily-scan.yml` to switch. Known soft spot: the tuned Wolfe rules (rhythm ±60 %) admit 43 roughly break-even signals where the spec's ±30 % kept 8 strong ones; a middle value is the next experiment. The grid also shows a close-based stop (exit on the first close at or below the stop) lifting tuned's mean R to +0.35 at a 52 % hit rate; the report's stop level is unchanged, that is an execution choice.
+**The nightly scan runs `--profile tuned`**, chosen on this evidence on 2026-09-05; the default in code stays `spec`. Change the flag in `.github/workflows/daily-scan.yml` to switch. The cup entry stays at the handle peak: a rim-B entry replayed at 19 cup signals and +0.17 R against 20 and +0.23 R. The grid also shows a close-based stop (exit on the first close at or below the stop) lifting tuned's mean R to +0.35 at a 52 % hit rate; the report's stop level is unchanged, that is an execution choice.
 
 ## CLI
 
@@ -121,7 +121,7 @@ Not configurable: the handle low must stay in the upper half of the cup.
 | `WW_MIN_LEN` / `WW_MAX_LEN` | 15 / 200 | same | point-1 to point-5 width | |
 | `WW_SWEET_ZONE` | `True` | `False` | point 5 must be below line 1-3 and above the line through point 3 parallel to 2-4 | the classic Wolfe rule |
 | `WW_MAX_OVERSHOOT_ATR` | 2.0 | 2.0 | legacy band: max undercut of line 1-3 by point 5 (also scales the score's overshoot term) | with the sweet zone on, only the score uses it |
-| `WW_TIME_SYM_TOL` | 0.30 | off | legs 1→2, 2→3, 3→4 each within this of their mean | |
+| `WW_TIME_SYM_TOL` | 0.30 (tuned 0.45) | off | legs 1→2, 2→3, 3→4 each within this of their mean | replay: 0.30 → 8 signals at +0.37 R, 0.45 → 28 at +0.13, 0.60 → 43 at +0.02 |
 | `WW_MAX_BARS_SINCE_P5` | 25 | same | point 5 must be within the last 25 bars | |
 | `WW_MAX_ETA_BARS` | 250 | same | lines 1-3 and 2-4 must meet within this many bars after point 5 for a target to be reported | guards against near-parallel lines projecting absurd targets |
 | `WW_MAX_TARGET_GAIN` | 1.0 | same | no target when line 1-4 at the ETA is more than +100 % above the entry | a year of replay produced +590 % and +120 % "targets" |

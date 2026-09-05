@@ -170,7 +170,7 @@ RULE_PROFILES: Dict[str, Dict[str, Any]] = {
     "tuned": {                           # spec with the four rules the 2026-09-05 ablation showed remove good signals
         "VOLUME_CONFIRM": {"Cup & Handle": None, "Inverse Head & Shoulders": None, "Bullish Wolfe Wave": None},
         "IHS_SIDE_SYM_TOL": None,        # +-40 % side symmetry removed the best H&S signals (+0.74 R)
-        "WW_TIME_SYM_TOL": 0.60,         # +-30 % leg rhythm removed 18 of 22 Wolfe signals; keep it loose
+        "WW_TIME_SYM_TOL": 0.45,         # replay: 0.30 -> 8 signals/+0.37 R, 0.45 -> 28/+0.13, 0.60 -> 43/+0.02
         "CUP_MAX_RETRACE": 0.618,        # the spec's own "absolute maximum"
     },
     "legacy": {                          # the rules in force until 2026-09-05

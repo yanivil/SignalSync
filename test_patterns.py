@@ -532,7 +532,7 @@ def test_rule_profiles_apply_and_restore():
     previous = scan.apply_profile("tuned")
     assert previous == "spec" and scan.ACTIVE_PROFILE == "tuned"
     assert scan.VOLUME_CONFIRM["Cup & Handle"] is None and scan.IHS_SIDE_SYM_TOL is None
-    assert scan.WW_TIME_SYM_TOL == 0.60 and scan.CUP_MAX_RETRACE == 0.618
+    assert scan.WW_TIME_SYM_TOL == 0.45 and scan.CUP_MAX_RETRACE == 0.618
     assert scan.WW_SWEET_ZONE is True and scan.CUP_MIN_ROUNDNESS == 0.70      # the rest stays spec
     scan.apply_profile("legacy")
     assert scan.WW_SWEET_ZONE is False and scan.CUP_MIN_ROUNDNESS == 0.60

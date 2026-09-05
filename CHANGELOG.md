@@ -5,6 +5,13 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed (calibration)
+- Tuned profile: Wolfe leg rhythm ±45 % (was ±60 %). Year-long replay:
+  ±30 % 8 signals at +0.37 R, ±45 % 28 at +0.13, ±60 % 43 at +0.02; the
+  whole profile moves to 177 signals at +0.34 R. Cup entry stays at the
+  handle peak (rim-B entry replayed worse: 19 signals at +0.17 R vs 20 at
+  +0.23).
+
 ### Changed
 - Report footer and output contract state that the stop is scored as an
   intraday touch in the backtest and that a close-based exit scored higher
