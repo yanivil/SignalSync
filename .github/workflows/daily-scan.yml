@@ -55,9 +55,10 @@ jobs:
         # commit step to record that, so capture the code instead of failing.
         run: |
           set +e
-          # --profile legacy until the spec rules are tuned (2026-09-05 replay: spec confirmed
-          # 22 signals in a year vs 354; see docs/wiki/03-Configuration-and-Tuning.md#rule-profiles)
-          python scan.py --out-dir output -v --profile legacy
+          # --profile tuned: chosen on the 2026-09-05 year-long replay (192 confirmed signals,
+          # 49 % hit rate, +0.30 R vs legacy 354 / 33 % / +0.06 and spec 22 / 53 % / +0.14);
+          # see docs/wiki/03-Configuration-and-Tuning.md#rule-profiles
+          python scan.py --out-dir output -v --profile tuned
           echo "scan_exit=$?" >> "$GITHUB_ENV"
 
       - name: Commit report
