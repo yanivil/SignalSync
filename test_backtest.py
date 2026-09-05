@@ -94,6 +94,17 @@ def test_breakout_level_target_applies_to_cups_only(mini_universe):
     assert bt.variant_target({**cup, "target": None}, "breakout") is None
 
 
+def test_ablation_relaxes_one_rule_at_a_time_and_restores_it(mini_universe):
+    table = bt.ablation(mini_universe, days=3, horizon=5)
+    assert len(table) == 1 + len(scan.RULE_PROFILES["legacy"])
+    assert table[0]["rule"] == "spec (all rules)" and table[0]["delta"] == 0
+    assert {r["rule"] for r in table[1:]} == set(scan.RULE_PROFILES["legacy"])
+    assert scan.ACTIVE_PROFILE == "spec" and scan.VOLUME_CONFIRM["Cup & Handle"] == 1.4   # every override undone
+    assert all(r["signals"] >= 0 and r["delta"] == r["signals"] - table[0]["signals"] for r in table)
+    md = bt.render_ablation(table, 3, 5)
+    assert "# Rule ablation" in md and "| spec (all rules) | - |" in md
+
+
 def test_profile_pass_replays_the_other_rule_set_and_restores_the_active_one(mini_universe):
     rows = bt.walk_forward(mini_universe, days=5, horizon=10)
     assert scan.ACTIVE_PROFILE == "spec"
