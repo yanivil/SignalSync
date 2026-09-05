@@ -5,6 +5,11 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed
+- Report footer and output contract state that the stop is scored as an
+  intraday touch in the backtest and that a close-based exit scored higher
+  in replay; the choice is the trader's.
+
 ### Added
 - `CUP_TRIGGER` (`handle_high`, default | `rim_b`): optional rim-clearing
   cup entry, for replay comparison. Backtest `--set KEY=VALUE` (workflow
