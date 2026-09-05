@@ -101,14 +101,14 @@ CUP, IHS = "Cup & Handle", "Inverse Head & Shoulders"     # lag 0 and lag PIVOT_
 @pytest.mark.parametrize("close, start, pattern, expected", [
     ([90, 95, 101.0], 0, CUP, ("CONFIRMED", 0)),          # broke on the last bar
     ([90, 101, 101.0], 0, CUP, ("CONFIRMED", 1)),         # broke one bar ago
-    ([90, 95, 98.0], 0, CUP, ("WATCHLIST", None)),        # within WATCH_PROXIMITY (3 %)
-    ([90, 95, 96.9], 0, CUP, ("STALE", None)),            # just outside 3 %
+    ([90, 95, 96.0], 0, CUP, ("WATCHLIST", None)),        # within WATCH_PROXIMITY (5 %)
+    ([90, 95, 94.9], 0, CUP, ("STALE", None)),            # just outside 5 %
     ([90, 101, 101, 101, 101, 101.0], 0, CUP, ("STALE", 4)),      # older than MAX_BREAKOUT_AGE
     ([90, 101, 101, 101, 101, 101.0], 0, IHS, ("CONFIRMED", 4)),  # ... unless the pivot lag allows it
     ([90, 101, 106.0], 0, CUP, ("STALE", 1)),             # > MAX_RUNAWAY above trigger: chasing
     ([90, 101, 104.9], 0, CUP, ("CONFIRMED", 1)),         # 4.9 % is still an entry
     ([90, 101, 99.8], 0, CUP, ("WATCHLIST", None)),       # broke out, pulled back: a retest stays listed
-    ([90, 101, 96.0], 0, CUP, ("STALE", None)),           # pulled back too far
+    ([90, 101, 94.0], 0, CUP, ("STALE", None)),           # pulled back too far
     ([90, 101, 99, 101.0], 0, CUP, ("CONFIRMED", 2)),     # re-break inside the window: age from the first break
     ([90, 101, 101, 101, 101, 99, 101.0], 0, CUP, ("STALE", 5)),      # re-break after the window: chop, not a breakout
     ([101, 90, 95, 98.0], 1, CUP, ("WATCHLIST", None)),   # breaks before `start` do not count
@@ -125,7 +125,7 @@ def test_evaluate_breakout_sloping_trigger_and_floor():
     assert scan.evaluate_breakout(np.array([90.0, 99.0, 99.0, 99.0]), neck, 0, IHS) == ("CONFIRMED", 0, 98.5)
     # 99.7 clears the line from bar 1 on: the run is three bars old, trigger = line at the break bar.
     assert scan.evaluate_breakout(np.array([90.0, 99.7, 99.7, 99.7]), neck, 0, IHS) == ("CONFIRMED", 2, 99.5)
-    # Pulled back below today's line but within 3 % of it: watchlist at today's level ...
+    # Pulled back below today's line but within 5 % of it: watchlist at today's level ...
     assert scan.evaluate_breakout(np.array([90.0, 99.7, 99.7, 96.0]), neck, 0, IHS) == ("WATCHLIST", None, 98.5)
     # ... unless it also lost the floor (right-shoulder low / point 5).
     assert scan.evaluate_breakout(np.array([90.0, 99.7, 99.7, 96.0]), neck, 0, IHS, floor=97.5) == ("STALE", None, 98.5)

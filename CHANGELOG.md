@@ -6,6 +6,9 @@ All notable changes to this project are documented here. Format follows
 ## [Unreleased]
 
 ### Changed
+- `WATCH_PROXIMITY` 3 % → 5 %: a setup stays on the watchlist while its close
+  is within 5 % below the trigger. At 3 %, ten of the 17 watchlist rows of
+  2026-09-04 fell out on one ordinary down day.
 - Nightly scan cron moved from 02:00 to 01:17 UTC: off the top of the hour,
   where GitHub delays scheduled runs most (the 2026-09-05 run started 4.5 h
   late), and with more margin before the 08:45 Israel e-mail.
