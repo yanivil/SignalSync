@@ -126,6 +126,7 @@ WW_MIN_LEN, WW_MAX_LEN = 15, 200         # bars from point 1 to point 5
 WW_MAX_OVERSHOOT_ATR = 2.0               # point 5 may undercut line 1-3 by <= 2 ATR
 WW_MAX_BARS_SINCE_P5 = 25                # confirmation must come soon after point 5
 WW_MAX_ETA_BARS = 250                    # target only if lines 1-3 / 2-4 meet within this many bars after point 5
+WW_MAX_TARGET_GAIN = 1.0                 # no target if line 1-4 at the ETA is more than +100% above the entry
 
 
 def max_breakout_age(pattern: str) -> int:
@@ -1160,6 +1161,10 @@ def detect_bullish_wolfe(df: pd.DataFrame, ticker: str) -> List[Signal]:
         s14 = (v4 - v1) / (p4 - p1)
         target = (float(v1 + s14 * (eta - p1))
                   if eta is not None and p5 < eta <= p5 + WW_MAX_ETA_BARS else None)
+        # A steep line 1-4 can still project a multiple of the price (replay
+        # found +590 % and +120 % targets): not a trading target, drop it.
+        if target is not None and target > close[-1] * (1 + WW_MAX_TARGET_GAIN):
+            target = None
         if target is not None and target <= entry:
             target = None
         # Quality score (0-100): 50 base

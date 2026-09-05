@@ -46,4 +46,4 @@ jobs:
           MIN_SCORE: ${{ github.event.inputs.min_score || '60' }}
         run: |
           python tools/backtest.py --days "$DAYS" --horizon "$HORIZON" --min-score "$MIN_SCORE" \
-            --json backtest.json | tee -a "$GITHUB_STEP_SUMMARY"
+            --grid --json backtest.json | tee -a "$GITHUB_STEP_SUMMARY"

@@ -5,7 +5,14 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed (detectors)
+- Wolfe targets more than `WW_MAX_TARGET_GAIN` (+100 %) above the entry are
+  dropped; the replay found +590 % and +120 % projections.
+
 ### Added
+- Backtest: MFE / MAE, the chart-book "+5 % before a close below the stop"
+  success share, and `--grid` (stop distance, stop basis, target size
+  variants on the same signals).
 - `tools/backtest.py` + `backtest` workflow: walk-forward replay of the
   scanner over the last N sessions (first-seen confirmed signals, next-open
   fills, gap filter, outcomes and R multiples overall / per pattern / per

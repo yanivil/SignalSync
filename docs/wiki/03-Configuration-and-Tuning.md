@@ -74,6 +74,7 @@ Not configurable but relevant: the cup bottom must sit in the middle 60 % of the
 | `WW_MAX_OVERSHOOT_ATR` | 2.0 | max undercut of line 1-3 by point 5 | more = accepts deeper false breakdowns; the −0.5 ATR "must reach the line" floor is fixed |
 | `WW_MAX_BARS_SINCE_P5` | 25 | point 5 must be within the last 25 bars | |
 | `WW_MAX_ETA_BARS` | 250 | lines 1-3 and 2-4 must meet within this many bars after point 5 for a target to be reported | guards against near-parallel lines projecting absurd targets |
+| `WW_MAX_TARGET_GAIN` | 1.0 | no target when line 1-4 at the ETA is more than +100 % above the entry | a year of replay produced +590 % and +120 % "targets" |
 
 ## False-positive filters, in the order they act
 

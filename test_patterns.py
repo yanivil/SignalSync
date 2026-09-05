@@ -460,6 +460,15 @@ def test_wolfe_target_is_dropped_when_the_lines_meet_too_far_out(wolfe_df):
     assert s.target is None and (s.entry, s.stop, s.status) == (base.entry, base.stop, base.status)
 
 
+def test_wolfe_target_is_dropped_when_absurdly_far(wolfe_df):
+    (base,) = scan.detect_bullish_wolfe(wolfe_df, "WW")
+    assert base.target is not None and base.target < base.entry * 2
+    with pytest.MonkeyPatch.context() as mp:                # fixture target is ~+29 %
+        mp.setattr(scan, "WW_MAX_TARGET_GAIN", 0.2)
+        (s,) = scan.detect_bullish_wolfe(wolfe_df, "WW")
+    assert s.target is None and s.entry == base.entry
+
+
 def test_fat_tailed_noise_false_positive_rate():
     """Student-t(3) returns (fat tails, spikes) must not inflate the false-positive rate."""
     rng = np.random.default_rng(7)
