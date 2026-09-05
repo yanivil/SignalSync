@@ -125,7 +125,7 @@ test_evaluate.py                     outcome classification and the git signal l
 conftest.py                          shared fixtures and the offline yfinance stand-in
 tools/debug_last_bar.py              per-symbol last-bar diagnostics (also a manual GitHub workflow)
 tools/evaluate_signals.py            replay past CONFIRMED signals against later prices (manual workflow)
-.github/workflows/daily-scan.yml     02:00 UTC daily: tests, scan, commit output/
+.github/workflows/daily-scan.yml     01:17 UTC daily: tests, scan, commit output/
 .github/workflows/tests.yml          lint + tests + coverage on pull requests and pushes to main
 .github/workflows/sync-wiki.yml      mirrors docs/wiki/ into the GitHub wiki
 run_daily.sh                         local wrapper (venv, dependency checksum, dated logs)
