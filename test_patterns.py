@@ -515,6 +515,21 @@ def test_wolfe_target_is_dropped_when_absurdly_far(wolfe_df):
     assert s.target is None and s.entry == base.entry
 
 
+def test_rule_profiles_apply_and_restore():
+    assert scan.ACTIVE_PROFILE == "spec"
+    previous = scan.apply_profile("tuned")
+    assert previous == "spec" and scan.ACTIVE_PROFILE == "tuned"
+    assert scan.VOLUME_CONFIRM["Cup & Handle"] is None and scan.IHS_SIDE_SYM_TOL is None
+    assert scan.WW_TIME_SYM_TOL == 0.60 and scan.CUP_MAX_RETRACE == 0.618
+    assert scan.WW_SWEET_ZONE is True and scan.CUP_MIN_ROUNDNESS == 0.70      # the rest stays spec
+    scan.apply_profile("legacy")
+    assert scan.WW_SWEET_ZONE is False and scan.CUP_MIN_ROUNDNESS == 0.60
+    scan.apply_profile("spec")
+    assert scan.VOLUME_CONFIRM["Cup & Handle"] == 1.4 and scan.WW_TIME_SYM_TOL == 0.30
+    with pytest.raises(ValueError):
+        scan.apply_profile("nope")
+
+
 def test_scan_symbol_detector_subset(cup_df):
     assert scan.scan_symbol("CUP", cup_df, detectors=(scan.detect_inverse_hs,)) == []
     assert [s.pattern for s in scan.scan_symbol("CUP", cup_df)] == ["Cup & Handle"]

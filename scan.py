@@ -166,6 +166,12 @@ MAX_RISK_PCT = {                         # reject setups whose stop is further t
 
 RULE_PROFILES: Dict[str, Dict[str, Any]] = {
     "spec": {},                          # the module defaults above
+    "tuned": {                           # spec with the four rules the 2026-09-05 ablation showed remove good signals
+        "VOLUME_CONFIRM": {"Cup & Handle": None, "Inverse Head & Shoulders": None, "Bullish Wolfe Wave": None},
+        "IHS_SIDE_SYM_TOL": None,        # +-40 % side symmetry removed the best H&S signals (+0.74 R)
+        "WW_TIME_SYM_TOL": 0.60,         # +-30 % leg rhythm removed 18 of 22 Wolfe signals; keep it loose
+        "CUP_MAX_RETRACE": 0.618,        # the spec's own "absolute maximum"
+    },
     "legacy": {                          # the rules in force until 2026-09-05
         "CUP_MIN_LEN": 30, "CUP_MAX_LEN": 250, "CUP_MAX_RETRACE": None, "CUP_RIM_TOL_OF_DEPTH": None,
         "CUP_BOTTOM_ZONE": (0.20, 0.80), "HANDLE_MAX_LEN": 40, "HANDLE_MAX_LEN_OF_CUP": None,

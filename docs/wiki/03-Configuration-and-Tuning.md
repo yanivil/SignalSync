@@ -16,6 +16,16 @@ gh workflow run backtest.yml -f profile=spec   # replays spec, and legacy alongs
 
 `apply_profile(name)` switches the constants at run time; `signals.json` records the profile in `meta.profile`. A value of `None` switches an optional rule off. In the tables below, **spec** is the default and **legacy** the alternative.
 
+A third profile, **tuned**, is the spec with the four rules changed that the 2026-09-05 rule ablation showed were removing good signals: volume confirmation off (back to a score bonus), IHS side-duration symmetry off, Wolfe leg rhythm loosened to ±60 %, cup rollback cap at the spec's own 61.8 % maximum. Everything else in it is the spec.
+
+| Profile | Year-long replay (250 sessions, horizon 60) | Confirmed signals | Hit rate | Mean R |
+|---|---|---|---|---|
+| legacy | rules until 2026-09-05 | 354 | 33 % | +0.06 |
+| spec | the engine specification as written | 22 | 53 % | +0.14 |
+| tuned | see above | run `gh workflow run backtest.yml -f profile=tuned` for the current numbers | | |
+
+**The nightly scan runs `--profile legacy`** until a profile is chosen on replay evidence; the default in code is `spec`. Change the flag in `.github/workflows/daily-scan.yml` to switch.
+
 ## CLI
 
 | Flag | Default | Effect |
