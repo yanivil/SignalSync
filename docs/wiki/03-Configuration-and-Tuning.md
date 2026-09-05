@@ -18,13 +18,15 @@ gh workflow run backtest.yml -f profile=spec   # replays spec, and legacy alongs
 
 A third profile, **tuned**, is the spec with the four rules changed that the 2026-09-05 rule ablation showed were removing good signals: volume confirmation off (back to a score bonus), IHS side-duration symmetry off, Wolfe leg rhythm loosened to ±60 %, cup rollback cap at the spec's own 61.8 % maximum. Everything else in it is the spec.
 
-| Profile | Year-long replay (250 sessions, horizon 60) | Confirmed signals | Hit rate | Mean R |
-|---|---|---|---|---|
-| legacy | rules until 2026-09-05 | 354 | 33 % | +0.06 |
-| spec | the engine specification as written | 22 | 53 % | +0.14 |
-| tuned | see above | run `gh workflow run backtest.yml -f profile=tuned` for the current numbers | | |
+| Profile | What it is | Confirmed signals | Hit rate | Mean R | +5 % first | IHS | Wolfe | Cup |
+|---|---|---|---|---|---|---|---|---|
+| legacy | rules until 2026-09-05 | 354 | 33 % | +0.06 | 64 % | 87 at +0.20 R | 142 at −0.11 R | 125 at +0.16 R |
+| spec | the engine specification as written | 22 | 53 % | +0.14 | 76 % | 10 at 0.00 R | 8 at +0.37 R | 4 at +0.03 R |
+| **tuned** | spec with the four relaxations above | **192** | **49 %** | **+0.30** | 71 % | 129 at +0.40 R | 43 at +0.02 R | 20 at +0.23 R |
 
-**The nightly scan runs `--profile legacy`** until a profile is chosen on replay evidence; the default in code is `spec`. Change the flag in `.github/workflows/daily-scan.yml` to switch.
+Year-long walk-forward replay, 250 sessions to 2026-09-04, horizon 60 bars, next-open fills, intraday stops (`backtest` workflow runs 33968691768 and 33973275310). Read with the usual caveats: today's constituents only, one year, one regime.
+
+**The nightly scan runs `--profile tuned`**, chosen on this evidence on 2026-09-05; the default in code stays `spec`. Change the flag in `.github/workflows/daily-scan.yml` to switch. Known soft spot: the tuned Wolfe rules (rhythm ±60 %) admit 43 roughly break-even signals where the spec's ±30 % kept 8 strong ones; a middle value is the next experiment. The grid also shows a close-based stop (exit on the first close at or below the stop) lifting tuned's mean R to +0.35 at a 52 % hit rate; the report's stop level is unchanged, that is an execution choice.
 
 ## CLI
 

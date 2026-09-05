@@ -6,11 +6,14 @@ All notable changes to this project are documented here. Format follows
 ## [Unreleased]
 
 ### Changed (operations)
-- The nightly scan runs `--profile legacy` until a profile is chosen on
-  replay evidence: over a year the spec profile confirmed 22 signals against
-  354, and a rule ablation showed four spec rules (volume confirmation, IHS
-  side symmetry, Wolfe leg rhythm, cup rollback) removing signals that were
-  better than the ones kept.
+- The nightly scan runs `--profile tuned`, chosen on the year-long replay:
+  192 confirmed signals, 49 % hit rate, +0.30 R, against legacy's 354 /
+  33 % / +0.06 and spec's 22 / 53 % / +0.14. (It ran `legacy` for a few
+  hours on 2026-09-05 while the tuned replay completed.) Background: over a
+  year the spec profile confirmed 22 signals against 354, and a rule
+  ablation showed four spec rules (volume confirmation, IHS side symmetry,
+  Wolfe leg rhythm, cup rollback) removing signals that were better than
+  the ones kept.
 - New `tuned` rule profile: the spec with those four rules relaxed (volume
   as a bonus, side symmetry off, rhythm +-60 %, rollback 61.8 %).
 - Backtest `--ablate`: leave-one-rule-out over the spec profile.
