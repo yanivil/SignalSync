@@ -74,12 +74,36 @@ def test_classify_variant_close_vs_intraday_stops():
 def test_grid_rescores_the_same_signals(mini_universe):
     rows = bt.walk_forward(mini_universe, days=5, horizon=10)
     g = bt.grid(rows, mini_universe, 10)
-    assert len(g) == len(bt.GRID) == 12
-    assert {(x["stop_extra_atr"], x["stop_basis"], x["target_fraction"]) for x in g} == set(bt.GRID)
+    assert len(g) == len(bt.GRID) == 18
+    assert {(x["stop_extra_atr"], x["stop_basis"], x["target_mode"]) for x in g} == set(bt.GRID)
     traded = sum(1 for r in rows if r["outcome"] in ("target", "stop", "open"))
     assert all(x["n"] == traded for x in g)
     md = bt.render(rows, bt.breakdown(rows), 5, 10, g)
-    assert "## Stop / target variants" in md and "| 0.75 | close | half |" in md
+    assert "## Stop / target variants" in md and "| 0.75 | close | breakout |" in md
+
+
+def test_breakout_level_target_applies_to_cups_only(mini_universe):
+    rows = bt.walk_forward(mini_universe, days=5, horizon=10)
+    cup = next(r for r in rows if r["pattern"] == "Cup & Handle")
+    assert cup["cup_bottom"] is not None and cup["cup_trigger"] > cup["cup_bottom"]
+    bo = bt.variant_target(cup, "breakout")
+    assert bo == cup["fill"] + (cup["cup_trigger"] - cup["cup_bottom"]) and bo < cup["target"]  # below rim-based
+    assert bt.variant_target(cup, "half") == cup["fill"] + 0.5 * (cup["target"] - cup["fill"])
+    other = next(r for r in rows if r["pattern"] != "Cup & Handle")
+    assert bt.variant_target(other, "breakout") == other["target"]
+    assert bt.variant_target({**cup, "target": None}, "breakout") is None
+
+
+def test_veto_off_pass_runs_reversal_detectors_only_and_restores_constants(mini_universe):
+    rows = bt.walk_forward(mini_universe, days=5, horizon=10)
+    before = (scan.TREND_STRONG_DOWN, scan.TREND_STRONG_DOWN_SMA50)
+    v = bt.veto_off_pass(mini_universe, 5, 10, rows)
+    assert (scan.TREND_STRONG_DOWN, scan.TREND_STRONG_DOWN_SMA50) == before      # overrides undone
+    assert v["veto_on"]["signals"] == sum(1 for r in rows if r["pattern"] != "Cup & Handle")
+    assert v["veto_off"]["signals"] >= v["veto_on"]["signals"]                    # never fewer
+    assert all(r["pattern"] != "Cup & Handle" for r in v["admitted_rows"])
+    md = bt.render(rows, bt.breakdown(rows), 5, 10, None, v)
+    assert "## Strong-down-trend veto" in md and "| veto on (baseline) |" in md
 
 
 def test_breakdown_and_render():

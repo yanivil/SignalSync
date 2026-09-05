@@ -10,6 +10,9 @@ All notable changes to this project are documented here. Format follows
   dropped; the replay found +590 % and +120 % projections.
 
 ### Added
+- Backtest grid: breakout-level (Investopedia) cup target and a
+  veto-off pass for the reversal detectors; `scan_symbol` accepts a
+  detector subset.
 - Backtest: MFE / MAE, the chart-book "+5 % before a close below the stop"
   success share, and `--grid` (stop distance, stop basis, target size
   variants on the same signals).

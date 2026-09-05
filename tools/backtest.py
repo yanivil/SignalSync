@@ -31,8 +31,13 @@ Method:
   stop), which is what published "pattern success rates" measure.
 * ``--grid`` re-scores the same signals under stop / target variants: extra
   ATR below the reported stop (0 / 0.25 / 0.75, i.e. ~0.25 / 0.5 / 1.0 ATR
-  under the structural low), intraday vs close-based stops, and full vs half
-  measured-move targets.
+  under the structural low), intraday vs close-based stops, and three target
+  sizes: the reported measured move, half of it, and (cups only) the
+  Investopedia measure -- cup bottom to the handle breakout level instead of
+  bottom to the left rim.
+* ``--grid`` also runs a second walk-forward with the strong-down-trend veto
+  switched off (reversal detectors only, since the cup needs an up-trend
+  anyway) and reports the signals that veto admits on their own.
 
 Caveats: the universe is today's constituents (survivorship bias: symbols
 that left the index are missing), and the last ``horizon`` sessions of the
@@ -42,9 +47,11 @@ window are still ``open``.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import logging
 import os
+import re
 import sys
 import time
 from typing import Dict, List, Optional, Sequence
@@ -59,7 +66,38 @@ import evaluate_signals as ev  # noqa: E402
 log = logging.getLogger("backtest")
 
 SCORE_BUCKETS = ((60, 69), (70, 79), (80, 89), (90, 100))
-GRID = [(extra, basis, tfrac) for extra in (0.0, 0.25, 0.75) for basis in ("intraday", "close") for tfrac in (1.0, 0.5)]
+TARGET_MODES = ("full", "half", "breakout")
+GRID = [(extra, basis, mode) for extra in (0.0, 0.25, 0.75) for basis in ("intraday", "close")
+        for mode in TARGET_MODES]
+REVERSAL_DETECTORS = (scan.detect_inverse_hs, scan.detect_bullish_wolfe)
+
+
+def variant_target(row: dict, mode: str) -> Optional[float]:
+    """Target under a grid mode: reported (``full``), halfway (``half``), or the
+    Investopedia cup measure (``breakout``: bottom-to-handle-high added at the fill;
+    non-cup patterns keep their reported target)."""
+    t, fill = row["target"], row["fill"]
+    if t is None:
+        return None
+    if mode == "half":
+        return fill + 0.5 * (t - fill)
+    if mode == "breakout" and row["pattern"] == "Cup & Handle":
+        bottom, trigger = row.get("cup_bottom"), row.get("cup_trigger")
+        return fill + (trigger - bottom) if bottom is not None and trigger is not None else t
+    return t
+
+
+@contextlib.contextmanager
+def overrides(**values):
+    """Temporarily set ``scan`` module constants (restored on exit)."""
+    saved = {k: getattr(scan, k) for k in values}
+    for k, v in values.items():
+        setattr(scan, k, v)
+    try:
+        yield
+    finally:
+        for k, v in saved.items():
+            setattr(scan, k, v)
 
 
 def excursions(fill: float, stop: float, bars: pd.DataFrame, horizon: int) -> dict:
@@ -110,27 +148,44 @@ def grid(rows: Sequence[dict], data: Dict[str, pd.DataFrame], horizon: int) -> L
     """Re-score the traded signals under every stop / target variant in ``GRID``."""
     out = []
     traded = [r for r in rows if r["outcome"] in ("target", "stop", "open")]
-    for extra, basis, tfrac in GRID:
+    for extra, basis, mode in GRID:
         scored = []
         for r in traded:
             bars = data[r["ticker"]]
             after = bars[bars.index > pd.Timestamp(r["scan_day"])]
             stop = r["stop"] - extra * r["atr"]
-            target = r["fill"] + tfrac * (r["target"] - r["fill"]) if r["target"] is not None else None
-            scored.append(classify_variant(r["fill"], stop, target, after, horizon, basis))
+            scored.append(classify_variant(r["fill"], stop, variant_target(r, mode), after, horizon, basis))
         s = ev.summarise(scored)
-        out.append({"stop_extra_atr": extra, "stop_basis": basis, "target_fraction": tfrac, **s})
+        out.append({"stop_extra_atr": extra, "stop_basis": basis, "target_mode": mode, **s})
     return out
 
 
-def walk_forward(data: Dict[str, pd.DataFrame], days: int, horizon: int) -> List[dict]:
+def veto_off_pass(data: Dict[str, pd.DataFrame], days: int, horizon: int, baseline: Sequence[dict]) -> dict:
+    """Second walk-forward with the strong-down-trend veto disabled, reversal detectors only.
+
+    :returns: ``{"veto_on", "veto_off", "admitted"}`` summaries (reversal patterns
+        only) plus the ``admitted_rows``: signals the veto had rejected.
+    """
+    with overrides(TREND_STRONG_DOWN=0.0, TREND_STRONG_DOWN_SMA50=0.0):
+        rows = walk_forward(data, days, horizon, detectors=REVERSAL_DETECTORS)
+    base_keys = {(r["ticker"], r["pattern"], round(r["stop"], 2)) for r in baseline}
+    base_rev = [r for r in baseline if r["pattern"] != "Cup & Handle"]
+    admitted = [r for r in rows if (r["ticker"], r["pattern"], round(r["stop"], 2)) not in base_keys]
+    return {"veto_on": breakdown(base_rev)["overall"], "veto_off": breakdown(rows)["overall"],
+            "admitted": breakdown(admitted)["overall"] if admitted else None, "admitted_rows": admitted}
+
+
+def walk_forward(data: Dict[str, pd.DataFrame], days: int, horizon: int,
+                 detectors: Optional[Sequence] = None) -> List[dict]:
     """Replay the scanner over the last ``days`` sessions and score each first-seen signal.
 
     :param data: ``{symbol: OHLCV frame}`` as returned by ``download_history``.
     :param days: Number of most recent sessions to scan (each as if it were "today").
     :param horizon: Bars after the fill before an unresolved signal counts as ``open``.
+    :param detectors: Subset of detectors to run (default: all).
     :returns: One dict per first-seen CONFIRMED signal with the signal fields plus
-        ``fill``, ``outcome``, ``bars``, ``exit``, ``r``.
+        ``fill``, ``outcome``, ``bars``, ``exit``, ``r`` (and for cups the parsed
+        ``cup_bottom`` / ``cup_trigger`` for the breakout-level target variant).
 
     Complexity: O(days * symbols * detector cost); ~2 ms per symbol-day.
     """
@@ -142,7 +197,7 @@ def walk_forward(data: Dict[str, pd.DataFrame], days: int, horizon: int) -> List
             hist = df[df.index <= d]
             if len(hist) < 60 or hist.index[-1] != d:
                 continue                      # symbol had no bar on d (halted, listed later)
-            for s in scan.scan_symbol(sym, hist):
+            for s in scan.scan_symbol(sym, hist, detectors):
                 if s.status != "CONFIRMED":
                     continue
                 assert s.last_date == str(d.date()), "look-ahead: signal dated after the scan day"
@@ -151,7 +206,11 @@ def walk_forward(data: Dict[str, pd.DataFrame], days: int, horizon: int) -> List
                     continue
                 after = df[df.index > d]
                 row = {**scan.asdict(s), "scan_day": str(d.date()),
-                       "atr": round(float(scan.atr(hist).iloc[-1]), 4)}
+                       "atr": round(float(scan.atr(hist).iloc[-1]), 4), "cup_bottom": None, "cup_trigger": None}
+                if s.pattern == "Cup & Handle":
+                    m = re.search(r"bottom \S+ @([\d.]+).*trigger ([\d.]+)", s.notes)
+                    if m:
+                        row["cup_bottom"], row["cup_trigger"] = float(m[1]), float(m[2])
                 if after.empty:
                     row.update(fill=None, outcome="no_data", bars=0, exit=None, r=None,
                                mfe=None, mae=None, success5=None)
@@ -192,7 +251,7 @@ def _pct(x, signed=False):
 
 
 def render(rows: Sequence[dict], stats: dict, days: int, horizon: int,
-           grid_rows: Optional[Sequence[dict]] = None) -> str:
+           grid_rows: Optional[Sequence[dict]] = None, veto: Optional[dict] = None) -> str:
     """Markdown report (readable as a GitHub step summary)."""
     def line(name, s):
         return (f"| {name} | {s['signals']} | {s['gap']} | {s['target']} | {s['stop']} | {s['open']} | "
@@ -212,14 +271,22 @@ def render(rows: Sequence[dict], stats: dict, days: int, horizon: int,
     if grid_rows:
         lines += ["", "## Stop / target variants (same signals)", "",
                   "Extra ATR = distance added below the reported stop (which already sits 0.25 ATR under the "
-                  "structural low). Half target = halfway from the fill to the measured-move target.", "",
+                  "structural low). Target: full = reported measured move; half = halfway to it; breakout = "
+                  "cups measured from the bottom to the handle breakout level (Investopedia), others unchanged.", "",
                   "| Extra ATR | Stop basis | Target | Target | Stop | Open | Hit rate | Mean R |",
                   "|---|---|---|---|---|---|---|---|"]
         for g in grid_rows:
-            size = "full" if g["target_fraction"] == 1.0 else "half"
-            lines.append(f"| {g['stop_extra_atr']} | {g['stop_basis']} | {size} | "
+            lines.append(f"| {g['stop_extra_atr']} | {g['stop_basis']} | {g['target_mode']} | "
                          f"{g['target']} | {g['stop']} | {g['open']} | {_pct(g['hit_rate'])} | "
                          f"{'-' if g['mean_r'] is None else f'{g['mean_r']:+.2f}'} |")
+    if veto:
+        lines += ["", "## Strong-down-trend veto (reversal patterns only)", "",
+                  "A second walk-forward with the veto switched off. 'admitted' = the signals the veto had rejected.",
+                  "", hdr, line("veto on (baseline)", veto["veto_on"]), line("veto off", veto["veto_off"])]
+        if veto["admitted"]:
+            lines.append(line("admitted by veto off", veto["admitted"]))
+        else:
+            lines.append("| admitted by veto off | 0 | | | | | | | | | |")
     lines += ["", "| Day | Ticker | Pattern | Score | Entry | Fill | Stop | Target | Outcome | Bars | R |",
               "|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in sorted(rows, key=lambda r: (r["scan_day"], r["ticker"])):
@@ -255,12 +322,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     rows = walk_forward(data, args.days, args.horizon)
     stats = breakdown(rows)
     log.info("replay done in %.0fs: %d first-seen confirmed signals", time.time() - t0, len(rows))
-    grid_rows = grid(rows, data, args.horizon) if args.grid else None
-    print(render(rows, stats, args.days, args.horizon, grid_rows))
+    grid_rows = veto = None
+    if args.grid:
+        grid_rows = grid(rows, data, args.horizon)
+        veto = veto_off_pass(data, args.days, args.horizon, rows)
+        log.info("veto-off pass done in %.0fs: %d reversal signals, %d admitted by the veto being off",
+                 time.time() - t0, veto["veto_off"]["signals"], len(veto["admitted_rows"]))
+    print(render(rows, stats, args.days, args.horizon, grid_rows, veto))
     if args.json:
         with open(args.json, "w", encoding="utf-8") as fh:
             json.dump({"days": args.days, "horizon": args.horizon, "min_score": scan.MIN_SCORE,
-                       "stats": stats, "grid": grid_rows, "rows": rows}, fh, indent=2)
+                       "stats": stats, "grid": grid_rows, "veto": veto, "rows": rows}, fh, indent=2)
     return 0
 
 

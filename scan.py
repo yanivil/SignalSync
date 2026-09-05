@@ -1213,15 +1213,20 @@ def _dedupe(signals: List[Signal]) -> List[Signal]:
 # --------------------------------------------------------------------------- #
 # Orchestration & reporting
 # --------------------------------------------------------------------------- #
-def scan_symbol(sym: str, df: pd.DataFrame) -> List[Signal]:
+DETECTORS = (detect_cup_and_handle, detect_inverse_hs, detect_bullish_wolfe)
+
+
+def scan_symbol(sym: str, df: pd.DataFrame, detectors: Optional[Sequence[Callable]] = None) -> List[Signal]:
     """Run all detectors on one symbol, isolating failures per detector.
 
     :param sym: Symbol.
     :param df: OHLCV DataFrame.
-    :returns: Signals from all detectors.
+    :param detectors: Subset of :data:`DETECTORS` to run (default: all); used
+        by the backtest's detector-variant passes.
+    :returns: Signals from the detectors run.
     """
     out: List[Signal] = []
-    for fn in (detect_cup_and_handle, detect_inverse_hs, detect_bullish_wolfe):
+    for fn in (detectors if detectors is not None else DETECTORS):
         try:
             out.extend(fn(df, sym))
         except Exception as exc:  # one bad ticker must not abort the scan
