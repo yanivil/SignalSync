@@ -1,5 +1,5 @@
 # Test suite on every pull request and every push to main (the daily scan
-# also runs it, but only at 02:00 UTC after the code is already on main).
+# also runs it, but only nightly, after the code is already on main).
 name: tests
 
 on:

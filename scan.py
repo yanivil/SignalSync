@@ -74,7 +74,7 @@ ATR_LEN = 14
 MIN_SCORE = 60           # reporting threshold for the 0-100 quality score
 MAX_BREAKOUT_AGE = 3     # a breakout older than this many bars is stale
 MAX_RUNAWAY = 0.05       # close more than 5% above trigger = chasing, not an entry
-WATCH_PROXIMITY = 0.03   # unbroken setups within 3% of trigger -> watchlist
+WATCH_PROXIMITY = 0.05   # setups whose close is within 5% below the trigger -> watchlist (3% until 2026-09-05)
 # Trend context (rule 2).  "Strong down-trend" = close this far below a
 # *falling* SMA200; the slope is judged against the SMA's value
 # TREND_SLOPE_LOOKBACK bars earlier (~2 months: long enough to ignore

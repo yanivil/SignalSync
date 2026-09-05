@@ -24,7 +24,7 @@ All thresholds are module-level constants at the top of `scan.py`. Two of them (
 | `MAX_BREAKOUT_AGE` | 3 | max bars since the confirming close (Cup); +`PIVOT_ORDER` for H&S and Wolfe | older breakouts reported | only fresh breakouts |
 | `BREAKOUT_AGE_LAG` | Cup 0, H&S 5, Wolfe 5 | extra age tolerated because the last pivot lags | | |
 | `MAX_RUNAWAY` | 0.05 | close more than this above the trigger = chasing, dropped | | |
-| `WATCH_PROXIMITY` | 0.03 | unbroken setups within this of the trigger → watchlist | longer watchlist | shorter watchlist |
+| `WATCH_PROXIMITY` | 0.05 | setups whose close is within this of the trigger → watchlist (was 0.03 until 2026-09-05; at 3 % a normal down day cleared most of the list) | longer watchlist | shorter watchlist |
 | `LAST_BAR_MIN_FRACTION` | 0.5 | share of symbols that must have a complete bar for it to be `meta.last_bar` | | |
 | `FILL_CLOSE_MIN_AGE` | 1 h | how old the last trade must be to count as the closing print | | |
 | `CONSTITUENTS_COMMIT` | 2026-08-20 hash | pinned upstream commit of the constituent CSV | | |
@@ -81,7 +81,7 @@ Not configurable but relevant: the cup bottom must sit in the middle 60 % of the
 2. **Geometry** — the width/depth/symmetry/slope rules above. Each is a hard reject.
 3. **Prior move** — a cup must continue a ≥ 25 % advance, an inverse H&S must reverse a ≥ 10 % decline.
 4. **Roundness** (cup only) — R² ≥ 0.60 and the parabola must fit at least as well as a V.
-5. **Confirmation state** — stale (> age limit), failed (closed back below the trigger) and runaway (> 5 % above) breakouts are dropped; unbroken setups more than 3 % below the trigger are dropped.
+5. **Confirmation state** — stale (> age limit), failed (closed back below the trigger) and runaway (> 5 % above) breakouts are dropped; setups more than 5 % below the trigger are dropped.
 6. **Risk** — stop above entry or risk > 15 % is dropped.
 7. **Score** — everything surviving with a score below `MIN_SCORE` is dropped.
 8. **De-duplication** — only the best-scoring signal per `(ticker, pattern, status)` is kept, so overlapping pivot combinations never inflate the count.
