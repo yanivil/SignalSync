@@ -176,10 +176,14 @@ def test_end_to_end_mini_universe(tmp_path, universe_csv, fake_yfinance, mini_un
 
 def test_end_to_end_min_score_filters_and_is_reported(tmp_path, universe_csv, fake_yfinance, mini_universe):
     fake_yfinance(mini_universe)
-    rc, data, _ = _run(tmp_path, universe_csv, ["--min-score", "85"])
-    assert rc == 0 and data["meta"]["min_score"] == 85
-    assert all(s["score"] >= 85 for s in data["signals"])
-    assert {s["ticker"] for s in data["signals"]} == {"CUP"}   # IHS (79) and WW (69) drop out
+    scores = {sym: max(s.score for s in scan.scan_symbol(sym, df)) for sym, df in mini_universe.items()
+              if scan.scan_symbol(sym, df)}
+    cut = max(scores.values())                                   # keep only the best-scoring setup
+    rc, data, _ = _run(tmp_path, universe_csv, ["--min-score", str(cut)])
+    assert rc == 0 and data["meta"]["min_score"] == cut and data["meta"]["profile"] == "spec"
+    assert all(s["score"] >= cut for s in data["signals"])
+    assert {s["ticker"] for s in data["signals"]} == {t for t, v in scores.items() if v >= cut}
+    assert len(data["signals"]) < len(scores)                    # something was filtered
 
 
 def test_end_to_end_is_deterministic(tmp_path, universe_csv, fake_yfinance, mini_universe):

@@ -35,9 +35,9 @@ Method:
   sizes: the reported measured move, half of it, and (cups only) the
   Investopedia measure -- cup bottom to the handle breakout level instead of
   bottom to the left rim.
-* ``--grid`` also runs a second walk-forward with the strong-down-trend veto
-  switched off (reversal detectors only, since the cup needs an up-trend
-  anyway) and reports the signals that veto admits on their own.
+* ``--grid`` also runs a second full walk-forward under the *other* rule
+  profile (``spec`` vs ``legacy``, see ``scan.RULE_PROFILES``) so the two rule
+  sets can be compared on the same data, per pattern.
 
 Caveats: the universe is today's constituents (survivorship bias: symbols
 that left the index are missing), and the last ``horizon`` sessions of the
@@ -69,7 +69,6 @@ SCORE_BUCKETS = ((60, 69), (70, 79), (80, 89), (90, 100))
 TARGET_MODES = ("full", "half", "breakout")
 GRID = [(extra, basis, mode) for extra in (0.0, 0.25, 0.75) for basis in ("intraday", "close")
         for mode in TARGET_MODES]
-REVERSAL_DETECTORS = (scan.detect_inverse_hs, scan.detect_bullish_wolfe)
 
 
 def variant_target(row: dict, mode: str) -> Optional[float]:
@@ -88,16 +87,13 @@ def variant_target(row: dict, mode: str) -> Optional[float]:
 
 
 @contextlib.contextmanager
-def overrides(**values):
-    """Temporarily set ``scan`` module constants (restored on exit)."""
-    saved = {k: getattr(scan, k) for k in values}
-    for k, v in values.items():
-        setattr(scan, k, v)
+def rule_profile(name: str):
+    """Run the body under ``scan.RULE_PROFILES[name]``; the previous profile is restored on exit."""
+    previous = scan.apply_profile(name)
     try:
         yield
     finally:
-        for k, v in saved.items():
-            setattr(scan, k, v)
+        scan.apply_profile(previous)
 
 
 def excursions(fill: float, stop: float, bars: pd.DataFrame, horizon: int) -> dict:
@@ -160,19 +156,14 @@ def grid(rows: Sequence[dict], data: Dict[str, pd.DataFrame], horizon: int) -> L
     return out
 
 
-def veto_off_pass(data: Dict[str, pd.DataFrame], days: int, horizon: int, baseline: Sequence[dict]) -> dict:
-    """Second walk-forward with the strong-down-trend veto disabled, reversal detectors only.
+def profile_pass(data: Dict[str, pd.DataFrame], days: int, horizon: int, name: str) -> dict:
+    """Second full walk-forward under rule profile ``name`` (the active profile is restored).
 
-    :returns: ``{"veto_on", "veto_off", "admitted"}`` summaries (reversal patterns
-        only) plus the ``admitted_rows``: signals the veto had rejected.
+    :returns: ``{"profile", "stats", "rows"}`` with the same ``breakdown`` slices as the main report.
     """
-    with overrides(TREND_STRONG_DOWN=0.0, TREND_STRONG_DOWN_SMA50=0.0):
-        rows = walk_forward(data, days, horizon, detectors=REVERSAL_DETECTORS)
-    base_keys = {(r["ticker"], r["pattern"], round(r["stop"], 2)) for r in baseline}
-    base_rev = [r for r in baseline if r["pattern"] != "Cup & Handle"]
-    admitted = [r for r in rows if (r["ticker"], r["pattern"], round(r["stop"], 2)) not in base_keys]
-    return {"veto_on": breakdown(base_rev)["overall"], "veto_off": breakdown(rows)["overall"],
-            "admitted": breakdown(admitted)["overall"] if admitted else None, "admitted_rows": admitted}
+    with rule_profile(name):
+        rows = walk_forward(data, days, horizon)
+    return {"profile": name, "stats": breakdown(rows), "rows": rows}
 
 
 def walk_forward(data: Dict[str, pd.DataFrame], days: int, horizon: int,
@@ -251,7 +242,7 @@ def _pct(x, signed=False):
 
 
 def render(rows: Sequence[dict], stats: dict, days: int, horizon: int,
-           grid_rows: Optional[Sequence[dict]] = None, veto: Optional[dict] = None) -> str:
+           grid_rows: Optional[Sequence[dict]] = None, other: Optional[dict] = None) -> str:
     """Markdown report (readable as a GitHub step summary)."""
     def line(name, s):
         return (f"| {name} | {s['signals']} | {s['gap']} | {s['target']} | {s['stop']} | {s['open']} | "
@@ -259,7 +250,8 @@ def render(rows: Sequence[dict], stats: dict, days: int, horizon: int,
                 f"{_pct(s['success5'])} | {_pct(s['mfe'], True)} | {_pct(s['mae'], True)} |")
     hdr = ("| Slice | Signals | Gapped | Target | Stop | Open | Hit rate | Mean R | +5% first | MFE | MAE |\n"
            "|---|---|---|---|---|---|---|---|---|---|---|")
-    lines = [f"# Walk-forward backtest: last {days} sessions, horizon {horizon} bars", "",
+    lines = [f"# Walk-forward backtest: last {days} sessions, horizon {horizon} bars "
+             f"(rule profile: {scan.ACTIVE_PROFILE})", "",
              "Hit rate = target / (target + stop). Mean R over traded signals (open ones marked to the last close). "
              "Fill = next session's open; opens > 5 % above entry are gapped (not traded). "
              "+5% first = share of signals whose high reached +5 % above the fill before any close below the stop "
@@ -279,14 +271,13 @@ def render(rows: Sequence[dict], stats: dict, days: int, horizon: int,
             lines.append(f"| {g['stop_extra_atr']} | {g['stop_basis']} | {g['target_mode']} | "
                          f"{g['target']} | {g['stop']} | {g['open']} | {_pct(g['hit_rate'])} | "
                          f"{'-' if g['mean_r'] is None else f'{g['mean_r']:+.2f}'} |")
-    if veto:
-        lines += ["", "## Strong-down-trend veto (reversal patterns only)", "",
-                  "A second walk-forward with the veto switched off. 'admitted' = the signals the veto had rejected.",
-                  "", hdr, line("veto on (baseline)", veto["veto_on"]), line("veto off", veto["veto_off"])]
-        if veto["admitted"]:
-            lines.append(line("admitted by veto off", veto["admitted"]))
-        else:
-            lines.append("| admitted by veto off | 0 | | | | | | | | | |")
+    if other:
+        o = other["stats"]
+        lines += ["", f"## Rule profile comparison: {scan.ACTIVE_PROFILE} (above) vs {other['profile']} (below)", "",
+                  "A second full walk-forward on the same data under the other rule profile "
+                  "(see scan.RULE_PROFILES).", "", hdr, line(f"{other['profile']}: all", o["overall"])]
+        lines += [line(f"{other['profile']}: {p}", s) for p, s in o["by_pattern"].items()]
+        lines += [line(f"{other['profile']}: score {b}", s) for b, s in o["by_score"].items()]
     lines += ["", "| Day | Ticker | Pattern | Score | Entry | Fill | Stop | Target | Outcome | Bars | R |",
               "|---|---|---|---|---|---|---|---|---|---|---|"]
     for r in sorted(rows, key=lambda r: (r["scan_day"], r["ticker"])):
@@ -306,9 +297,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--period", default="2y")
     ap.add_argument("--min-score", type=int, default=None, help="override MIN_SCORE for the replay")
     ap.add_argument("--json", help="also write rows and stats here")
-    ap.add_argument("--grid", action="store_true", help="also re-score under stop / target variants")
+    ap.add_argument("--grid", action="store_true",
+                    help="also re-score under stop / target variants and replay the other rule profile")
+    ap.add_argument("--profile", choices=sorted(scan.RULE_PROFILES), default=scan.ACTIVE_PROFILE,
+                    help="rule profile to replay (default: the scanner's active profile)")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    scan.apply_profile(args.profile)
     if args.min_score is not None:
         scan.MIN_SCORE = args.min_score
     symbols = ([s.strip().upper() for s in args.tickers.split(",") if s.strip()]
@@ -322,17 +317,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     rows = walk_forward(data, args.days, args.horizon)
     stats = breakdown(rows)
     log.info("replay done in %.0fs: %d first-seen confirmed signals", time.time() - t0, len(rows))
-    grid_rows = veto = None
+    grid_rows = other = None
     if args.grid:
         grid_rows = grid(rows, data, args.horizon)
-        veto = veto_off_pass(data, args.days, args.horizon, rows)
-        log.info("veto-off pass done in %.0fs: %d reversal signals, %d admitted by the veto being off",
-                 time.time() - t0, veto["veto_off"]["signals"], len(veto["admitted_rows"]))
-    print(render(rows, stats, args.days, args.horizon, grid_rows, veto))
+        other_name = "legacy" if scan.ACTIVE_PROFILE == "spec" else "spec"
+        other = profile_pass(data, args.days, args.horizon, other_name)
+        log.info("%s-profile pass done in %.0fs: %d first-seen confirmed signals",
+                 other_name, time.time() - t0, len(other["rows"]))
+    print(render(rows, stats, args.days, args.horizon, grid_rows, other))
     if args.json:
         with open(args.json, "w", encoding="utf-8") as fh:
-            json.dump({"days": args.days, "horizon": args.horizon, "min_score": scan.MIN_SCORE,
-                       "stats": stats, "grid": grid_rows, "veto": veto, "rows": rows}, fh, indent=2)
+            json.dump({"days": args.days, "horizon": args.horizon, "profile": scan.ACTIVE_PROFILE,
+                       "min_score": scan.MIN_SCORE, "stats": stats, "grid": grid_rows,
+                       "other_profile": other, "rows": rows}, fh, indent=2)
     return 0
 
 

@@ -54,15 +54,18 @@ def _uptrend_prefix(n: int, start: float, end: float, seed: int = 1) -> np.ndarr
 
 
 def make_cup_and_handle() -> pd.DataFrame:
-    """Uptrend, 100-bar rounded cup 25% deep, 15-bar handle 6% deep, breakout today."""
-    pre = _uptrend_prefix(220, 60, 100)                      # 220 bars up-trend to 100
+    """Uptrend 40->100, 100-bar rounded cup 25% deep, 15-bar handle 6% deep, breakout today on volume.
+
+    The cup's 25-point decline retraces 42 % of the 60-point advance (spec: <= 50 %).
+    """
+    pre = _uptrend_prefix(220, 40, 100)                      # 220 bars up-trend to 100
     t = np.linspace(0, np.pi, 100)
     cup = 100 - 25 * np.sin(t)                               # 100 -> 75 -> 100
     handle = np.concatenate([np.linspace(100, 94, 8), np.linspace(94, 97, 7)])
     brk = np.array([101.5, 102.0])                           # close above handle high
     path = np.concatenate([pre, cup, handle, brk])
     df = _ohlc_from_path(path, seed=3)
-    df.loc[df.index[-2], "Volume"] *= 2.0                    # breakout volume
+    df.loc[df.index[-2], "Volume"] *= 3.0                    # breakout volume (spec: >= 1.4x the 20-bar average)
     return df
 
 
@@ -76,19 +79,22 @@ def make_inverse_hs() -> pd.DataFrame:
     path = np.concatenate([pre, ls, head, rs, brk])
     # pad with a gentle 200+ bar base so SMA200 exists but is not "strong downtrend"
     base = np.linspace(112, 120, 160)
-    return _ohlc_from_path(np.concatenate([base, path]), seed=5)
+    df = _ohlc_from_path(np.concatenate([base, path]), seed=5)
+    df.loc[df.index[-3:-1], "Volume"] *= 3.0                 # breakout volume (spec: >= 1.3x the 20-bar average)
+    return df
 
 
 def make_bullish_wolfe() -> pd.DataFrame:
     """Falling wedge 1-2-3-4-5 with point 5 undercutting line 1-3, then a close back above."""
     base = np.linspace(95, 105, 230)
-    p = [(0, 100.0), (10, 108.0), (22, 96.0), (32, 103.0), (46, 90.5)]  # (bar, price)
+    p = [(0, 100.0), (10, 108.0), (22, 96.0), (32, 103.0), (46, 91.5)]  # (bar, price)
     seg = []
     for (b0, v0), (b1, v1) in zip(p[:-1], p[1:]):
         seg.append(np.linspace(v0, v1, b1 - b0, endpoint=False))
-    wedge = np.concatenate(seg + [[90.5]])
-    # line 1-3 at bar 46: 100 + (96-100)/22*46 = 91.64 ; point 5 = 90.5 undercuts by ~1.1
-    rebound = np.array([91.0, 92.0, 92.8, 93.5, 94.0, 94.8, 95.5])  # 5 bars later swing low confirmed, then above line
+    wedge = np.concatenate(seg + [[91.5]])
+    # line 1-3 at bar 46: 100 + (96-100)/22*46 = 91.64 ; point 5 = 91.5 undercuts it (by ~0.5 on the
+    # actual pivots) and stays above the sweet-zone line through point 3 parallel to 2-4 (~90.9)
+    rebound = np.array([92.0, 92.5, 93.0, 93.5, 94.0, 94.8, 95.5])  # 5 bars later swing low confirmed, then above line
     path = np.concatenate([base, wedge, rebound])
     return _ohlc_from_path(path, seed=7, noise=0.002)
 

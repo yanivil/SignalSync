@@ -19,6 +19,10 @@ on:
         description: "MIN_SCORE override for the replay"
         required: false
         default: "60"
+      profile:
+        description: "rule profile to replay (spec or legacy); the other one is replayed alongside"
+        required: false
+        default: "spec"
   push:
     paths:
       - tools/backtest.py
@@ -44,6 +48,7 @@ jobs:
           DAYS: ${{ github.event.inputs.days || '63' }}
           HORIZON: ${{ github.event.inputs.horizon || '40' }}
           MIN_SCORE: ${{ github.event.inputs.min_score || '60' }}
+          PROFILE: ${{ github.event.inputs.profile || 'spec' }}
         run: |
           python tools/backtest.py --days "$DAYS" --horizon "$HORIZON" --min-score "$MIN_SCORE" \
-            --grid --json backtest.json | tee -a "$GITHUB_STEP_SUMMARY"
+            --profile "$PROFILE" --grid --json backtest.json | tee -a "$GITHUB_STEP_SUMMARY"

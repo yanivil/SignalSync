@@ -31,9 +31,11 @@ from test_scan import (END, _close_print, _ohlc_from_path, make_bullish_wolfe,  
 
 @pytest.fixture(autouse=True)
 def _restore_tunables(monkeypatch):
-    """``scan.main()`` mutates these globals; keep every test independent."""
+    """``scan.main()`` mutates these globals and tests may switch rule profiles; keep tests independent."""
     monkeypatch.setattr(scan, "MIN_SCORE", scan.MIN_SCORE)
     monkeypatch.setattr(scan, "MAX_BREAKOUT_AGE", scan.MAX_BREAKOUT_AGE)
+    yield
+    scan.apply_profile("spec")
 
 
 # --------------------------------------------------------------------------- #

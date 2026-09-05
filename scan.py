@@ -102,31 +102,105 @@ BREAKOUT_AGE_LAG = {
 LAST_BAR_MIN_FRACTION = 0.5
 FILL_CLOSE_MIN_AGE = dt.timedelta(hours=1)   # last trade must be this old to count as the closing print
 
+# --------------------------------------------------------------------------- #
+# Pattern rules.  The values below are the "spec" profile (docs/wiki/02 and the
+# engine specification of 2026-09-05); the previous rules are kept as the
+# "legacy" profile in RULE_PROFILES so the two can be replayed side by side.
+# ``None`` switches an optional rule off.
+# --------------------------------------------------------------------------- #
 # Cup & Handle
-CUP_MIN_LEN, CUP_MAX_LEN = 30, 250       # bars from left rim to right rim
-CUP_MIN_DEPTH, CUP_MAX_DEPTH = 0.12, 0.50  # cup depth as fraction of left rim
-CUP_RIM_TOL = 0.05                       # right rim within 5% of left rim
-HANDLE_MIN_LEN, HANDLE_MAX_LEN = 5, 40
+CUP_MIN_LEN, CUP_MAX_LEN = 20, 300       # bars from left rim to right rim (spec: min 20, typically 35-300)
+CUP_MIN_DEPTH, CUP_MAX_DEPTH = 0.12, 0.50  # cup depth as fraction of left rim (spec is silent on a minimum)
+CUP_MAX_RETRACE = 0.50                   # cup decline <= this share of the preceding advance; None = off
+CUP_ADVANCE_LOOKBACK = 250               # bars before rim A in which the "preceding advance" low is sought
+CUP_RIM_TOL = 0.05                       # right rim within 5% of left rim (used when CUP_RIM_TOL_OF_DEPTH is None)
+CUP_RIM_TOL_OF_DEPTH = 0.15              # spec: |rim B - rim A| <= 15% of the cup depth; None -> CUP_RIM_TOL
+CUP_BOTTOM_ZONE = (0.25, 0.75)           # the lowest low must sit in this middle part of the cup span
+HANDLE_MIN_LEN, HANDLE_MAX_LEN = 5, 25   # handle bars (spec: typically 5-25)
+HANDLE_MAX_LEN_OF_CUP = 1.0              # handle bars <= cup bars x this; None = off
 HANDLE_MAX_DEPTH = 0.12                  # handle pull-back from right rim (O'Neil: <= 12%)
 HANDLE_MAX_FRACTION_OF_CUP = 0.50        # handle depth vs cup depth
-CUP_PRIOR_ADVANCE = 0.25                 # >= 25% rise into the left rim (prior uptrend)
-CUP_MIN_ROUNDNESS = 0.60                 # R^2 of a U-shaped (convex) quadratic fit to cup lows
+CUP_PRIOR_ADVANCE = 0.20                 # >= 20% rise into the left rim over CUP_PRIOR_LOOKBACK bars ...
+CUP_PRIOR_LOOKBACK = 60                  # ... (spec: 30-60 bars) ...
+CUP_TREND_SMA_OR = True                  # ... OR SMA50 > SMA200 satisfies the trend filter on its own (spec)
+CUP_REQUIRE_CLOSE_ABOVE_SMA200 = False   # legacy gate: close above the SMA200
+CUP_MIN_ROUNDNESS = 0.70                 # R^2 of a U-shaped (convex) quadratic fit to cup lows (spec 0.70)
 CUP_MAX_V_ADVANTAGE = 0.0                # best V fit may beat the U fit's R^2 by at most this (0 = U must win)
+CUP_TARGET_BASE = "right_rim"            # measured move from the bottom to: right_rim (spec) | left_rim | trigger
 
 # Inverse Head & Shoulders
 IHS_MIN_LEN, IHS_MAX_LEN = 20, 200       # bars from left shoulder to right shoulder
 IHS_MIN_HEAD_ATR = 1.0                   # head must be >= 1 ATR below both shoulders
-IHS_SHOULDER_SYM = 0.50                  # |LS-RS| <= 50% of the shallower shoulder depth
-IHS_TIME_SYM = 2.5                       # left/right half duration ratio
+IHS_SHOULDER_SYM = None                  # legacy: |LS-RS| <= this x the shallower shoulder depth; None = off
+IHS_SHOULDER_SYM_OF_HEIGHT = 0.30        # spec: |LS-RS| <= this x head height (neckline at the head minus head)
+IHS_TIME_SYM = 2.5                       # left/right half duration ratio (loose sanity bound)
+IHS_SIDE_SYM_TOL = 0.40                  # spec: |(N1-S1) - (S2-N2)| / max <= this; None = off
 IHS_MAX_NECK_SLOPE = 0.15                # neckline rise/fall over pattern, fraction of price
-IHS_PRIOR_DECLINE = 0.10                 # >=10% decline into the left shoulder
+IHS_PRIOR_DECLINE = None                 # legacy: >= this share decline into the left shoulder; None = off
+IHS_PRIOR_DECLINE_OF_HEIGHT = 1.0        # spec: prior decline >= this x head height ...
+IHS_TREND_SMA_OR = True                  # ... OR SMA50 < SMA200 satisfies the trend filter on its own (spec)
+IHS_TARGET_AT_HEAD = True                # target height = neckline at the head bar minus head (spec); else at the break
+TREND_VETO_REVERSALS = False             # legacy: reject reversal patterns in a strong down-trend
 
 # Bullish Wolfe Wave
 WW_MIN_LEN, WW_MAX_LEN = 15, 200         # bars from point 1 to point 5
-WW_MAX_OVERSHOOT_ATR = 2.0               # point 5 may undercut line 1-3 by <= 2 ATR
+WW_SWEET_ZONE = True                     # spec: point 5 below line 1-3 but above the line through 3 parallel to 2-4
+WW_MAX_OVERSHOOT_ATR = 2.0               # legacy band: point 5 <= 2 ATR under line 1-3 (also scales the score)
+WW_TIME_SYM_TOL = 0.30                   # spec: legs 1-2, 2-3, 3-4 each within this of their mean; None = off
 WW_MAX_BARS_SINCE_P5 = 25                # confirmation must come soon after point 5
 WW_MAX_ETA_BARS = 250                    # target only if lines 1-3 / 2-4 meet within this many bars after point 5
 WW_MAX_TARGET_GAIN = 1.0                 # no target if line 1-4 at the ETA is more than +100% above the entry
+
+# Volume and risk (all patterns)
+VOLUME_AVG_LEN = 20                      # breakout volume is compared with this many prior bars (spec 20, legacy 50)
+VOLUME_CONFIRM = {                       # a breakout close needs this volume ratio to be CONFIRMED; None = not required
+    "Cup & Handle": 1.4,
+    "Inverse Head & Shoulders": 1.3,
+    "Bullish Wolfe Wave": None,
+}
+MAX_RISK_PCT = {                         # reject setups whose stop is further than this below the entry
+    "Cup & Handle": 12.0,
+    "Inverse Head & Shoulders": 15.0,
+    "Bullish Wolfe Wave": 15.0,
+}
+
+RULE_PROFILES: Dict[str, Dict[str, Any]] = {
+    "spec": {},                          # the module defaults above
+    "legacy": {                          # the rules in force until 2026-09-05
+        "CUP_MIN_LEN": 30, "CUP_MAX_LEN": 250, "CUP_MAX_RETRACE": None, "CUP_RIM_TOL_OF_DEPTH": None,
+        "CUP_BOTTOM_ZONE": (0.20, 0.80), "HANDLE_MAX_LEN": 40, "HANDLE_MAX_LEN_OF_CUP": None,
+        "CUP_PRIOR_ADVANCE": 0.25, "CUP_PRIOR_LOOKBACK": 120, "CUP_TREND_SMA_OR": False,
+        "CUP_REQUIRE_CLOSE_ABOVE_SMA200": True, "CUP_MIN_ROUNDNESS": 0.60, "CUP_TARGET_BASE": "left_rim",
+        "IHS_SHOULDER_SYM": 0.50, "IHS_SHOULDER_SYM_OF_HEIGHT": None, "IHS_SIDE_SYM_TOL": None,
+        "IHS_PRIOR_DECLINE": 0.10, "IHS_PRIOR_DECLINE_OF_HEIGHT": None, "IHS_TREND_SMA_OR": False,
+        "IHS_TARGET_AT_HEAD": False, "TREND_VETO_REVERSALS": True,
+        "WW_SWEET_ZONE": False, "WW_TIME_SYM_TOL": None,
+        "VOLUME_AVG_LEN": 50,
+        "VOLUME_CONFIRM": {"Cup & Handle": None, "Inverse Head & Shoulders": None, "Bullish Wolfe Wave": None},
+        "MAX_RISK_PCT": {"Cup & Handle": 15.0, "Inverse Head & Shoulders": 15.0, "Bullish Wolfe Wave": 15.0},
+    },
+}
+ACTIVE_PROFILE = "spec"
+_SPEC_VALUES: Dict[str, Any] = {}        # filled by apply_profile on first use
+
+
+def apply_profile(name: str) -> str:
+    """Switch the rule constants to ``RULE_PROFILES[name]``; returns the previous profile.
+
+    "spec" restores the module defaults.  Used by ``--profile`` and by the
+    backtest to replay two rule sets on the same data.
+    """
+    global ACTIVE_PROFILE
+    if name not in RULE_PROFILES:
+        raise ValueError(f"unknown rule profile {name!r}; choose from {sorted(RULE_PROFILES)}")
+    keys = {k for p in RULE_PROFILES.values() for k in p}
+    if not _SPEC_VALUES:
+        _SPEC_VALUES.update({k: globals()[k] for k in keys})
+    previous = ACTIVE_PROFILE
+    for k in keys:
+        globals()[k] = RULE_PROFILES[name].get(k, _SPEC_VALUES[k])
+    ACTIVE_PROFILE = name
+    return previous
 
 
 def max_breakout_age(pattern: str) -> int:
@@ -632,7 +706,7 @@ def trend_context(df: pd.DataFrame) -> Tuple[str, bool, bool]:
 
 
 def _volume_ratio(df: pd.DataFrame, idx: int) -> Optional[float]:
-    """Volume on bar ``idx`` divided by the trailing 50-bar average (excl. idx).
+    """Volume on bar ``idx`` divided by the trailing ``VOLUME_AVG_LEN``-bar average (excl. idx).
 
     :returns: The ratio rounded to 2 dp, or ``None`` when ``idx < 20``, the
         bar's volume is NaN, or the trailing average is zero/NaN (a zero-volume
@@ -641,11 +715,27 @@ def _volume_ratio(df: pd.DataFrame, idx: int) -> Optional[float]:
     vol = df["Volume"].to_numpy(dtype=float)
     if idx < 20 or np.isnan(vol[idx]):
         return None
-    base = vol[max(0, idx - 50):idx]
+    base = vol[max(0, idx - VOLUME_AVG_LEN):idx]
     base = base[~np.isnan(base)]
     if len(base) == 0 or base.mean() == 0:
         return None
     return round(float(vol[idx] / base.mean()), 2)
+
+
+def _sma_pair(df: pd.DataFrame) -> Tuple[Optional[float], Optional[float]]:
+    """Last SMA50 and SMA200 of the close (``None`` when there is not enough history)."""
+    close = df["Close"]
+    out = []
+    for n in (50, 200):
+        v = close.rolling(n).mean().iloc[-1] if len(close) >= n else float("nan")
+        out.append(None if math.isnan(v) else float(v))
+    return out[0], out[1]
+
+
+def _volume_confirmed(pattern: str, vr: Optional[float]) -> bool:
+    """Spec rule: a breakout close is CONFIRMED only with ``VOLUME_CONFIRM[pattern]`` x average volume."""
+    need = VOLUME_CONFIRM.get(pattern)
+    return need is None or (vr is not None and vr >= need)
 
 
 def evaluate_breakout(close: np.ndarray, trigger_at: Callable[[int], float], start: int,
@@ -772,17 +862,18 @@ def _v_shape_r2(lows: np.ndarray, bottom_rel: int) -> float:
 
 
 def _find_handle(high: np.ndarray, low: np.ndarray, close: np.ndarray, b: int,
-                 n: int) -> Optional[Tuple[int, float, int]]:
+                 n: int, max_len: Optional[int] = None) -> Optional[Tuple[int, float, int]]:
     """Locate the handle that follows right rim ``b``.
 
     The handle runs from ``b+1`` until the bar *before* the first close that
-    exceeds the running handle high (the breakout), or until ``HANDLE_MAX_LEN``
-    bars / the end of data.  It must contain at least ``HANDLE_MIN_LEN`` bars.
+    exceeds the running handle high (the breakout), or until ``max_len``
+    (default ``HANDLE_MAX_LEN``) bars / the end of data.  It must contain at
+    least ``HANDLE_MIN_LEN`` bars.
 
     :returns: ``(handle_low_index, handle_high, handle_end_index)`` or ``None``.
     """
     start = b + 1
-    end_max = min(b + HANDLE_MAX_LEN, n - 1)
+    end_max = min(b + (max_len if max_len is not None else HANDLE_MAX_LEN), n - 1)
     if start + HANDLE_MIN_LEN - 1 > end_max:
         return None
     run_high = -np.inf
@@ -842,8 +933,10 @@ def detect_cup_and_handle(df: pd.DataFrame, ticker: str) -> List[Signal]:
     if n < CUP_MIN_LEN + HANDLE_MIN_LEN + 5:
         return []
     desc, uptrend, strong_down = trend_context(df)
-    if not uptrend:
-        return []  # rule 2: continuation pattern needs the uptrend
+    if CUP_REQUIRE_CLOSE_ABOVE_SMA200 and not uptrend:
+        return []  # legacy rule 2 gate: continuation pattern needs the uptrend
+    s50, s200 = _sma_pair(df)
+    sma_trend_ok = CUP_TREND_SMA_OR and s50 is not None and s200 is not None and s50 > s200
     piv_h, _ = find_pivots(high, low, order=PIVOT_ORDER)
     signals: List[Signal] = []
     a_tr = atr(df).to_numpy(dtype=float)
@@ -856,24 +949,36 @@ def detect_cup_and_handle(df: pd.DataFrame, ticker: str) -> List[Signal]:
             if width > CUP_MAX_LEN:
                 break
             rim_a, rim_b = high[a], high[b]
-            if abs(rim_b - rim_a) / rim_a > CUP_RIM_TOL:
-                continue
             seg_low = low[a:b + 1]
             bottom_rel = int(np.argmin(seg_low))
             bottom = seg_low[bottom_rel]
             depth = (rim_a - bottom) / rim_a
             if not (CUP_MIN_DEPTH <= depth <= CUP_MAX_DEPTH):
                 continue
-            pos = bottom_rel / width
-            if not (0.20 <= pos <= 0.80):
-                continue  # bottom hugging one rim -> not a rounded cup
-            # Prior up-trend into the left rim: a cup is a *continuation* base,
-            # so the stock must have advanced meaningfully before rim A.  The
-            # test is the *rise* from the 120-bar low to rim A (>= 25 %), not
-            # the low's distance below the rim (which would be a 33 % rise).
-            pre_low = float(low[max(0, a - 120):a + 1].min())
-            if (rim_a - pre_low) / pre_low < CUP_PRIOR_ADVANCE:
+            # Rim alignment: spec measures the rim mismatch against the cup
+            # depth (<= 15 % of it); legacy against the price (<= 5 %).
+            rim_tol = (CUP_RIM_TOL_OF_DEPTH * (rim_a - bottom) if CUP_RIM_TOL_OF_DEPTH is not None
+                       else CUP_RIM_TOL * rim_a)
+            if abs(rim_b - rim_a) > rim_tol:
                 continue
+            pos = bottom_rel / width
+            if not (CUP_BOTTOM_ZONE[0] <= pos <= CUP_BOTTOM_ZONE[1]):
+                continue  # bottom hugging one rim -> not a rounded cup
+            # Prior up-trend into the left rim: a cup is a *continuation* base.
+            # Spec: SMA50 > SMA200, OR a >= 20 % *rise* from the low of the
+            # CUP_PRIOR_LOOKBACK bars before rim A (legacy: 25 % over 120 bars,
+            # no SMA alternative).  Note it is a rise from the low, not the
+            # low's distance below the rim (which would be a 33 % rise).
+            recent_low = float(low[max(0, a - CUP_PRIOR_LOOKBACK):a + 1].min())
+            if not sma_trend_ok and (rim_a - recent_low) / recent_low < CUP_PRIOR_ADVANCE:
+                continue
+            # Cup rollback: the decline from rim A may not retrace more than
+            # CUP_MAX_RETRACE of the preceding advance (the rise from the
+            # CUP_ADVANCE_LOOKBACK-bar low to rim A).
+            if CUP_MAX_RETRACE is not None:
+                pre_low = float(low[max(0, a - CUP_ADVANCE_LOOKBACK):a + 1].min())
+                if (rim_a - bottom) > CUP_MAX_RETRACE * (rim_a - pre_low):
+                    continue
             # Roundness: fit a convex quadratic to the cup lows; a ragged or
             # lopsided base scores poorly.  This is the main defence against
             # "seeing" cups in random price movement (rule 1).
@@ -889,7 +994,9 @@ def detect_cup_and_handle(df: pd.DataFrame, ticker: str) -> List[Signal]:
             # Handle: the stretch after rim B up to (not including) the first
             # close above the handle's own high.  It must last >= HANDLE_MIN_LEN
             # bars, stay shallow, and hold the upper half of the cup.
-            handle = _find_handle(high, low, close, b, n)
+            max_handle = (HANDLE_MAX_LEN if HANDLE_MAX_LEN_OF_CUP is None
+                          else min(HANDLE_MAX_LEN, int(width * HANDLE_MAX_LEN_OF_CUP)))
+            handle = _find_handle(high, low, close, b, n, max_handle)
             if handle is None:
                 continue
             h_low_idx, handle_high, handle_end = handle
@@ -905,37 +1012,47 @@ def detect_cup_and_handle(df: pd.DataFrame, ticker: str) -> List[Signal]:
                                                      start=handle_end + 1, pattern="Cup & Handle")
             if status == "STALE":
                 continue
+            vr = _volume_ratio(df, n - 1 - age) if age is not None else None
+            volume_note = ""
+            if status == "CONFIRMED" and not _volume_confirmed("Cup & Handle", vr):
+                # Spec: a breakout close without volume is not a confirmation;
+                # keep it visible on the watchlist rather than dropping it.
+                status, age = "WATCHLIST", None
+                volume_note = f"; breakout without volume ({vr if vr is not None else 'n/a'}x)"
             entry = float(close[-1]) if status == "CONFIRMED" and close[-1] > trigger else float(trigger)
             stop = float(handle_low - 0.25 * a_tr[h_low_idx])
             if stop >= entry:
                 continue
             risk = (entry - stop) / entry * 100
-            if risk > 15:
+            max_risk = MAX_RISK_PCT["Cup & Handle"]
+            if risk > max_risk:
                 continue  # rule 4: reject setups whose structural stop is too far
             # Quality score (0-100): 50 base
             #   +15 roundness         (0 at CUP_MIN_ROUNDNESS, 15 at R^2 = 1)
             #   +10 depth near 25 %   (0 at 0 % or 50 %, linear)
             #   +10 shallow handle    (0 at HANDLE_MAX_DEPTH)
-            #   +10 tight risk        (0 at the 15 % limit)
-            #   +5  breakout volume >= 1.3x the 50-day average
+            #   +10 tight risk        (0 at the MAX_RISK_PCT limit)
+            #   +5  breakout volume >= 1.3x the VOLUME_AVG_LEN-day average
             score = 50
             score += 15 * (roundness - CUP_MIN_ROUNDNESS) / (1 - CUP_MIN_ROUNDNESS)
             score += 10 * (1 - min(abs(depth - 0.25) / 0.25, 1))  # depth ~25% ideal
             score += 10 * (1 - min(handle_depth / HANDLE_MAX_DEPTH, 1))
-            score += 10 * (1 - min(risk / 15, 1))
-            vr = _volume_ratio(df, n - 1 - age) if age is not None else None
+            score += 10 * (1 - min(risk / max_risk, 1))
             if vr is not None and vr >= 1.3:
                 score += 5
             score = int(max(0, min(100, round(score))))
             if score < MIN_SCORE:
                 continue
-            target = float(entry + (rim_a - bottom))  # measured move
+            # Measured move: cup bottom to the right rim (spec), the left rim
+            # (legacy) or the handle breakout level (Investopedia).
+            base_level = {"right_rim": rim_b, "left_rim": rim_a, "trigger": trigger}[CUP_TARGET_BASE]
+            target = float(entry + (base_level - bottom))
             dates = df.index
             notes = (f"left rim {dates[a].date()} @{rim_a:.2f}, bottom "
                      f"{dates[a + bottom_rel].date()} @{bottom:.2f} (depth {depth*100:.0f}%), "
                      f"right rim {dates[b].date()} @{rim_b:.2f}, handle low "
                      f"{dates[h_low_idx].date()} @{handle_low:.2f} (depth {handle_depth*100:.1f}%), "
-                     f"trigger {trigger:.2f}")
+                     f"trigger {trigger:.2f}{volume_note}")
             signals.append(Signal(ticker, "Cup & Handle", status, round(entry, 2), round(stop, 2),
                                   round(risk, 2), round(target, 2), score, round(float(close[-1]), 2),
                                   str(dates[-1].date()), age, vr, desc, notes))
@@ -971,8 +1088,10 @@ def detect_inverse_hs(df: pd.DataFrame, ticker: str) -> List[Signal]:
     if n < IHS_MIN_LEN + 20:
         return []
     desc, uptrend, strong_down = trend_context(df)
-    if strong_down:
+    if TREND_VETO_REVERSALS and strong_down:
         return []
+    s50, s200 = _sma_pair(df)
+    sma_trend_ok = IHS_TREND_SMA_OR and s50 is not None and s200 is not None and s50 < s200
     a_tr = atr(df).to_numpy(dtype=float)
     piv_h, piv_l = find_pivots(high, low, order=PIVOT_ORDER)
     signals: List[Signal] = []
@@ -987,7 +1106,7 @@ def detect_inverse_hs(df: pd.DataFrame, ticker: str) -> List[Signal]:
         if not (h_v < ls_v - IHS_MIN_HEAD_ATR * unit and h_v < rs_v - IHS_MIN_HEAD_ATR * unit):
             continue
         d_left, d_right = ls_v - h_v, rs_v - h_v
-        if abs(ls_v - rs_v) > IHS_SHOULDER_SYM * min(d_left, d_right):
+        if IHS_SHOULDER_SYM is not None and abs(ls_v - rs_v) > IHS_SHOULDER_SYM * min(d_left, d_right):
             continue
         ratio = (h - ls) / max(rs - h, 1)
         if ratio > IHS_TIME_SYM or ratio < 1 / IHS_TIME_SYM:
@@ -1005,10 +1124,24 @@ def detect_inverse_hs(df: pd.DataFrame, ticker: str) -> List[Signal]:
         # trend line rather than a neckline.
         if abs(slope * width) / close[h] > IHS_MAX_NECK_SLOPE:
             continue
-        # Prior decline into the left shoulder, measured as a share of the
-        # 60-bar high (slightly stricter than "10 % above the shoulder low").
+        head_height = float(high[n1] + slope * (h - n1)) - h_v   # spec: neckline at the head bar minus head
+        # Shoulder symmetry (spec): |S2 - S1| <= 30 % of the head height.
+        if IHS_SHOULDER_SYM_OF_HEIGHT is not None and abs(ls_v - rs_v) > IHS_SHOULDER_SYM_OF_HEIGHT * head_height:
+            continue
+        # Side-duration symmetry (spec): S1->N1 and N2->S2 within +-40 % of each other.
+        if IHS_SIDE_SYM_TOL is not None:
+            left_side, right_side = n1 - ls, rs - n2
+            if abs(left_side - right_side) / max(left_side, right_side) > IHS_SIDE_SYM_TOL:
+                continue
+        # Prior decline into the left shoulder.  Spec: SMA50 < SMA200 OR a
+        # decline of at least one head height from the 60-bar high; legacy: a
+        # 10 % decline measured as a share of that high.
         look = high[max(0, ls - 60):ls + 1]
-        if (look.max() - ls_v) / look.max() < IHS_PRIOR_DECLINE:
+        decline = float(look.max()) - ls_v
+        decline_ok = ((IHS_PRIOR_DECLINE is not None and decline / float(look.max()) >= IHS_PRIOR_DECLINE)
+                      or (IHS_PRIOR_DECLINE_OF_HEIGHT is not None
+                          and decline >= IHS_PRIOR_DECLINE_OF_HEIGHT * head_height))
+        if not (sma_trend_ok or decline_ok):
             continue
 
         def neck_at(idx: int) -> float:
@@ -1021,28 +1154,37 @@ def detect_inverse_hs(df: pd.DataFrame, ticker: str) -> List[Signal]:
                                                  pattern="Inverse Head & Shoulders", floor=rs_v)
         if status == "STALE":
             continue
+        vr = _volume_ratio(df, n - 1 - age) if age is not None else None
+        volume_note = ""
+        if status == "CONFIRMED" and not _volume_confirmed("Inverse Head & Shoulders", vr):
+            status, age, trigger = "WATCHLIST", None, trigger_now
+            volume_note = f"; breakout without volume ({vr if vr is not None else 'n/a'}x)"
         entry = float(close[-1]) if status == "CONFIRMED" and close[-1] > trigger else float(trigger)
         stop = float(rs_v - 0.25 * a_tr[rs])
         if stop >= entry:
             continue
         risk = (entry - stop) / entry * 100
-        if risk > 15:
+        max_risk = MAX_RISK_PCT["Inverse Head & Shoulders"]
+        if risk > max_risk:
             continue
-        height = trigger - h_v          # measured move: neckline minus head
+        # Measured move: neckline minus head, with the neckline read at the
+        # head bar (spec) or at the breakout bar (legacy).
+        height = head_height if IHS_TARGET_AT_HEAD else trigger - h_v
         # Quality score (0-100): 50 base
-        #   +15 shoulder price symmetry (0 at the IHS_SHOULDER_SYM limit)
+        #   +15 shoulder price symmetry (0 at the symmetry limit in force)
         #   +10 shoulder time symmetry  (log-scaled, 0 at the IHS_TIME_SYM limit)
         #   +10 flat neckline           (0 at the IHS_MAX_NECK_SLOPE limit)
         #   +5  close above SMA200
-        #   +5  tight risk              (0 at the 15 % limit)
-        #   +5  breakout volume >= 1.3x the 50-day average
+        #   +5  tight risk              (0 at the MAX_RISK_PCT limit)
+        #   +5  breakout volume >= 1.3x the VOLUME_AVG_LEN-day average
         score = 50
-        score += 15 * (1 - abs(ls_v - rs_v) / max(IHS_SHOULDER_SYM * min(d_left, d_right), 1e-9))
+        sym_limit = (IHS_SHOULDER_SYM * min(d_left, d_right) if IHS_SHOULDER_SYM is not None
+                     else (IHS_SHOULDER_SYM_OF_HEIGHT or 0) * head_height)
+        score += 15 * (1 - min(abs(ls_v - rs_v) / max(sym_limit, 1e-9), 1))
         score += 10 * (1 - abs(math.log(ratio)) / math.log(IHS_TIME_SYM))
         score += 10 * (1 - min(abs(slope * width) / close[h] / IHS_MAX_NECK_SLOPE, 1))
         score += 5 if uptrend else 0
-        score += 5 * (1 - min(risk / 15, 1))
-        vr = _volume_ratio(df, n - 1 - age) if age is not None else None
+        score += 5 * (1 - min(risk / max_risk, 1))
         if vr is not None and vr >= 1.3:
             score += 5
         score = int(max(0, min(100, round(score))))
@@ -1051,7 +1193,7 @@ def detect_inverse_hs(df: pd.DataFrame, ticker: str) -> List[Signal]:
         dates = df.index
         notes = (f"LS {dates[ls].date()} @{ls_v:.2f}, head {dates[h].date()} @{h_v:.2f}, "
                  f"RS {dates[rs].date()} @{rs_v:.2f}, neckline {high[n1]:.2f}->{high[n2]:.2f} "
-                 f"(now {trigger_now:.2f})")
+                 f"(now {trigger_now:.2f}){volume_note}")
         signals.append(Signal(ticker, "Inverse Head & Shoulders", status, round(entry, 2),
                               round(stop, 2), round(risk, 2), round(float(entry + height), 2),
                               score, round(float(close[-1]), 2), str(dates[-1].date()), age, vr,
@@ -1093,7 +1235,7 @@ def detect_bullish_wolfe(df: pd.DataFrame, ticker: str) -> List[Signal]:
     if n < WW_MIN_LEN + 20:
         return []
     desc, uptrend, strong_down = trend_context(df)
-    if strong_down:
+    if TREND_VETO_REVERSALS and strong_down:
         return []
     a_tr = atr(df).to_numpy(dtype=float)
     piv_h, piv_l = find_pivots(high, low, order=PIVOT_ORDER)
@@ -1127,10 +1269,25 @@ def detect_bullish_wolfe(df: pd.DataFrame, ticker: str) -> List[Signal]:
             continue  # upper line must fall faster -> lines converge ahead
         line13_at5 = v1 + s13 * (p5 - p1)
         overshoot = line13_at5 - v5     # positive = undercut below the line
-        if overshoot < -0.5 * a_tr[p5]:
-            continue  # point 5 clearly failed to reach the line
-        if overshoot > WW_MAX_OVERSHOOT_ATR * a_tr[p5]:
-            continue  # broke down for real, not a Wolfe false break
+        if WW_SWEET_ZONE:
+            # Spec: point 5 must penetrate below line 1-3 and stop inside the
+            # "sweet zone", i.e. above the line through point 3 parallel to 2-4.
+            if overshoot < 0:
+                continue  # point 5 did not break below line 1-3
+            if v5 < v3 + s24 * (p5 - p3):
+                continue  # broke below the sweet zone: a real breakdown, not a false one
+        else:
+            if overshoot < -0.5 * a_tr[p5]:
+                continue  # point 5 clearly failed to reach the line
+            if overshoot > WW_MAX_OVERSHOOT_ATR * a_tr[p5]:
+                continue  # broke down for real, not a Wolfe false break
+        if WW_TIME_SYM_TOL is not None:
+            # Spec: legs 1->2, 2->3 and 3->4 keep a consistent rhythm (each
+            # within WW_TIME_SYM_TOL of their mean).
+            legs = (p2 - p1, p3 - p2, p4 - p3)
+            mean_leg = sum(legs) / 3
+            if any(abs(leg - mean_leg) > WW_TIME_SYM_TOL * mean_leg for leg in legs):
+                continue
         # Confirmation: closes back above line 1-3 after point 5; a watchlist
         # row must also hold above point 5.
         def line13(idx: int) -> float:
@@ -1141,12 +1298,18 @@ def detect_bullish_wolfe(df: pd.DataFrame, ticker: str) -> List[Signal]:
                                                  pattern="Bullish Wolfe Wave", floor=v5)
         if status == "STALE":
             continue
+        vr = _volume_ratio(df, n - 1 - age) if age is not None else None
+        volume_note = ""
+        if status == "CONFIRMED" and not _volume_confirmed("Bullish Wolfe Wave", vr):
+            status, age, trigger = "WATCHLIST", None, line_now
+            volume_note = f"; breakout without volume ({vr if vr is not None else 'n/a'}x)"
         entry = float(close[-1]) if status == "CONFIRMED" and close[-1] > trigger else float(trigger)
         stop = float(v5 - 0.25 * a_tr[p5])
         if stop >= entry:
             continue
         risk = (entry - stop) / entry * 100
-        if risk > 15:
+        max_risk = MAX_RISK_PCT["Bullish Wolfe Wave"]
+        if risk > max_risk:
             continue
         # ETA = the bar where lines 1-3 and 2-4 meet.  Solving
         #   v1 + s13 (x - p1) = v2 + s24 (x - p2)
@@ -1170,16 +1333,15 @@ def detect_bullish_wolfe(df: pd.DataFrame, ticker: str) -> List[Signal]:
         # Quality score (0-100): 50 base
         #   +15 point 5 close to line 1-3 (0 at the WW_MAX_OVERSHOOT_ATR limit)
         #   +10 time symmetry of legs 1-3 vs 3-5 (log-scaled, 0 at a 3x ratio)
-        #   +10 tight risk (0 at the 15 % limit)
+        #   +10 tight risk (0 at the MAX_RISK_PCT limit)
         #   +5  close above SMA200
-        #   +5  breakout volume >= 1.3x the 50-day average
+        #   +5  breakout volume >= 1.3x the VOLUME_AVG_LEN-day average
         score = 50
         score += 15 * (1 - min(abs(overshoot) / (WW_MAX_OVERSHOOT_ATR * a_tr[p5]), 1))
         sym = (p3 - p1) / max(p5 - p3, 1)
         score += 10 * (1 - min(abs(math.log(sym)) / math.log(3), 1))
-        score += 10 * (1 - min(risk / 15, 1))
+        score += 10 * (1 - min(risk / max_risk, 1))
         score += 5 if uptrend else 0
-        vr = _volume_ratio(df, n - 1 - age) if age is not None else None
         if vr is not None and vr >= 1.3:
             score += 5
         score = int(max(0, min(100, round(score))))
@@ -1189,7 +1351,8 @@ def detect_bullish_wolfe(df: pd.DataFrame, ticker: str) -> List[Signal]:
         notes = (f"1 {dates[p1].date()} @{v1:.2f}, 2 {dates[p2].date()} @{v2:.2f}, "
                  f"3 {dates[p3].date()} @{v3:.2f}, 4 {dates[p4].date()} @{v4:.2f}, "
                  f"5 {dates[p5].date()} @{v5:.2f}; line 1-3 now {line_now:.2f}"
-                 + (f"; ETA ~{dates[min(int(eta), n - 1)].date()}" if eta and eta < n else ""))
+                 + (f"; ETA ~{dates[min(int(eta), n - 1)].date()}" if eta and eta < n else "")
+                 + volume_note)
         signals.append(Signal(ticker, "Bullish Wolfe Wave", status, round(entry, 2), round(stop, 2),
                               round(risk, 2), round(target, 2) if target else None, score,
                               round(float(close[-1]), 2), str(dates[-1].date()), age, vr, desc, notes))
@@ -1305,8 +1468,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--period", default="2y")
     ap.add_argument("--min-score", type=int, default=MIN_SCORE)
     ap.add_argument("--max-age", type=int, default=MAX_BREAKOUT_AGE)
+    ap.add_argument("--profile", choices=sorted(RULE_PROFILES), default=ACTIVE_PROFILE,
+                    help="rule profile: spec (default) or legacy (rules in force until 2026-09-05)")
     ap.add_argument("-v", "--verbose", action="store_true")
     args = ap.parse_args(argv)
+    apply_profile(args.profile)
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
     MIN_SCORE, MAX_BREAKOUT_AGE = args.min_score, args.max_age
@@ -1340,7 +1506,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     meta: Dict[str, Any] = {"run_date": dt.datetime.now().strftime("%Y-%m-%d %H:%M"), "universe": len(symbols),
             "scanned": len(data), "errors": len(symbols) - len(data),
             **bar_info,
-            "min_score": MIN_SCORE, "max_breakout_age": MAX_BREAKOUT_AGE,
+            "profile": ACTIVE_PROFILE, "min_score": MIN_SCORE, "max_breakout_age": MAX_BREAKOUT_AGE,
             "max_breakout_age_by_pattern": {p: max_breakout_age(p) for p in BREAKOUT_AGE_LAG}}
     os.makedirs(args.out_dir, exist_ok=True)
     with open(os.path.join(args.out_dir, "signals.json"), "w", encoding="utf-8") as fh:

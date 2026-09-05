@@ -164,8 +164,9 @@ def test_volume_ratio_edge_cases(cup_df):
     assert scan._volume_ratio(spot, n - 1) == 0.0                 # zero-volume session
     spot.loc[spot.index[-1], "Volume"] = np.nan
     assert scan._volume_ratio(spot, n - 1) is None
+    k = scan.VOLUME_AVG_LEN
     assert scan._volume_ratio(cup_df, n - 1) == pytest.approx(
-        cup_df["Volume"].iloc[-1] / cup_df["Volume"].iloc[n - 51:n - 1].mean(), abs=0.006)
+        cup_df["Volume"].iloc[-1] / cup_df["Volume"].iloc[n - 1 - k:n - 1].mean(), abs=0.006)
 
 
 def test_max_breakout_age_and_dedupe():
@@ -215,12 +216,20 @@ def test_cup_levels_follow_documented_formulas(cup_df):
     assert float(m[10]) == pytest.approx((rim_b - handle_low) / rim_b * 100, abs=0.06)
     # Geometry bounds actually hold on the reported anchors.
     assert scan.CUP_MIN_LEN <= b - a <= scan.CUP_MAX_LEN
-    assert abs(rim_b - rim_a) / rim_a <= scan.CUP_RIM_TOL
     assert scan.CUP_MIN_DEPTH <= (rim_a - bottom) / rim_a <= scan.CUP_MAX_DEPTH
     assert handle_low < trigger
-    # Prior advance is a *rise* from the 120-bar low to rim A (not "low 25 % below rim").
-    pre_low = low[max(0, a - 120):a + 1].min()
-    assert (rim_a - pre_low) / pre_low >= scan.CUP_PRIOR_ADVANCE
+    # Spec trend filter: SMA50 > SMA200, or a >= 20 % *rise* from the 60-bar low into rim A
+    # (a rise from the low, not "low 20 % below the rim").
+    s50, s200 = scan._sma_pair(cup_df)
+    recent_low = low[max(0, a - scan.CUP_PRIOR_LOOKBACK):a + 1].min()
+    assert s50 > s200 or (rim_a - recent_low) / recent_low >= scan.CUP_PRIOR_ADVANCE
+    # Spec rollback rule: the cup decline retraces at most half of the preceding advance.
+    pre_low = low[max(0, a - scan.CUP_ADVANCE_LOOKBACK):a + 1].min()
+    assert (rim_a - bottom) <= scan.CUP_MAX_RETRACE * (rim_a - pre_low)
+    assert abs(rim_b - rim_a) <= scan.CUP_RIM_TOL_OF_DEPTH * (rim_a - bottom)
+    assert scan.CUP_BOTTOM_ZONE[0] <= (low[a:b + 1].argmin()) / (b - a) <= scan.CUP_BOTTOM_ZONE[1]
+    assert h - b <= min(scan.HANDLE_MAX_LEN, b - a)               # handle shorter than the cup
+    assert s.volume_ratio >= scan.VOLUME_CONFIRM["Cup & Handle"]  # confirmation needs volume
     # Trigger = handle high; first close above it after the handle is the break.
     assert high[b + 1:h + 1].max() <= trigger + TOL
     first_break = next(i for i in range(h + 1, len(close)) if close[i] > trigger)
@@ -230,8 +239,9 @@ def test_cup_levels_follow_documented_formulas(cup_df):
     assert trigger < s.entry <= trigger * (1 + scan.MAX_RUNAWAY)
     atr = scan.atr(cup_df).to_numpy()
     assert s.stop == pytest.approx(handle_low - 0.25 * atr[h], abs=TOL)
-    assert s.target == pytest.approx(s.entry + (rim_a - bottom), abs=TOL)
+    assert s.target == pytest.approx(s.entry + (rim_b - bottom), abs=TOL)   # spec: bottom to the right rim
     assert s.risk_pct == pytest.approx((s.entry - s.stop) / s.entry * 100, abs=0.02)
+    assert s.risk_pct <= scan.MAX_RISK_PCT["Cup & Handle"]
     assert s.volume_ratio == scan._volume_ratio(cup_df, first_break)
 
 
@@ -263,10 +273,9 @@ def test_ihs_levels_follow_documented_formulas(ihs_df):
     n = len(close)
     ls_v, h_v, rs_v = low[ls], low[h], low[rs]
     assert (float(m[2]), float(m[4]), float(m[6])) == tuple(round(v, 2) for v in (ls_v, h_v, rs_v))
-    # Head depth and shoulder symmetry rules hold on the reported anchors.
+    # Head depth rule holds on the reported anchors.
     unit = scan.atr(ihs_df).to_numpy()
     assert h_v < ls_v - scan.IHS_MIN_HEAD_ATR * unit[h] and h_v < rs_v - scan.IHS_MIN_HEAD_ATR * unit[h]
-    assert abs(ls_v - rs_v) <= scan.IHS_SHOULDER_SYM * min(ls_v - h_v, rs_v - h_v)
     # Neckline through the highest highs strictly between the anchors; slope bounded.
     n1 = ls + 1 + int(np.argmax(high[ls + 1:h]))
     n2 = h + 1 + int(np.argmax(high[h + 1:rs]))
@@ -274,17 +283,25 @@ def test_ihs_levels_follow_documented_formulas(ihs_df):
     slope = (high[n2] - high[n1]) / (n2 - n1)
     assert (float(m[7]), float(m[8])) == (round(high[n1], 2), round(high[n2], 2))
     assert abs(slope * (rs - ls)) / close[h] <= scan.IHS_MAX_NECK_SLOPE
-    # Prior decline is measured as a share of the 60-bar high before LS.
-    look = high[max(0, ls - 60):ls + 1]
-    assert (look.max() - ls_v) / look.max() >= scan.IHS_PRIOR_DECLINE
     neck = lambda i: high[n1] + slope * (i - n1)  # noqa: E731
+    head_height = neck(h) - h_v
+    # Spec trend filter: SMA50 < SMA200, or a decline of at least one head height into LS.
+    look = high[max(0, ls - 60):ls + 1]
+    s50, s200 = scan._sma_pair(ihs_df)
+    assert s50 < s200 or (look.max() - ls_v) >= scan.IHS_PRIOR_DECLINE_OF_HEIGHT * head_height
+    # Spec symmetry rules: shoulders within 30 % of the head height; side durations within 40 %.
+    assert abs(ls_v - rs_v) <= scan.IHS_SHOULDER_SYM_OF_HEIGHT * head_height
+    left_side, right_side = n1 - ls, rs - n2
+    assert abs(left_side - right_side) / max(left_side, right_side) <= scan.IHS_SIDE_SYM_TOL
     assert float(m[9]) == pytest.approx(neck(n - 1), abs=TOL)
     first_break = next(j for j in range(rs + 1, n) if close[j] > neck(j))
     trigger = neck(first_break)
     assert s.bars_since_break == n - 1 - first_break
     assert s.status == "CONFIRMED" and s.entry == round(close[-1], 2)
+    assert s.volume_ratio >= scan.VOLUME_CONFIRM["Inverse Head & Shoulders"]
     assert s.stop == pytest.approx(rs_v - 0.25 * unit[rs], abs=TOL)
-    assert s.target == pytest.approx(s.entry + (trigger - h_v), abs=TOL)   # neckline-to-head height
+    assert s.target == pytest.approx(s.entry + head_height, abs=TOL)   # spec: neckline at the head bar minus head
+    assert trigger > 0                                                   # (break-bar neckline, legacy height)
     assert s.risk_pct == pytest.approx((s.entry - s.stop) / s.entry * 100, abs=0.02)
 
 
@@ -306,7 +323,10 @@ def test_wolfe_target_is_line_1_4_at_the_eta(wolfe_df):
     line13 = lambda x: v1 + s13 * (x - p1)  # noqa: E731
     overshoot = line13(p5) - v5
     atr = scan.atr(wolfe_df).to_numpy()
-    assert -0.5 * atr[p5] <= overshoot <= scan.WW_MAX_OVERSHOOT_ATR * atr[p5]
+    assert overshoot >= 0                                       # spec: point 5 penetrates line 1-3 ...
+    assert v5 >= v3 + s24 * (p5 - p3)                           # ... but holds the sweet zone (2-4 parallel via 3)
+    legs = (p2 - p1, p3 - p2, p4 - p3)
+    assert all(abs(leg - sum(legs) / 3) <= scan.WW_TIME_SYM_TOL * sum(legs) / 3 for leg in legs)
     assert float(m[11]) == pytest.approx(line13(n - 1), abs=TOL)
     # ETA: intersection of 1-3 and 2-4; EPA: line 1-4 at the ETA = target.
     eta = ((v2 - s24 * p2) - (v1 - s13 * p1)) / (s13 - s24)
@@ -342,12 +362,12 @@ T = np.linspace(0, np.pi, 100)
 
 def cup_variant(pre=None, cup=None, handle=None, brk=None) -> pd.DataFrame:
     """The textbook cup with one component swapped out."""
-    pre = _uptrend_prefix(220, 60, 100) if pre is None else pre
+    pre = _uptrend_prefix(220, 40, 100) if pre is None else pre
     cup = (100 - 25 * np.sin(T)) if cup is None else cup
     handle = np.concatenate([np.linspace(100, 94, 8), np.linspace(94, 97, 7)]) if handle is None else handle
     brk = np.array([101.5, 102.0]) if brk is None else brk
     df = _ohlc_from_path(np.concatenate([pre, cup, handle, brk]), seed=3)
-    df.loc[df.index[-2], "Volume"] *= 2.0
+    df.loc[df.index[-2], "Volume"] *= 3.0
     return df
 
 
@@ -374,16 +394,35 @@ def test_cup_single_rule_violations_are_rejected(label, kwargs):
 
 
 def test_cup_prior_advance_is_a_rise_from_the_low():
-    """The rule is a >= 25 % rise from the 120-bar low into rim A.
+    """Legacy rule: a >= 25 % rise from the 120-bar low into rim A (and no SMA alternative).
 
     A low 20.6 % below the rim (a 25.9 % rise) passes, which a "low must be
-    25 % below the rim" reading would reject; a 19.9 % rise fails.  The low
-    sits inside the 120-bar look-back window before the rim.
+    25 % below the rim" reading would reject; a 19.9 % rise fails.  Under the
+    spec profile the same cups pass regardless, because SMA50 > SMA200 alone
+    satisfies the trend filter and the rollback rule is what limits the depth.
     """
     def prefix(low):
         return np.concatenate([np.full(100, low), np.linspace(low, 100, 120)])
+    scan.apply_profile("legacy")
     assert scan.detect_cup_and_handle(cup_variant(pre=prefix(100 / 1.259)), "CUP")
     assert scan.detect_cup_and_handle(cup_variant(pre=prefix(100 / 1.199)), "CUP") == []
+    scan.apply_profile("spec")
+    shallow = cup_variant(pre=prefix(100 / 1.199))
+    assert scan.detect_cup_and_handle(shallow, "CUP") == []      # ... but the rollback rule rejects it:
+    with pytest.MonkeyPatch.context() as mp:                     # a 25-point cup after a 17-point advance
+        mp.setattr(scan, "CUP_MAX_RETRACE", None)
+        assert scan.detect_cup_and_handle(shallow, "CUP")        # SMA50 > SMA200 alone satisfies the trend filter
+
+
+def test_cup_rollback_rule_limits_depth_to_half_the_advance():
+    """Spec: the cup decline may retrace at most 50 % of the preceding advance."""
+    ok = cup_variant(pre=_uptrend_prefix(220, 40, 100))          # 25-point cup after a 60-point advance (42 %)
+    assert scan.detect_cup_and_handle(ok, "CUP")
+    too_deep = cup_variant(pre=_uptrend_prefix(220, 60, 100))    # same cup after a 40-point advance (62 %)
+    assert scan.detect_cup_and_handle(too_deep, "CUP") == []
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(scan, "CUP_MAX_RETRACE", None)
+        assert scan.detect_cup_and_handle(too_deep, "CUP")        # the rollback rule is the only reason
 
 
 def test_wick_above_rim_b_inside_the_handle_raises_the_trigger(cup_df):
@@ -414,28 +453,35 @@ def ihs_variant(head_low=70.0, rs_low=81.0, base=None) -> pd.DataFrame:
     head = np.concatenate([np.linspace(90, head_low, 15), np.linspace(head_low, 90.5, 15)])
     rs = np.concatenate([np.linspace(90.5, rs_low, 12), np.linspace(rs_low, 89, 12)])
     brk = np.array([90.0, 92.5, 93.0])
-    return _ohlc_from_path(np.concatenate([base, pre, ls, head, rs, brk]), seed=5)
+    df = _ohlc_from_path(np.concatenate([base, pre, ls, head, rs, brk]), seed=5)
+    df.loc[df.index[-3:-1], "Volume"] *= 3.0
+    return df
 
 
 @pytest.mark.parametrize("label, kwargs", [
     ("head not >= 1 ATR below the shoulders", dict(head_low=79.5)),
-    ("shoulders asymmetric beyond IHS_SHOULDER_SYM", dict(rs_low=74.0)),
-    ("strong down-trend veto (rule 2)", dict(base=np.linspace(300, 120, 160))),
+    ("shoulders asymmetric beyond 30 % of the head height", dict(rs_low=74.0)),
 ])
 def test_ihs_single_rule_violations_are_rejected(label, kwargs):
-    df = ihs_variant(**kwargs)
-    if "veto" in label:
-        assert scan.trend_context(df)[2], "fixture must be a strong down-trend"
-    assert scan.detect_inverse_hs(df, "IHS") == [], label
+    assert scan.detect_inverse_hs(ihs_variant(**kwargs), "IHS") == [], label
+
+
+def test_strong_downtrend_veto_is_a_legacy_rule():
+    """Spec: reversal patterns are expected in down-trends, so no veto; legacy vetoed them."""
+    df = ihs_variant(base=np.linspace(300, 120, 160))
+    assert scan.trend_context(df)[2], "fixture must be a strong down-trend"
+    assert scan.detect_inverse_hs(df, "IHS")                     # spec profile: allowed
+    scan.apply_profile("legacy")
+    assert scan.detect_inverse_hs(df, "IHS") == []               # legacy profile: vetoed
 
 
 def wolfe_variant(points=None, rebound=None) -> pd.DataFrame:
     base = np.linspace(95, 105, 230)
-    points = [(0, 100.0), (10, 108.0), (22, 96.0), (32, 103.0), (46, 90.5)] if points is None else points
+    points = [(0, 100.0), (10, 108.0), (22, 96.0), (32, 103.0), (46, 91.5)] if points is None else points
     seg = [np.linspace(v0, v1, b1 - b0, endpoint=False)
            for (b0, v0), (b1, v1) in zip(points[:-1], points[1:])]
     wedge = np.concatenate(seg + [[points[-1][1]]])
-    rebound = np.array([91.0, 92.0, 92.8, 93.5, 94.0, 94.8, 95.5]) if rebound is None else rebound
+    rebound = np.array([92.0, 92.5, 93.0, 93.5, 94.0, 94.8, 95.5]) if rebound is None else rebound
     return _ohlc_from_path(np.concatenate([base, wedge, rebound]), seed=7, noise=0.002)
 
 
@@ -543,17 +589,23 @@ def test_missing_bars_do_not_move_the_levels(cup_df):
         assert _levels(s) == _levels(base), gap                  # bars are positional, not calendar
 
 
-def test_zero_volume_sessions_only_cost_the_volume_bonus(cup_df):
+def test_breakout_without_volume_is_watchlisted_under_spec_and_bonus_only_under_legacy(cup_df):
     (base,) = scan.detect_cup_and_handle(cup_df, "CUP")
-    assert base.volume_ratio >= 1.3                               # fixture has breakout volume
-    dead = cup_df.copy()
-    dead["Volume"] = 0.0
-    (s,) = scan.detect_cup_and_handle(dead, "CUP")
-    assert s.volume_ratio is None and s.score == base.score - 5 and _levels(s) == _levels(base)
+    assert base.status == "CONFIRMED" and base.volume_ratio >= scan.VOLUME_CONFIRM["Cup & Handle"]
     spot = cup_df.copy()
     spot.loc[spot.index[-2], "Volume"] = 0.0                      # zero volume on the breakout bar
     (s,) = scan.detect_cup_and_handle(spot, "CUP")
-    assert s.volume_ratio == 0.0 and s.score == base.score - 5
+    assert s.status == "WATCHLIST" and s.bars_since_break is None  # spec: no volume, no confirmation
+    assert "breakout without volume (0.0x)" in s.notes and s.entry == base.entry - (base.entry - float(
+        re.search(r"trigger ([\d.]+)", base.notes)[1]))           # entry falls back to the trigger
+    dead = cup_df.copy()
+    dead["Volume"] = 0.0
+    (s,) = scan.detect_cup_and_handle(dead, "CUP")
+    assert s.status == "WATCHLIST" and "n/a" in s.notes
+    scan.apply_profile("legacy")                                   # legacy: volume was only a +5 bonus
+    (legacy_base,) = scan.detect_cup_and_handle(cup_df, "CUP")
+    (s,) = scan.detect_cup_and_handle(dead, "CUP")
+    assert s.status == "CONFIRMED" and s.volume_ratio is None and s.score == legacy_base.score - 5
 
 
 def test_volatility_spikes_inside_the_pattern_invalidate_it(cup_df):
