@@ -5,6 +5,14 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Added
+- `Max buy` column and `max_buy` field: trigger + 5 %, the open above which
+  a setup no longer qualifies.
+- "Closed since the last report": every row of the previous committed
+  report that is absent today is classified as TARGET_REACHED, FAILED
+  (close at or below the stop), EXPIRED, FADED or DROPPED, with the bar and
+  level that decided it; `closed` in `signals.json`, `meta.previous_run`.
+
 ### Changed (operations)
 - The nightly scan runs `--profile tuned`, chosen on the year-long replay:
   192 confirmed signals, 49 % hit rate, +0.30 R, against legacy's 354 /

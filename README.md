@@ -91,18 +91,25 @@ Data errors: 1
 
 ## Confirmed breakouts (actionable): 5
 
-| Ticker | Pattern                  | Entry  | Stop   | Risk % | Target | Score | Age | Vol× | Trend                                   | Details                                              |
-|--------|--------------------------|--------|--------|--------|--------|-------|-----|------|-----------------------------------------|------------------------------------------------------|
-| CL     | Bullish Wolfe Wave       | 90.09  | 88.67  | 1.58   | 107.98 | 84    | 8/8 | 0.97 | close above SMA200, SMA50 > SMA200, ... | 1 2026-07-23 @89.25, 2 2026-07-28 @95.46, ... 5 2026-08-21 @89.16; line 1-3 now 88.95 |
-| HAL    | Inverse Head & Shoulders | 37.29  | 32.64  | 12.47  | 42.34  | 82    | 4/8 | 0.8  | close above SMA200, SMA50 < SMA200, ... | LS 2026-07-02 @32.44, head 2026-07-30 @30.84, RS 2026-08-26 @32.88, neckline 36.03->35.91 |
-| VRTX   | Cup & Handle             | 557.96 | 528.86 | 5.22   | 626.63 | 77    | 1/3 | 1.16 | close above SMA200, SMA50 > SMA200, ... | left rim 2026-07-07 @533.67, bottom 2026-07-23 @465.00 (depth 13%), ... trigger 553.47 |
+| Ticker | Pattern                  | Entry  | Max buy | Stop   | Risk % | Target | Score | Age | Vol× | Trend                                   | Details                                              |
+|--------|--------------------------|--------|---------|--------|--------|--------|-------|-----|------|-----------------------------------------|------------------------------------------------------|
+| CL     | Bullish Wolfe Wave       | 90.09  | 93.40   | 88.67  | 1.58   | 107.98 | 84    | 8/8 | 0.97 | close above SMA200, SMA50 > SMA200, ... | 1 2026-07-23 @89.25, 2 2026-07-28 @95.46, ... 5 2026-08-21 @89.16; line 1-3 now 88.95 |
+| HAL    | Inverse Head & Shoulders | 37.29  | 37.83   | 32.64  | 12.47  | 42.34  | 82    | 4/8 | 0.8  | close above SMA200, SMA50 < SMA200, ... | LS 2026-07-02 @32.44, head 2026-07-30 @30.84, RS 2026-08-26 @32.88, neckline 36.03->35.91 |
+| VRTX   | Cup & Handle             | 557.96 | 581.14  | 528.86 | 5.22   | 626.63 | 77    | 1/3 | 1.16 | close above SMA200, SMA50 > SMA200, ... | left rim 2026-07-07 @533.67, bottom 2026-07-23 @465.00 (depth 13%), ... trigger 553.47 |
 
 ## Watchlist (pattern complete, waiting for a close above trigger): 17
 
-| BDX    | Cup & Handle             | 191.76 | 183.9  | 4.1    | 236.51 | 84    | -   | -    | close above SMA200, ...                 | left rim 2026-02-24 @184.86, ... handle low 2026-09-03 @184.91 (depth 4.2%), trigger 191.76 |
+| BDX    | Cup & Handle             | 191.76 | 201.35  | 183.9  | 4.1    | 236.51 | 84    | -   | -    | close above SMA200, ...                 | left rim 2026-02-24 @184.86, ... handle low 2026-09-03 @184.91 (depth 4.2%), trigger 191.76 |
+
+## Closed since the last report (2026-09-03 08:25): 2
+
+| Ticker | Pattern      | Was       | Outcome        | Entry  | Stop   | Target | Detail                                          |
+|--------|--------------|-----------|----------------|--------|--------|--------|-------------------------------------------------|
+| GPC    | Cup & Handle | CONFIRMED | TARGET_REACHED | 138.08 | 133.59 | 164.92 | high 165.10 on 2026-09-03 reached target 164.92 |
+| DG     | Cup & Handle | WATCHLIST | FAILED         | 134.13 | 116.6  | 161.68 | close 116.20 on 2026-09-03 at or below stop 116.6 |
 ```
 
-`output/signals.json` carries the same rows as records plus a `meta` block (`last_bar`, per-symbol bar histogram, effective breakout-age limits). The schema is documented in the wiki.
+Max buy is the trigger plus 5 %: an open above it means the setup no longer qualifies. The last table explains every row of the previous report that is gone today (the two rows above are illustrative). `output/signals.json` carries the same rows as records plus a `meta` block (`last_bar`, per-symbol bar histogram, effective breakout-age limits) and the `closed` list. The schema is documented in the wiki.
 
 ## Documentation
 
