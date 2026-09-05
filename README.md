@@ -122,9 +122,11 @@ test_scan.py                         original suite: textbook fixtures, random-w
 test_patterns.py                     primitive precision, formula verification, negative controls, boundaries
 test_pipeline.py                     retry policy, universe loading, end-to-end mini universe
 test_evaluate.py                     outcome classification and the git signal log
+test_backtest.py                     walk-forward replay: no look-ahead, first-seen signals, fills, breakdowns
 conftest.py                          shared fixtures and the offline yfinance stand-in
 tools/debug_last_bar.py              per-symbol last-bar diagnostics (also a manual GitHub workflow)
 tools/evaluate_signals.py            replay past CONFIRMED signals against later prices (manual workflow)
+tools/backtest.py                    walk-forward replay of the scanner over the last N sessions (manual workflow)
 .github/workflows/daily-scan.yml     01:17 UTC daily: tests, scan, commit output/
 .github/workflows/tests.yml          lint + tests + coverage on pull requests and pushes to main
 .github/workflows/sync-wiki.yml      mirrors docs/wiki/ into the GitHub wiki
@@ -141,7 +143,7 @@ docs/wiki/                           documentation, mirrored into the GitHub wik
 * Pattern recognition is heuristic. Thresholds follow common practice (O'Neil, Bulkowski, Wolfe) but there is no industry standard; expect some false positives and misses.
 * Swing points are only recognised 5 bars after they print, so Inverse H&S and Wolfe confirmations can be reported up to 5 bars late.
 * Cup bases must be explained at least as well by a parabola as by a two-legged V; the rule is calibrated on reference shapes, not on market data (see the pattern catalog).
-* Signal outcomes have not been measured yet. `tools/evaluate_signals.py` (the `evaluate-signals` workflow) replays every committed `CONFIRMED` signal against later prices; run it once enough history has accumulated.
+* Signal quality is measured by replay, not proven live: `tools/backtest.py` (the `backtest` workflow) runs the scanner walk-forward over past sessions on today's constituents (survivorship bias), and `tools/evaluate_signals.py` scores the signals the nightly job actually committed.
 * Yahoo Finance data is unofficial. Symbols with fewer than 60 bars are skipped and counted in `meta.errors`.
 * There is no persistent price cache: every run re-downloads two years of history for the whole universe.
 

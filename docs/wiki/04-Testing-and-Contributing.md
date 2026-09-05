@@ -72,8 +72,11 @@ Work on a feature branch and open a PR to `main`; the `tests` workflow must pass
 | `daily-scan` | 01:17 UTC daily, manual | tests, full scan, commit `output/` |
 | `debug-last-bar` | manual, pushes touching its files | read-only per-symbol bar diagnostics |
 | `evaluate-signals` | manual | replay every committed `CONFIRMED` signal against later prices; Markdown table in the job summary |
+| `backtest` | manual, pushes touching its files | walk-forward replay of the scanner over the last N sessions; overall / per-pattern / per-score-bucket hit rates and R multiples in the job summary |
 | `sync-wiki` | pushes to `main` touching `docs/wiki/`, manual | mirror `docs/wiki/` into the GitHub wiki |
 
 ## Measuring signal outcomes
+
+`tools/backtest.py` is the fast path: for each of the last N sessions it truncates every symbol's history at that day, runs the scanner exactly as the nightly job would have, takes each `CONFIRMED` signal on the day it first appears, fills at the next session's open (opens more than 5 % above the entry are "gapped", not traded), and classifies the outcome within a horizon. Output: overall, per-pattern and per-score-bucket hit rates and mean R, plus every signal. Caveats: today's constituents only (survivorship bias), and the last `horizon` sessions are still open. Dispatch with `gh workflow run backtest.yml -f days=63 -f horizon=40`; about 2 minutes for the full index.
 
 `tools/evaluate_signals.py` reads every version of `output/signals.json` from git history (the daily scan commits one per run), keeps the first appearance of each `CONFIRMED` signal keyed on `(ticker, pattern, stop)`, fetches the bars that followed, and classifies each as `target` (High reached the target before Low touched the stop), `stop`, `open` (neither within the horizon, marked to the last close) or `no_data`. R multiples are `(exit − entry) / (entry − stop)`. Run it on GitHub (`gh workflow run evaluate-signals.yml -f horizon=60`) because market-data hosts may be blocked locally.

@@ -1,0 +1,49 @@
+# Manual: walk-forward replay of the scanner over the last N sessions on the
+# runner's open internet.  The Markdown report lands in the job summary.
+#   gh workflow run backtest.yml [-f days=63] [-f horizon=40] [-f min_score=60]
+# Also runs on pushes that touch its own files (first registration / smoke test).
+name: backtest
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "sessions to replay"
+        required: false
+        default: "63"
+      horizon:
+        description: "bars after the fill before a signal counts as open"
+        required: false
+        default: "40"
+      min_score:
+        description: "MIN_SCORE override for the replay"
+        required: false
+        default: "60"
+  push:
+    paths:
+      - tools/backtest.py
+      - .github/workflows/backtest.yml
+
+permissions:
+  contents: read
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies (hash-checked)
+        run: pip install --require-hashes -r requirements.txt
+      - name: Replay
+        env:
+          DAYS: ${{ github.event.inputs.days || '63' }}
+          HORIZON: ${{ github.event.inputs.horizon || '40' }}
+          MIN_SCORE: ${{ github.event.inputs.min_score || '60' }}
+        run: |
+          python tools/backtest.py --days "$DAYS" --horizon "$HORIZON" --min-score "$MIN_SCORE" \
+            --json backtest.json | tee -a "$GITHUB_STEP_SUMMARY"
