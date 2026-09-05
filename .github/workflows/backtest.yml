@@ -27,6 +27,10 @@ on:
         description: "true = leave-one-rule-out over the spec profile instead of the grid (use a short window)"
         required: false
         default: "false"
+      overrides:
+        description: "space-separated KEY=VALUE constant overrides, e.g. CUP_TRIGGER=rim_b WW_TIME_SYM_TOL=0.45"
+        required: false
+        default: ""
   push:
     paths:
       - tools/backtest.py
@@ -54,7 +58,10 @@ jobs:
           MIN_SCORE: ${{ github.event.inputs.min_score || '60' }}
           PROFILE: ${{ github.event.inputs.profile || 'spec' }}
           ABLATE: ${{ github.event.inputs.ablate || 'false' }}
+          OVERRIDES: ${{ github.event.inputs.overrides || '' }}
         run: |
           if [ "$ABLATE" = "true" ]; then MODE=--ablate; else MODE=--grid; fi
-          python tools/backtest.py --days "$DAYS" --horizon "$HORIZON" --min-score "$MIN_SCORE" \
-            --profile "$PROFILE" "$MODE" --json backtest.json | tee -a "$GITHUB_STEP_SUMMARY"
+          cmd=(python tools/backtest.py --days "$DAYS" --horizon "$HORIZON" --min-score "$MIN_SCORE"
+               --profile "$PROFILE" "$MODE" --json backtest.json)
+          for kv in $OVERRIDES; do cmd+=(--set "$kv"); done
+          "${cmd[@]}" | tee -a "$GITHUB_STEP_SUMMARY"

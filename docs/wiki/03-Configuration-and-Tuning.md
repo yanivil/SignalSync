@@ -94,6 +94,7 @@ Year-long walk-forward replay, 250 sessions to 2026-09-04, horizon 60 bars, next
 | `HANDLE_MAX_DEPTH` | 0.12 | same | handle pull-back vs. the right rim | O'Neil's 12 % |
 | `HANDLE_MAX_FRACTION_OF_CUP` | 0.50 | same | handle depth vs. cup depth | |
 | `CUP_TARGET_BASE` | `right_rim` | `left_rim` | the measured move is bottom → this level, added to the entry (`trigger` = Investopedia's breakout-level measure) | |
+| `CUP_TRIGGER` | `handle_high` | same | breakout level: the handle peak (O'Neil's buy point) or `rim_b`, the higher of the handle peak and rim B, so the close must also clear the rim | a later, more conservative entry; compare with `gh workflow run backtest.yml -f overrides="CUP_TRIGGER=rim_b"` |
 
 Not configurable: the handle low must stay in the upper half of the cup.
 
@@ -151,4 +152,4 @@ For sensitivity, run the negative-control mutations (`test_patterns.py -k violat
 python -m pytest test_patterns.py -k "violations or controls" -q
 ```
 
-For real-data effect, run the backtest (see [Testing and Contributing](04-Testing-and-Contributing.md)): it replays the active profile and the other one on the same year of prices, and re-scores the signals under stop and target variants. Change one constant, re-run both, and only then change the default.
+For real-data effect, run the backtest (see [Testing and Contributing](04-Testing-and-Contributing.md)): it replays the active profile and the other one on the same year of prices, and re-scores the signals under stop and target variants. Any constant can be overridden for one replay without a code change: `gh workflow run backtest.yml -f overrides="CUP_TRIGGER=rim_b WW_TIME_SYM_TOL=0.45"` (locally `--set KEY=VALUE`). Change one constant, re-run, and only then change the default.

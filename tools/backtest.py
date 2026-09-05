@@ -58,7 +58,7 @@ import os
 import re
 import sys
 import time
-from typing import Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import pandas as pd
 
@@ -193,6 +193,23 @@ def render_ablation(rows: Sequence[dict], days: int, horizon: int) -> str:
                      f"{r['open']} | {_pct(r['hit_rate'])} | {'-' if r['mean_r'] is None else f'{r['mean_r']:+.2f}'} | "
                      f"{_pct(r['success5'])} |")
     return "\n".join(lines)
+
+
+def apply_override(item: str) -> Tuple[str, Any]:
+    """Apply one ``KEY=VALUE`` override to ``scan``; the value is parsed as a Python literal, else kept as text."""
+    import ast
+    if "=" not in item:
+        raise ValueError(f"--set expects KEY=VALUE, got {item!r}")
+    key, raw = item.split("=", 1)
+    key = key.strip()
+    if not hasattr(scan, key) or key.startswith("_"):
+        raise ValueError(f"unknown scan constant {key!r}")
+    try:
+        value: Any = ast.literal_eval(raw.strip())
+    except (ValueError, SyntaxError):
+        value = raw.strip()
+    setattr(scan, key, value)
+    return key, value
 
 
 def profile_pass(data: Dict[str, pd.DataFrame], days: int, horizon: int, name: str) -> dict:
@@ -342,9 +359,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="rule profile to replay (default: the scanner's active profile)")
     ap.add_argument("--ablate", action="store_true",
                     help="leave-one-rule-out over the spec profile (one full replay per rule; use a short window)")
+    ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
+                    help="override a scan constant for this replay after the profile is applied, e.g. "
+                         "--set CUP_TRIGGER=rim_b or --set WW_TIME_SYM_TOL=0.45 (values parsed as Python literals)")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     scan.apply_profile(args.profile)
+    for item in args.set:
+        key, value = apply_override(item)
+        log.info("override %s = %r", key, value)
     if args.min_score is not None:
         scan.MIN_SCORE = args.min_score
     symbols = ([s.strip().upper() for s in args.tickers.split(",") if s.strip()]

@@ -439,6 +439,18 @@ def test_wick_above_rim_b_inside_the_handle_raises_the_trigger(cup_df):
     assert f"trigger {s.entry:.2f}" in s.notes
 
 
+def test_cup_trigger_option_rim_b_requires_clearing_the_rim(cup_df):
+    (base,) = scan.detect_cup_and_handle(cup_df, "CUP")           # handle-peak trigger 100.34 < rim B 100.67
+    rim_b = float(re.search(r"right rim \S+ @([\d.]+)", base.notes)[1])
+    assert float(re.search(r"trigger ([\d.]+)", base.notes)[1]) < rim_b
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(scan, "CUP_TRIGGER", "rim_b")
+        (s,) = scan.detect_cup_and_handle(cup_df, "CUP")
+    assert float(re.search(r"trigger ([\d.]+)", s.notes)[1]) == pytest.approx(rim_b, abs=0.011)
+    assert s.status == "CONFIRMED" and s.entry == base.entry    # the 102 close clears both levels
+    assert s.max_buy > base.max_buy                             # max buy follows the higher trigger
+
+
 def test_cup_unbroken_within_three_percent_is_watchlisted():
     (s,) = scan.detect_cup_and_handle(cup_variant(brk=np.array([98.0, 98.5])), "CUP")
     assert s.status == "WATCHLIST" and s.bars_since_break is None and s.volume_ratio is None
