@@ -38,6 +38,10 @@ Method:
 * ``--grid`` also runs a second full walk-forward under the *other* rule
   profile (``spec`` vs ``legacy``, see ``scan.RULE_PROFILES``) so the two rule
   sets can be compared on the same data, per pattern.
+* ``--ablate`` replays the spec profile once per rule with that single rule
+  set to its legacy value (leave-one-rule-out), so the cost of each spec rule
+  in signals and outcomes can be attributed.  One full replay per rule, so
+  use a short window (63 sessions is about 1.5 minutes per rule on a runner).
 
 Caveats: the universe is today's constituents (survivorship bias: symbols
 that left the index are missing), and the last ``horizon`` sessions of the
@@ -154,6 +158,41 @@ def grid(rows: Sequence[dict], data: Dict[str, pd.DataFrame], horizon: int) -> L
         s = ev.summarise(scored)
         out.append({"stop_extra_atr": extra, "stop_basis": basis, "target_mode": mode, **s})
     return out
+
+
+def ablation(data: Dict[str, pd.DataFrame], days: int, horizon: int) -> List[dict]:
+    """Leave-one-rule-out over the spec profile.
+
+    Replays the active (spec) profile, then once per key in
+    ``RULE_PROFILES["legacy"]`` with only that key set to its legacy value.
+    :returns: one summary row per replay: ``{"rule", "value", "delta", **breakdown(...)["overall"]}``.
+    """
+    base = breakdown(walk_forward(data, days, horizon))["overall"]
+    rows = [{"rule": "spec (all rules)", "value": "-", "delta": 0, **base}]
+    for key, legacy_value in scan.RULE_PROFILES["legacy"].items():
+        saved = getattr(scan, key)
+        setattr(scan, key, legacy_value)
+        try:
+            s = breakdown(walk_forward(data, days, horizon))["overall"]
+        finally:
+            setattr(scan, key, saved)
+        rows.append({"rule": key, "value": str(legacy_value), "delta": s["signals"] - base["signals"], **s})
+    return rows
+
+
+def render_ablation(rows: Sequence[dict], days: int, horizon: int) -> str:
+    """Markdown table: what each spec rule costs when relaxed to its legacy value on its own."""
+    lines = [f"# Rule ablation: spec profile, each rule relaxed alone (last {days} sessions, horizon {horizon})", "",
+             "Each row replays the spec profile with one rule set to its legacy value. "
+             "delta = confirmed signals gained (+) or lost (-) versus the full spec profile.", "",
+             "| Rule relaxed to legacy | Legacy value | Signals | delta | Target | Stop | Open | Hit rate | "
+             "Mean R | +5% first |",
+             "|---|---|---|---|---|---|---|---|---|---|"]
+    for r in sorted(rows, key=lambda r: -abs(r["delta"])):
+        lines.append(f"| {r['rule']} | {r['value']} | {r['signals']} | {r['delta']:+d} | {r['target']} | {r['stop']} | "
+                     f"{r['open']} | {_pct(r['hit_rate'])} | {'-' if r['mean_r'] is None else f'{r['mean_r']:+.2f}'} | "
+                     f"{_pct(r['success5'])} |")
+    return "\n".join(lines)
 
 
 def profile_pass(data: Dict[str, pd.DataFrame], days: int, horizon: int, name: str) -> dict:
@@ -301,6 +340,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="also re-score under stop / target variants and replay the other rule profile")
     ap.add_argument("--profile", choices=sorted(scan.RULE_PROFILES), default=scan.ACTIVE_PROFILE,
                     help="rule profile to replay (default: the scanner's active profile)")
+    ap.add_argument("--ablate", action="store_true",
+                    help="leave-one-rule-out over the spec profile (one full replay per rule; use a short window)")
     args = ap.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     scan.apply_profile(args.profile)
@@ -314,6 +355,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print("no price data")
         return 2
     log.info("downloaded %d symbols in %.0fs; replaying %d sessions", len(data), time.time() - t0, args.days)
+    if args.ablate:
+        scan.apply_profile("spec")
+        table = ablation(data, args.days, args.horizon)
+        log.info("ablation done in %.0fs: %d replays", time.time() - t0, len(table))
+        print(render_ablation(table, args.days, args.horizon))
+        if args.json:
+            with open(args.json, "w", encoding="utf-8") as fh:
+                json.dump({"days": args.days, "horizon": args.horizon, "ablation": table}, fh, indent=2)
+        return 0
     rows = walk_forward(data, args.days, args.horizon)
     stats = breakdown(rows)
     log.info("replay done in %.0fs: %d first-seen confirmed signals", time.time() - t0, len(rows))
