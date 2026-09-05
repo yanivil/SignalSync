@@ -163,7 +163,12 @@ def test_end_to_end_mini_universe(tmp_path, universe_csv, fake_yfinance, mini_un
     rows = [ln for ln in report.splitlines() if ln.startswith("| ") and not ln.startswith("| Ticker")]
     assert len(rows) == len(signals)
     for ln in rows:
-        assert ln.count("|") == 11, ln                       # 10 columns
+        assert ln.count("|") == 12, ln                       # 11 columns
+    by_row = {ln.split(" | ")[0].lstrip("| "): ln for ln in rows}
+    for s in signals:                                        # Age column: bars/limit for confirmed, '-' otherwise
+        age_cell = by_row[s["ticker"]].split(" | ")[7]
+        assert age_cell == (f"{s['bars_since_break']}/{scan.max_breakout_age(s['pattern'])}"
+                            if s["status"] == "CONFIRMED" else "-"), by_row[s["ticker"]]
     for s in signals:
         assert f"| {s['ticker']} | {s['pattern']} | {s['entry']} | {s['stop']} |" in report
     assert f"{scan.MAX_RUNAWAY:.0%} above the trigger" in report   # footer states the real rule
