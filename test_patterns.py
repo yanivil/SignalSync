@@ -469,6 +469,11 @@ def test_wolfe_target_is_dropped_when_absurdly_far(wolfe_df):
     assert s.target is None and s.entry == base.entry
 
 
+def test_scan_symbol_detector_subset(cup_df):
+    assert scan.scan_symbol("CUP", cup_df, detectors=(scan.detect_inverse_hs,)) == []
+    assert [s.pattern for s in scan.scan_symbol("CUP", cup_df)] == ["Cup & Handle"]
+
+
 def test_fat_tailed_noise_false_positive_rate():
     """Student-t(3) returns (fat tails, spikes) must not inflate the false-positive rate."""
     rng = np.random.default_rng(7)
