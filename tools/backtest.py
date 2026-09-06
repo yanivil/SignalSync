@@ -19,8 +19,9 @@ Method:
   pattern and stop, like ``evaluate_signals``), which is the day the report
   would have alerted.
 * The fill is the **next session's open** (the e-mail arrives before the US
-  open).  An open more than ``MAX_RUNAWAY`` above the reported entry is a
-  ``gap``: no trade, counted separately.
+  open).  An open above the row's ``max_buy`` (trigger + ``MAX_RUNAWAY``, or
+  where the risk at the fill reaches ``MAX_BUY_RISK_MULT`` x the planned risk)
+  is a ``gap``: no trade, counted separately.
 * Outcomes use ``evaluate_signals.classify``: ``target`` / ``stop`` / ``open``
   within ``horizon`` bars after the fill bar, gaps filled at the open, R
   multiple = (exit - fill) / (fill - stop).
@@ -263,7 +264,8 @@ def walk_forward(data: Dict[str, pd.DataFrame], days: int, horizon: int,
                                mfe=None, mae=None, success5=None)
                 else:
                     fill = float(after["Open"].iloc[0])
-                    if fill > s.entry * (1 + scan.MAX_RUNAWAY):
+                    max_buy = s.max_buy if s.max_buy is not None else s.entry * (1 + scan.MAX_RUNAWAY)
+                    if fill > max_buy:
                         row.update(fill=round(fill, 2), outcome="gap", bars=0, exit=None, r=None,
                                    mfe=None, mae=None, success5=None)
                     else:
@@ -309,7 +311,7 @@ def render(rows: Sequence[dict], stats: dict, days: int, horizon: int,
     lines = [f"# Walk-forward backtest: last {days} sessions, horizon {horizon} bars "
              f"(rule profile: {scan.ACTIVE_PROFILE})", "",
              "Hit rate = target / (target + stop). Mean R over traded signals (open ones marked to the last close). "
-             "Fill = next session's open; opens > 5 % above entry are gapped (not traded). "
+             "Fill = next session's open; opens above the row's Max buy are gapped (not traded). "
              "+5% first = share of signals whose high reached +5 % above the fill before any close below the stop "
              "(the chart-book success definition). MFE / MAE = mean best / worst excursion from the fill "
              "within the horizon.",

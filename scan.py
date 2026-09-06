@@ -39,6 +39,7 @@ import json
 import logging
 import math
 import os
+import re
 import sys
 import time
 import urllib.request
@@ -165,6 +166,14 @@ MAX_RISK_PCT = {                         # reject setups whose stop is further t
     "Bullish Wolfe Wave": 15.0,
 }
 
+# Reward, chase and patience (all patterns; added 2026-09-06 after an external
+# review of the HAL and TXN rows, see docs/wiki/03).  ``None`` = rule off.
+MIN_REWARD_RISK: Optional[float] = None  # reject setups whose (target - entry) / (entry - stop) is below this
+MAX_WAIT_BARS: Optional[int] = None      # drop a completed pattern whose breakout has not come within this many
+#                                          bars of its last anchor (handle low, right shoulder, point 5)
+MAX_BUY_RISK_MULT: Optional[float] = 1.5  # Max buy is also capped where the risk at the fill reaches this x the
+#                                          planned (entry - stop); None = trigger + MAX_RUNAWAY only
+
 RULE_PROFILES: Dict[str, Dict[str, Any]] = {
     "spec": {},                          # the module defaults above
     "tuned": {                           # spec with the four rules the 2026-09-05 ablation showed remove good signals
@@ -185,6 +194,7 @@ RULE_PROFILES: Dict[str, Dict[str, Any]] = {
         "VOLUME_AVG_LEN": 50,
         "VOLUME_CONFIRM": {"Cup & Handle": None, "Inverse Head & Shoulders": None, "Bullish Wolfe Wave": None},
         "MAX_RISK_PCT": {"Cup & Handle": 15.0, "Inverse Head & Shoulders": 15.0, "Bullish Wolfe Wave": 15.0},
+        "MIN_REWARD_RISK": None, "MAX_WAIT_BARS": None, "MAX_BUY_RISK_MULT": None,
     },
 }
 ACTIVE_PROFILE = "spec"
@@ -220,6 +230,48 @@ def max_breakout_age(pattern: str) -> int:
     return MAX_BREAKOUT_AGE + BREAKOUT_AGE_LAG.get(pattern, 0)
 
 
+def reward_risk(entry: float, stop: float, target: Optional[float]) -> Optional[float]:
+    """Reward per unit of planned risk, ``(target - entry) / (entry - stop)``.
+
+    ``None`` without a target (a Wolfe whose lines do not converge) or when the
+    stop is not below the entry.  Rounded to 2 decimals for the report.
+    """
+    if target is None or entry <= stop:
+        return None
+    return round((target - entry) / (entry - stop), 2)
+
+
+def max_buy_level(trigger: float, entry: float, stop: float) -> float:
+    """Highest open still worth filling.
+
+    ``trigger x (1 + MAX_RUNAWAY)`` -- the runaway rule applied to the open --
+    and, when ``MAX_BUY_RISK_MULT`` is set, no higher than the price at which
+    the risk to the stop reaches that multiple of the planned ``entry - stop``.
+    The second cap matters for tight structural stops (a Wolfe point 5 sits
+    about 2 % under the entry, so +5 % of chase would nearly triple the risk).
+    """
+    cap = trigger * (1 + MAX_RUNAWAY)
+    if MAX_BUY_RISK_MULT is not None:
+        cap = min(cap, stop + MAX_BUY_RISK_MULT * (entry - stop))
+    return round(float(cap), 2)
+
+
+def waited_too_long(completed: int, age: Optional[int], n: int) -> bool:
+    """``MAX_WAIT_BARS`` rule: the pattern's last anchor is more than the limit
+    behind the breakout bar (``age`` bars before the last bar), or behind the
+    last bar itself when there is no breakout yet.  A completed base that sits
+    for months without breaking out is no longer the pattern that was found."""
+    if MAX_WAIT_BARS is None:
+        return False
+    break_bar = n - 1 - age if age is not None else n - 1
+    return break_bar - completed > MAX_WAIT_BARS
+
+
+def _reward_ok(rr: Optional[float]) -> bool:
+    """``MIN_REWARD_RISK`` gate; rows without a target are not judged."""
+    return MIN_REWARD_RISK is None or rr is None or rr >= MIN_REWARD_RISK
+
+
 # --------------------------------------------------------------------------- #
 # Data classes
 # --------------------------------------------------------------------------- #
@@ -244,6 +296,8 @@ class Signal:
     :param volume_ratio: Breakout-day volume / 50-day average volume, or None.
     :param trend: Short description of the wider-trend context.
     :param notes: Free-text details (pattern anchor dates and levels).
+    :param max_buy: Highest open worth filling (see :func:`max_buy_level`).
+    :param reward_risk: ``(target - entry) / (entry - stop)`` or None (see :func:`reward_risk`).
     """
 
     ticker: str
@@ -260,7 +314,8 @@ class Signal:
     volume_ratio: Optional[float]
     trend: str
     notes: str = ""
-    max_buy: Optional[float] = None      # trigger x (1 + MAX_RUNAWAY): above this at the open, do not chase
+    max_buy: Optional[float] = None      # above this at the open, do not chase (max_buy_level)
+    reward_risk: Optional[float] = None  # reward per unit of planned risk, None without a target
 
 
 # --------------------------------------------------------------------------- #
@@ -1038,6 +1093,8 @@ def detect_cup_and_handle(df: pd.DataFrame, ticker: str) -> List[Signal]:
             max_risk = MAX_RISK_PCT["Cup & Handle"]
             if risk > max_risk:
                 continue  # rule 4: reject setups whose structural stop is too far
+            if waited_too_long(h_low_idx, age, n):
+                continue  # the handle low is too far behind the breakout (or today)
             # Quality score (0-100): 50 base
             #   +15 roundness         (0 at CUP_MIN_ROUNDNESS, 15 at R^2 = 1)
             #   +10 depth near 25 %   (0 at 0 % or 50 %, linear)
@@ -1058,6 +1115,9 @@ def detect_cup_and_handle(df: pd.DataFrame, ticker: str) -> List[Signal]:
             # (legacy) or the handle breakout level (Investopedia).
             base_level = {"right_rim": rim_b, "left_rim": rim_a, "trigger": trigger}[CUP_TARGET_BASE]
             target = float(entry + (base_level - bottom))
+            rr = reward_risk(entry, stop, target)
+            if not _reward_ok(rr):
+                continue
             dates = df.index
             notes = (f"left rim {dates[a].date()} @{rim_a:.2f}, bottom "
                      f"{dates[a + bottom_rel].date()} @{bottom:.2f} (depth {depth*100:.0f}%), "
@@ -1067,7 +1127,7 @@ def detect_cup_and_handle(df: pd.DataFrame, ticker: str) -> List[Signal]:
             signals.append(Signal(ticker, "Cup & Handle", status, round(entry, 2), round(stop, 2),
                                   round(risk, 2), round(target, 2), score, round(float(close[-1]), 2),
                                   str(dates[-1].date()), age, vr, desc, notes,
-                                  max_buy=round(float(trigger) * (1 + MAX_RUNAWAY), 2)))
+                                  max_buy=max_buy_level(trigger, entry, stop), reward_risk=rr))
     return _dedupe(signals)
 
 
@@ -1179,9 +1239,15 @@ def detect_inverse_hs(df: pd.DataFrame, ticker: str) -> List[Signal]:
         max_risk = MAX_RISK_PCT["Inverse Head & Shoulders"]
         if risk > max_risk:
             continue
+        if waited_too_long(rs, age, n):
+            continue  # the right shoulder is too far behind the breakout (or today)
         # Measured move: neckline minus head, with the neckline read at the
         # head bar (spec) or at the breakout bar (legacy).
         height = head_height if IHS_TARGET_AT_HEAD else trigger - h_v
+        target = float(entry + height)
+        rr = reward_risk(entry, stop, target)
+        if not _reward_ok(rr):
+            continue
         # Quality score (0-100): 50 base
         #   +15 shoulder price symmetry (0 at the symmetry limit in force)
         #   +10 shoulder time symmetry  (log-scaled, 0 at the IHS_TIME_SYM limit)
@@ -1207,9 +1273,9 @@ def detect_inverse_hs(df: pd.DataFrame, ticker: str) -> List[Signal]:
                  f"RS {dates[rs].date()} @{rs_v:.2f}, neckline {high[n1]:.2f}->{high[n2]:.2f} "
                  f"(now {trigger_now:.2f}){volume_note}")
         signals.append(Signal(ticker, "Inverse Head & Shoulders", status, round(entry, 2),
-                              round(stop, 2), round(risk, 2), round(float(entry + height), 2),
+                              round(stop, 2), round(risk, 2), round(target, 2),
                               score, round(float(close[-1]), 2), str(dates[-1].date()), age, vr,
-                              desc, notes, max_buy=round(float(trigger) * (1 + MAX_RUNAWAY), 2)))
+                              desc, notes, max_buy=max_buy_level(trigger, entry, stop), reward_risk=rr))
     return _dedupe(signals)
 
 
@@ -1323,6 +1389,8 @@ def detect_bullish_wolfe(df: pd.DataFrame, ticker: str) -> List[Signal]:
         max_risk = MAX_RISK_PCT["Bullish Wolfe Wave"]
         if risk > max_risk:
             continue
+        if waited_too_long(p5, age, n):
+            continue  # (WW_MAX_BARS_SINCE_P5 is usually the tighter of the two)
         # ETA = the bar where lines 1-3 and 2-4 meet.  Solving
         #   v1 + s13 (x - p1) = v2 + s24 (x - p2)
         # for x gives  x = [(v2 - s24 p2) - (v1 - s13 p1)] / (s13 - s24);
@@ -1342,6 +1410,9 @@ def detect_bullish_wolfe(df: pd.DataFrame, ticker: str) -> List[Signal]:
             target = None
         if target is not None and target <= entry:
             target = None
+        rr = reward_risk(entry, stop, target)
+        if not _reward_ok(rr):
+            continue
         # Quality score (0-100): 50 base
         #   +15 point 5 close to line 1-3 (0 at the WW_MAX_OVERSHOOT_ATR limit)
         #   +10 time symmetry of legs 1-3 vs 3-5 (log-scaled, 0 at a 3x ratio)
@@ -1364,11 +1435,13 @@ def detect_bullish_wolfe(df: pd.DataFrame, ticker: str) -> List[Signal]:
                  f"3 {dates[p3].date()} @{v3:.2f}, 4 {dates[p4].date()} @{v4:.2f}, "
                  f"5 {dates[p5].date()} @{v5:.2f}; line 1-3 now {line_now:.2f}"
                  + (f"; ETA ~{dates[min(int(eta), n - 1)].date()}" if eta and eta < n else "")
+                 # Point 4 is the conservative first target many traders take before the EPA.
+                 + (f"; first target {v4:.2f} (point 4)" if target is not None else "")
                  + volume_note)
         signals.append(Signal(ticker, "Bullish Wolfe Wave", status, round(entry, 2), round(stop, 2),
                               round(risk, 2), round(target, 2) if target else None, score,
                               round(float(close[-1]), 2), str(dates[-1].date()), age, vr, desc, notes,
-                                  max_buy=round(float(trigger) * (1 + MAX_RUNAWAY), 2)))
+                              max_buy=max_buy_level(trigger, entry, stop), reward_risk=rr))
     return _dedupe(signals)
 
 
@@ -1469,9 +1542,28 @@ def close_out(previous: Sequence[Mapping[str, Any]], current: Sequence[Signal],
                 row.update(outcome="FADED",
                            detail=f"close {last_close:.2f} more than {WATCH_PROXIMITY:.0%} below entry {p['entry']}")
             else:
-                row["detail"] = "pattern no longer qualifies"
+                row["detail"] = _drop_reason(p, df)
         out.append(row)
     return out
+
+
+_ANCHOR_RE = re.compile(r"(RS|handle low|5) (\d{4}-\d{2}-\d{2})")
+
+
+def _drop_reason(p: Mapping[str, Any], df: pd.DataFrame) -> str:
+    """Best-effort explanation for a DROPPED row: one of today's reward or
+    patience rules, judged on the previous row's own levels and anchors, else
+    the generic "pattern no longer qualifies"."""
+    rr = reward_risk(p["entry"], p["stop"], p.get("target"))
+    if MIN_REWARD_RISK is not None and rr is not None and rr < MIN_REWARD_RISK:
+        return f"reward:risk {rr} below the minimum {MIN_REWARD_RISK}"
+    m = _ANCHOR_RE.search(p.get("notes") or "")
+    if MAX_WAIT_BARS is not None and m:
+        label = {"RS": "right shoulder", "handle low": "handle low", "5": "point 5"}[m[1]]
+        waited = int((df.index > pd.Timestamp(m[2])).sum())
+        if waited > MAX_WAIT_BARS:
+            return f"no breakout within {MAX_WAIT_BARS} bars of the {label} on {m[2]} ({waited} bars)"
+    return "pattern no longer qualifies"
 
 
 def render_markdown(signals: List[Signal], meta: Mapping[str, Any],
@@ -1491,7 +1583,11 @@ def render_markdown(signals: List[Signal], meta: Mapping[str, Any],
                  f"Min quality score {MIN_SCORE}. Breakouts older than the per-pattern "
                  f"limit are dropped (bars: {age_text}; H&S and Wolfe get "
                  f"{PIVOT_ORDER} extra bars because their last pivot is only visible "
-                 f"{PIVOT_ORDER} bars after it prints).")
+                 f"{PIVOT_ORDER} bars after it prints)."
+                 + (f" Rows with reward:risk below {MIN_REWARD_RISK} are dropped."
+                    if MIN_REWARD_RISK is not None else "")
+                 + (f" Patterns still waiting for their breakout more than {MAX_WAIT_BARS} bars after "
+                    f"their last anchor are dropped." if MAX_WAIT_BARS is not None else ""))
     if meta.get("skipped_bar"):
         lines.append(f"Newest bar {meta['skipped_bar']} not scanned: complete for "
                      f"{meta.get('skipped_bar_complete', 0)} symbols, still missing OHLC at "
@@ -1511,22 +1607,28 @@ def render_markdown(signals: List[Signal], meta: Mapping[str, Any],
             lines.append("_none_")
             lines.append("")
             continue
-        lines.append("| Ticker | Pattern | Entry | Max buy | Stop | Risk % | Target | Score | Age | Vol× | "
+        lines.append("| Ticker | Pattern | Entry | Max buy | Stop | Risk % | Target | R:R | Score | Age | Vol× | "
                      "Trend | Details |")
-        lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|")
+        lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
         for s in rows:
             # Age = bars since the breakout close / the pattern's limit, so a reader
             # can see whether a confirmed row is fresh (0/3) or about to expire (3/3).
             age = (f"{s.bars_since_break}/{max_breakout_age(s.pattern)}"
                    if s.bars_since_break is not None else "-")
             lines.append(f"| {s.ticker} | {s.pattern} | {s.entry} | {s.max_buy if s.max_buy else '-'} | {s.stop} | "
-                         f"{s.risk_pct} | {s.target if s.target else '-'} | {s.score} | {age} | "
+                         f"{s.risk_pct} | {s.target if s.target else '-'} | "
+                         f"{s.reward_risk if s.reward_risk is not None else '-'} | {s.score} | {age} | "
                          f"{s.volume_ratio if s.volume_ratio else '-'} | {s.trend} | {s.notes} |")
         lines.append("")
     if closed is not None:
         since = meta.get("previous_run") or "the last report"
         lines.append(f"## Closed since the last report ({since}): {len(closed)}")
         lines.append("")
+        prev_profile = meta.get("previous_profile")
+        if prev_profile and prev_profile != meta.get("profile"):
+            lines.append(f"_Rule profile changed from `{prev_profile}` to `{meta.get('profile')}`: DROPPED rows "
+                         f"were re-judged under the new rules, not by new bars._")
+            lines.append("")
         if not closed:
             lines.append("_none_")
             lines.append("")
@@ -1538,7 +1640,12 @@ def render_markdown(signals: List[Signal], meta: Mapping[str, Any],
                 lines.append(f"| {c['ticker']} | {c['pattern']} | {c['was']} | {c['outcome']} | {c['entry']} | "
                              f"{c['stop']} | {c['target'] if c['target'] is not None else '-'} | {c['detail']} |")
             lines.append("")
-    lines.append(f"_Max buy = trigger + {MAX_RUNAWAY:.0%}: if the open is above it the setup no longer qualifies. "
+    max_buy_rule = (f"the lower of trigger + {MAX_RUNAWAY:.0%} and the open at which the risk to the stop "
+                    f"reaches {MAX_BUY_RISK_MULT:g}x the planned entry-to-stop distance"
+                    if MAX_BUY_RISK_MULT is not None else f"trigger + {MAX_RUNAWAY:.0%}")
+    lines.append(f"_Max buy = {max_buy_rule}: if the open is above it the setup no longer qualifies. "
+                 f"R:R = (target - entry) / (entry - stop) at the reported entry; it shrinks with every "
+                 f"session the entry drifts above the trigger. "
                  f"Age = bars since the breakout close / the limit after which the row is dropped "
                  f"(0 = broke out on the last bar). Heuristic scan, not advice. "
                  f"Entry = trigger level, or the breakout close when it "
@@ -1604,6 +1711,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "scanned": len(data), "errors": len(symbols) - len(data),
             **bar_info,
             "profile": ACTIVE_PROFILE, "min_score": MIN_SCORE, "max_breakout_age": MAX_BREAKOUT_AGE,
+            "min_reward_risk": MIN_REWARD_RISK, "max_wait_bars": MAX_WAIT_BARS,
+            "max_buy_risk_mult": MAX_BUY_RISK_MULT,
             "max_breakout_age_by_pattern": {p: max_breakout_age(p) for p in BREAKOUT_AGE_LAG}}
     os.makedirs(args.out_dir, exist_ok=True)
     out_path = os.path.join(args.out_dir, "signals.json")
@@ -1614,6 +1723,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 prev_doc = json.load(fh)
             previous = list(prev_doc.get("signals", []))
             meta["previous_run"] = prev_doc.get("meta", {}).get("run_date")
+            meta["previous_profile"] = prev_doc.get("meta", {}).get("profile")
         except (OSError, ValueError) as exc:  # a corrupt previous file must not stop today's report
             log.warning("previous signals.json unreadable, no close-out: %s", exc)
     closed = close_out(previous, signals, data)

@@ -63,6 +63,9 @@ Year-long walk-forward replay, 250 sessions to 2026-09-04, horizon 60 bars, next
 | `VOLUME_AVG_LEN` | 20 | 50 | bars in the average that the breakout-bar volume is compared with |
 | `VOLUME_CONFIRM` | cup 1.4, H&S 1.3, Wolfe none | none | a breakout close is `CONFIRMED` only with at least this volume ratio; otherwise the row stays on the watchlist with the note "breakout without volume". A ratio ≥ 1.3 always adds +5 to the score. |
 | `MAX_RISK_PCT` | cup 12, H&S 15, Wolfe 15 | 15 for all | reject setups whose stop is further than this below the entry |
+| `MIN_REWARD_RISK` | off (tuned value from the replay in progress) | off | reject setups whose `(target − entry) / (entry − stop)` is below this; rows without a target are not judged |
+| `MAX_WAIT_BARS` | off (tuned value from the replay in progress) | off | drop a completed pattern whose breakout has not come within this many bars of its last anchor (handle low, right shoulder, point 5); also bounds how long a row can sit on the watchlist |
+| `MAX_BUY_RISK_MULT` | 1.5 | off | Max buy is also capped where the risk at the fill reaches this multiple of the planned risk; the backtest gaps fills above Max buy |
 
 ## Trend context
 
@@ -135,8 +138,10 @@ Not configurable: the handle low must stay in the upper half of the cup.
 5. **Confirmation state** — stale (> age limit) and runaway (> 5 % above) breakouts are dropped; setups more than 5 % below the trigger are dropped.
 6. **Volume** — a breakout close without ≥ 1.4× (cup) or ≥ 1.3× (H&S) average volume is watch-listed, not confirmed.
 7. **Risk** — stop above entry or risk above `MAX_RISK_PCT` is dropped.
-8. **Score** — everything surviving with a score below `MIN_SCORE` is dropped.
-9. **De-duplication** — only the best-scoring signal per `(ticker, pattern, status)` is kept, so overlapping pivot combinations never inflate the count.
+8. **Patience** — the breakout (or today, for a watchlist row) more than `MAX_WAIT_BARS` after the last anchor is dropped.
+9. **Reward:risk** — a target less than `MIN_REWARD_RISK` planned risks above the entry is dropped.
+10. **Score** — everything surviving with a score below `MIN_SCORE` is dropped.
+11. **De-duplication** — only the best-scoring signal per `(ticker, pattern, status)` is kept, so overlapping pivot combinations never inflate the count.
 
 ## Measuring the effect of a change
 

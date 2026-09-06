@@ -70,7 +70,9 @@ Yahoo publishes the newest daily bar per symbol at different times (volume first
           "skipped_bar": null, "skipped_bar_complete": 0, "skipped_bar_partial": 0,
           "last_bar_histogram": {"2026-09-03": 502}, "filled_close_symbols": 0,
           "profile": "spec", "min_score": 60, "max_breakout_age": 3,
-          "max_breakout_age_by_pattern": {"Cup & Handle": 3, "Inverse Head & Shoulders": 8, "Bullish Wolfe Wave": 8}},
+          "max_breakout_age_by_pattern": {"Cup & Handle": 3, "Inverse Head & Shoulders": 8, "Bullish Wolfe Wave": 8},
+          "min_reward_risk": null, "max_wait_bars": null, "max_buy_risk_mult": 1.5,
+          "previous_run": "2026-09-03 08:25", "previous_profile": "spec"},
  "signals": [{"ticker": "CL", "pattern": "Bullish Wolfe Wave", "status": "CONFIRMED",
               "entry": 90.09, "stop": 88.67, "risk_pct": 1.58, "target": 107.98, "score": 84,
               "last_close": 90.09, "last_date": "2026-09-03", "bars_since_break": 8,
@@ -89,9 +91,10 @@ Yahoo publishes the newest daily bar per symbol at different times (volume first
 | `bars_since_break` | 0 = the confirming close is the last bar; `null` for watchlist rows |
 | `volume_ratio` | breakout-day volume / trailing 50-bar average; `null` when unavailable |
 | `notes` | anchor dates and levels used by the detector (parseable, see tests); "breakout without volume (x.xx×)" when a breakout was watch-listed for lack of volume |
-| `max_buy` | trigger × 1.05: if the next open is above it the setup no longer qualifies (the same 5 % runaway rule the scanner applies to closes) |
+| `max_buy` | the open above which the setup no longer qualifies: the lower of trigger × 1.05 (the runaway rule applied to the open) and `stop + MAX_BUY_RISK_MULT × (entry − stop)`, the fill at which the risk reaches 1.5× the planned risk. The second cap binds for tight structural stops (Wolfe point 5, shallow handles); the first for wide ones (H&S shoulders) |
+| `reward_risk` | `(target − entry) / (entry − stop)` at the reported entry, 2 decimals; `null` without a target. Rows below `MIN_REWARD_RISK` (when set) are not reported. It falls as the entry drifts above the trigger, so a late confirmed row can show a poor R:R on an otherwise clean pattern |
 
-Signals are sorted `CONFIRMED` first, then by score descending. `output/report.md` renders the same rows as two Markdown tables (Ticker, Pattern, Entry, Max buy, Stop, Risk %, Target, Score, Age, Vol×, Trend, Details) with a header stating the scanned bar, effective age limits, skipped/lagging counts and data errors. **Age** is `bars_since_break / limit`, e.g. `1/3` for a cup that broke out yesterday and will be dropped after two more sessions; `-` for watchlist rows.
+Signals are sorted `CONFIRMED` first, then by score descending. `output/report.md` renders the same rows as two Markdown tables (Ticker, Pattern, Entry, Max buy, Stop, Risk %, Target, R:R, Score, Age, Vol×, Trend, Details) with a header stating the scanned bar, effective age limits, skipped/lagging counts and data errors. **Age** is `bars_since_break / limit`, e.g. `1/3` for a cup that broke out yesterday and will be dropped after two more sessions; `-` for watchlist rows.
 
 **Closed since the last report.** A stateless scan only knows what qualifies today, so each run also reads the previous committed `signals.json` (the nightly job has it in the checkout) and explains every row that disappeared, using the bars since that row's `last_date`. The list is `closed` in `signals.json` (ticker, pattern, was, since, entry, stop, target, outcome, detail) and a third table in the report; `meta.previous_run` names the report it was compared with.
 
@@ -101,7 +104,7 @@ Signals are sorted `CONFIRMED` first, then by score descending. `output/report.m
 | `FAILED` | a close at or below the stop (the spec's invalidation; a bar touching both levels counts as FAILED) |
 | `EXPIRED` | a confirmed breakout aged past `max_breakout_age` |
 | `FADED` | the close fell more than `WATCH_PROXIMITY` (5 %) below the entry |
-| `DROPPED` | none of the above: the pattern itself no longer qualifies, or no price data |
+| `DROPPED` | none of the above: the pattern itself no longer qualifies, or no price data. When one of today's reward or patience rules would reject the old row on its own levels and anchors, the detail says so ("reward:risk 0.36 below the minimum 1.5", "no breakout within 60 bars of the right shoulder on 2026-01-29 (156 bars)") |
 
 ## 5. Scheduling
 

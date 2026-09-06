@@ -308,7 +308,8 @@ def test_ihs_levels_follow_documented_formulas(ihs_df):
 def test_wolfe_target_is_line_1_4_at_the_eta(wolfe_df):
     (s,) = scan.detect_bullish_wolfe(wolfe_df, "WW")
     m = re.fullmatch(r"1 (\S+) @([\d.]+), 2 (\S+) @([\d.]+), 3 (\S+) @([\d.]+), 4 (\S+) @([\d.]+), "
-                     r"5 (\S+) @([\d.]+); line 1-3 now ([\d.]+)(?:; ETA ~(\S+))?", s.notes)
+                     r"5 (\S+) @([\d.]+); line 1-3 now ([\d.]+)(?:; ETA ~(\S+))?"
+                     r"(?:; first target ([\d.]+) \(point 4\))?", s.notes)
     assert m, s.notes
     p1, p2, p3, p4, p5 = (_loc(wolfe_df, m[k]) for k in (1, 3, 5, 7, 9))
     high, low, close = (wolfe_df[c].to_numpy() for c in ("High", "Low", "Close"))
@@ -335,6 +336,8 @@ def test_wolfe_target_is_line_1_4_at_the_eta(wolfe_df):
     assert s.target == pytest.approx(v1 + s14 * (eta - p1), abs=TOL)
     if m[12]:
         assert wolfe_df.index[min(int(eta), n - 1)].date().isoformat() == m[12]
+    assert float(m[13]) == round(v4, 2)                      # point 4 is reported as the first target
+    assert s.reward_risk == pytest.approx((s.target - s.entry) / (s.entry - s.stop), abs=0.01)
     # Confirmation: first close back above line 1-3 after point 5.
     first_break = next(j for j in range(p5 + 1, n) if close[j] > line13(j))
     assert s.bars_since_break == n - 1 - first_break
@@ -674,3 +677,46 @@ def test_detectors_are_deterministic(cup_df):
     a = [scan.asdict(s) for s in scan.scan_symbol("X", cup_df)]
     b = [scan.asdict(s) for s in scan.scan_symbol("X", cup_df.copy())]
     assert a == b and a
+
+
+def test_reward_risk_and_max_buy_formulas(monkeypatch):
+    """R:R and Max buy as documented, on the TXN Wolfe row of 2026-09-04 (entry 258.44, stop 252.94)."""
+    assert scan.reward_risk(100.0, 95.0, 110.0) == 2.0
+    assert scan.reward_risk(100.0, 95.0, None) is None and scan.reward_risk(100.0, 100.0, 110.0) is None
+    assert scan.reward_risk(258.44, 252.94, 312.19) == 9.77
+    # Risk cap binds first: 252.94 + 1.5 x 5.50 = 261.19, well under trigger + 5 % = 267.86.
+    assert scan.max_buy_level(255.10, 258.44, 252.94) == 261.19
+    # Wide structural stop: the runaway cap binds (HAL: 32.64 + 1.5 x 4.43 = 39.29 > 37.65).
+    assert scan.max_buy_level(35.86, 37.07, 32.64) == round(35.86 * 1.05, 2)
+    monkeypatch.setattr(scan, "MAX_BUY_RISK_MULT", None)
+    assert scan.max_buy_level(255.10, 258.44, 252.94) == 267.86
+
+
+def test_waited_too_long_rule(monkeypatch):
+    assert not scan.waited_too_long(10, None, 500)                     # rule off
+    monkeypatch.setattr(scan, "MAX_WAIT_BARS", 40)
+    assert not scan.waited_too_long(100, 3, 144)                       # broke out 40 bars after the anchor
+    assert scan.waited_too_long(100, 3, 145)                           # 41 bars: too late
+    assert scan.waited_too_long(100, None, 142) and not scan.waited_too_long(100, None, 141)
+
+
+def test_min_reward_risk_and_max_wait_filter_the_detectors(cup_df, ihs_df, wolfe_df, monkeypatch):
+    frames = {"C": cup_df, "I": ihs_df, "W": wolfe_df}
+    base = {k: scan.scan_symbol(k, df) for k, df in frames.items()}
+    assert all(base.values())
+    for sigs in base.values():
+        for s in sigs:
+            assert s.entry < s.max_buy <= round(s.entry * 1.06, 2)
+            assert s.reward_risk is None or s.reward_risk == pytest.approx(
+                (s.target - s.entry) / (s.entry - s.stop), abs=0.01)
+    # A minimum above every fixture's R:R removes every row that has a target.
+    top = max(s.reward_risk for sigs in base.values() for s in sigs if s.reward_risk is not None)
+    monkeypatch.setattr(scan, "MIN_REWARD_RISK", top + 0.01)
+    assert all(s.reward_risk is None for k, df in frames.items() for s in scan.scan_symbol(k, df))
+    monkeypatch.setattr(scan, "MIN_REWARD_RISK", None)
+    # Every fixture breaks out more than 0 bars after its anchor, and within 300.
+    monkeypatch.setattr(scan, "MAX_WAIT_BARS", 0)
+    assert not any(scan.scan_symbol(k, df) for k, df in frames.items())
+    monkeypatch.setattr(scan, "MAX_WAIT_BARS", 300)
+    assert {k: [s.pattern for s in scan.scan_symbol(k, df)] for k, df in frames.items()} == \
+        {k: [s.pattern for s in sigs] for k, sigs in base.items()}
