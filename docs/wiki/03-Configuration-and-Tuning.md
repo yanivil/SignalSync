@@ -63,8 +63,8 @@ Year-long walk-forward replay, 250 sessions to 2026-09-04, horizon 60 bars, next
 | `VOLUME_AVG_LEN` | 20 | 50 | bars in the average that the breakout-bar volume is compared with |
 | `VOLUME_CONFIRM` | cup 1.4, H&S 1.3, Wolfe none | none | a breakout close is `CONFIRMED` only with at least this volume ratio; otherwise the row stays on the watchlist with the note "breakout without volume". A ratio ≥ 1.3 always adds +5 to the score. |
 | `MAX_RISK_PCT` | cup 12, H&S 15, Wolfe 15 | 15 for all | reject setups whose stop is further than this below the entry |
-| `MIN_REWARD_RISK` | off (tuned: see below) | off | reject setups whose `(target − entry) / (entry − stop)` is below this; rows without a target are not judged |
-| `MAX_WAIT_BARS` | off (tuned: see below) | off | drop a completed pattern whose breakout has not come within this many bars of its last anchor (handle low, right shoulder, point 5); also bounds how long a row can sit on the watchlist |
+| `MIN_REWARD_RISK` | off (tuned value from the replay in progress) | off | reject setups whose `(target − entry) / (entry − stop)` is below this; rows without a target are not judged |
+| `MAX_WAIT_BARS` | off (tuned value from the replay in progress) | off | drop a completed pattern whose breakout has not come within this many bars of its last anchor (handle low, right shoulder, point 5); also bounds how long a row can sit on the watchlist |
 | `MAX_BUY_RISK_MULT` | 1.5 | off | Max buy is also capped where the risk at the fill reaches this multiple of the planned risk; the backtest gaps fills above Max buy |
 
 ## Trend context

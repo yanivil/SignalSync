@@ -7,13 +7,13 @@ All notable changes to this project are documented here. Format follows
 
 ### Added (2026-09-06, after an external review of the HAL and TXN rows)
 - `R:R` column and `reward_risk` field: `(target - entry) / (entry - stop)`
-  at the reported entry. `MIN_REWARD_RISK` drops rows below it (spec: off;
-  tuned: REPLAY_RR). On 2026-09-04, 5 of 18 reported rows were below 1.5 and
+  at the reported entry. `MIN_REWARD_RISK` drops rows below it (off in every
+  profile until the year-long replay on the branch sets the tuned value). On 2026-09-04, 5 of 18 reported rows were below 1.5 and
   4 below 1.0, all inverse H&S whose shoulder was months old under a
   neckline extrapolated to today.
 - `MAX_WAIT_BARS`: a completed pattern whose breakout has not come within N
   bars of its last anchor (handle low, right shoulder, point 5) is dropped
-  (spec: off; tuned: REPLAY_WAIT). Nothing bounded that wait before; 9 of
+  (off in every profile until the replay sets the tuned value). Nothing bounded that wait before; 9 of
   17 watchlist rows had waited more than 60 sessions, one since May 2025.
 - Wolfe `notes` carry `first target <point 4> (point 4)` next to the EPA.
 - `close_out` names the reward or patience rule that removed a row; the
