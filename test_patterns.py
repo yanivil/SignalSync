@@ -714,9 +714,16 @@ def test_min_reward_risk_and_max_wait_filter_the_detectors(cup_df, ihs_df, wolfe
     monkeypatch.setattr(scan, "MIN_REWARD_RISK", top + 0.01)
     assert all(s.reward_risk is None for k, df in frames.items() for s in scan.scan_symbol(k, df))
     monkeypatch.setattr(scan, "MIN_REWARD_RISK", None)
-    # Every fixture breaks out more than 0 bars after its anchor, and within 300.
+    # Patience is a watchlist rule: confirmed breakouts survive even a zero limit ...
     monkeypatch.setattr(scan, "MAX_WAIT_BARS", 0)
-    assert not any(scan.scan_symbol(k, df) for k, df in frames.items())
+    assert {k: [s.status for s in scan.scan_symbol(k, df)] for k, df in frames.items()} == \
+        {k: ["CONFIRMED"] for k in frames}
+    # ... while the same patterns, cut off the bar before their breakout, are watchlist rows that the
+    # limit removes (the anchor is at least a bar behind the last close) and a wide limit keeps.
+    waiting = {k: frames[k].iloc[:-(base[k][0].bars_since_break + 1)] for k in ("C", "I")}
+    monkeypatch.setattr(scan, "MAX_WAIT_BARS", None)
+    assert all(scan.scan_symbol(k, df)[0].status == "WATCHLIST" for k, df in waiting.items())
+    monkeypatch.setattr(scan, "MAX_WAIT_BARS", 0)
+    assert not any(scan.scan_symbol(k, df) for k, df in waiting.items())
     monkeypatch.setattr(scan, "MAX_WAIT_BARS", 300)
-    assert {k: [s.pattern for s in scan.scan_symbol(k, df)] for k, df in frames.items()} == \
-        {k: [s.pattern for s in sigs] for k, sigs in base.items()}
+    assert all(scan.scan_symbol(k, df)[0].status == "WATCHLIST" for k, df in waiting.items())

@@ -5,16 +5,29 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed (calibration, 2026-09-06 replay of the review rules)
+- Tuned profile: `MIN_REWARD_RISK = 1.0`. Year-long replay (250 sessions,
+  horizon 60, tuned): no minimum 177 signals at +0.28 R, 1.0 -> 158 at
+  +0.29, 1.5 -> 113 at +0.30, 2.0 -> 77 at +0.29. The filter is
+  expectancy-neutral (a small target is hit more often and pays less), so
+  only rows whose target is below one risk unit are dropped.
+- Tuned profile: `MAX_WAIT_BARS = 60`, **watchlist rows only**. Dropping
+  late breakouts cost R in every variant (40 -> 169 signals at +0.25, 60 ->
+  172 at +0.26, 90 -> 175 at +0.27 against +0.28): the 8 breakouts that came
+  more than 40 bars after their anchor averaged +1.1 R. A breakout is
+  therefore always reported; the limit only prunes rows that have waited
+  longer than 97 % of the year's eventual breakouts did.
+
 ### Added (2026-09-06, after an external review of the HAL and TXN rows)
 - `R:R` column and `reward_risk` field: `(target - entry) / (entry - stop)`
-  at the reported entry. `MIN_REWARD_RISK` drops rows below it (off in every
-  profile until the year-long replay on the branch sets the tuned value). On 2026-09-04, 5 of 18 reported rows were below 1.5 and
-  4 below 1.0, all inverse H&S whose shoulder was months old under a
-  neckline extrapolated to today.
-- `MAX_WAIT_BARS`: a completed pattern whose breakout has not come within N
-  bars of its last anchor (handle low, right shoulder, point 5) is dropped
-  (off in every profile until the replay sets the tuned value). Nothing bounded that wait before; 9 of
-  17 watchlist rows had waited more than 60 sessions, one since May 2025.
+  at the reported entry. `MIN_REWARD_RISK` drops rows below it. On
+  2026-09-04, 5 of 18 reported rows were below 1.5 and 4 below 1.0, all
+  inverse H&S whose shoulder was months old under a neckline extrapolated
+  to today.
+- `MAX_WAIT_BARS`: a watchlist row whose last anchor (handle low, right
+  shoulder, point 5) is more than N bars old is dropped. Nothing bounded
+  that wait before; 9 of 17 watchlist rows had waited more than 60
+  sessions, one since May 2025.
 - Wolfe `notes` carry `first target <point 4> (point 4)` next to the EPA.
 - `close_out` names the reward or patience rule that removed a row; the
   Closed header notes a rule-profile change between runs;

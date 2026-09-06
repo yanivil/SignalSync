@@ -16,7 +16,7 @@ gh workflow run backtest.yml -f profile=spec   # replays spec, and legacy alongs
 
 `apply_profile(name)` switches the constants at run time; `signals.json` records the profile in `meta.profile`. A value of `None` switches an optional rule off. In the tables below, **spec** is the default and **legacy** the alternative.
 
-A third profile, **tuned**, is the spec with the four rules changed that the 2026-09-05 rule ablation showed were removing good signals: volume confirmation off (back to a score bonus), IHS side-duration symmetry off, Wolfe leg rhythm loosened to ±45 %, cup rollback cap at the spec's own 61.8 % maximum. Everything else in it is the spec. The Wolfe rhythm value was chosen on a three-point replay: ±30 % kept 8 Wolfe signals a year at +0.37 R, ±45 % 28 at +0.13 R, ±60 % 43 at +0.02 R; ±45 % lifts the whole tuned profile to 177 signals at +0.34 R.
+A third profile, **tuned**, is the spec with the four rules changed that the 2026-09-05 rule ablation showed were removing good signals: volume confirmation off (back to a score bonus), IHS side-duration symmetry off, Wolfe leg rhythm loosened to ±45 %, cup rollback cap at the spec's own 61.8 % maximum; plus, since 2026-09-06, a minimum reward:risk of 1.0 and a 60-bar patience limit on watchlist rows (see "Calibrating the review rules" below). Everything else in it is the spec. The Wolfe rhythm value was chosen on a three-point replay: ±30 % kept 8 Wolfe signals a year at +0.37 R, ±45 % 28 at +0.13 R, ±60 % 43 at +0.02 R; ±45 % lifts the whole tuned profile to 177 signals at +0.34 R.
 
 | Profile | What it is | Confirmed signals | Hit rate | Mean R | +5 % first | IHS | Wolfe | Cup |
 |---|---|---|---|---|---|---|---|---|
@@ -25,6 +25,22 @@ A third profile, **tuned**, is the spec with the four rules changed that the 202
 | **tuned** | spec with the four relaxations above (Wolfe rhythm ±45 %) | **177** | **50 %** | **+0.34** | 72 % | 129 at +0.40 R | 28 at +0.13 R | 20 at +0.23 R |
 
 Year-long walk-forward replay, 250 sessions to 2026-09-04, horizon 60 bars, next-open fills, intraday stops (`backtest` workflow runs 33968691768, 33973275310 and 33985398488). Read with the usual caveats: today's constituents only, one year, one regime.
+
+### Calibrating the review rules (2026-09-06)
+
+An external review of the 2026-09-04 report (HAL entered late at R:R 1.16 on a 12 % stop; TXN's Max buy carrying 2.7× the planned risk) led to three candidate rules. Each was replayed alone on the tuned profile, 250 sessions to 2026-09-04, horizon 60 (`backtest` runs 34023518929 to 34023527178):
+
+| Variant | Signals | Gapped | Hit rate | Mean R | +5 % first | Decision |
+|---|---|---|---|---|---|---|
+| tuned, no new rule | 177 | 11 | 48 % | +0.28 | 71 % | reference |
+| `MIN_REWARD_RISK` 1.0 | 158 | 6 | 46 % | +0.29 | 71 % | **adopted** |
+| `MIN_REWARD_RISK` 1.5 | 113 | 5 | 38 % | +0.30 | 65 % | expectancy-neutral, a third of the flow gone |
+| `MIN_REWARD_RISK` 2.0 | 77 | 4 | 33 % | +0.29 | 67 % | Wolfe collapses to +0.05 R |
+| `MAX_WAIT_BARS` 40 on all rows | 169 | 9 | 46 % | +0.25 | 70 % | the 8 removed breakouts averaged +1.1 R |
+| `MAX_WAIT_BARS` 60 on all rows | 172 | 11 | 47 % | +0.26 | 70 % | same direction |
+| `MAX_WAIT_BARS` 90 on all rows | 175 | 11 | 47 % | +0.27 | 70 % | same direction |
+
+Reading: a reward:risk minimum trades hit rate for payoff almost exactly (small targets are hit more often and pay less), so it is set at 1.0, where it removes only rows whose target is below one risk unit at no cost in mean R. A patience limit on *breakouts* is wrong in every variant: the longer a base waited, the better its eventual breakout did. The limit therefore applies to watchlist rows only, where it costs nothing (a breakout is reported whenever it comes) and where 97 % of the year's eventual breakouts would have survived a 60-bar limit anyway.
 
 **The nightly scan runs `--profile tuned`**, chosen on this evidence on 2026-09-05; the default in code stays `spec`. Change the flag in `.github/workflows/daily-scan.yml` to switch. The cup entry stays at the handle peak: a rim-B entry replayed at 19 cup signals and +0.17 R against 20 and +0.23 R. The grid also shows a close-based stop (exit on the first close at or below the stop) lifting tuned's mean R to +0.35 at a 52 % hit rate; the report's stop level is unchanged, that is an execution choice.
 
@@ -63,8 +79,8 @@ Year-long walk-forward replay, 250 sessions to 2026-09-04, horizon 60 bars, next
 | `VOLUME_AVG_LEN` | 20 | 50 | bars in the average that the breakout-bar volume is compared with |
 | `VOLUME_CONFIRM` | cup 1.4, H&S 1.3, Wolfe none | none | a breakout close is `CONFIRMED` only with at least this volume ratio; otherwise the row stays on the watchlist with the note "breakout without volume". A ratio ≥ 1.3 always adds +5 to the score. |
 | `MAX_RISK_PCT` | cup 12, H&S 15, Wolfe 15 | 15 for all | reject setups whose stop is further than this below the entry |
-| `MIN_REWARD_RISK` | off (tuned value from the replay in progress) | off | reject setups whose `(target − entry) / (entry − stop)` is below this; rows without a target are not judged |
-| `MAX_WAIT_BARS` | off (tuned value from the replay in progress) | off | drop a completed pattern whose breakout has not come within this many bars of its last anchor (handle low, right shoulder, point 5); also bounds how long a row can sit on the watchlist |
+| `MIN_REWARD_RISK` | off (tuned 1.0) | off | reject setups whose `(target − entry) / (entry − stop)` is below this; rows without a target are not judged |
+| `MAX_WAIT_BARS` | off (tuned 60) | off | drop a **watchlist** row whose last anchor (handle low, right shoulder, point 5) is more than this many bars old; a breakout is reported whenever it comes |
 | `MAX_BUY_RISK_MULT` | 1.5 | off | Max buy is also capped where the risk at the fill reaches this multiple of the planned risk; the backtest gaps fills above Max buy |
 
 ## Trend context
@@ -138,7 +154,7 @@ Not configurable: the handle low must stay in the upper half of the cup.
 5. **Confirmation state** — stale (> age limit) and runaway (> 5 % above) breakouts are dropped; setups more than 5 % below the trigger are dropped.
 6. **Volume** — a breakout close without ≥ 1.4× (cup) or ≥ 1.3× (H&S) average volume is watch-listed, not confirmed.
 7. **Risk** — stop above entry or risk above `MAX_RISK_PCT` is dropped.
-8. **Patience** — the breakout (or today, for a watchlist row) more than `MAX_WAIT_BARS` after the last anchor is dropped.
+8. **Patience** — a watchlist row whose last anchor is more than `MAX_WAIT_BARS` old is dropped (confirmed breakouts are exempt).
 9. **Reward:risk** — a target less than `MIN_REWARD_RISK` planned risks above the entry is dropped.
 10. **Score** — everything surviving with a score below `MIN_SCORE` is dropped.
 11. **De-duplication** — only the best-scoring signal per `(ticker, pattern, status)` is kept, so overlapping pivot combinations never inflate the count.
