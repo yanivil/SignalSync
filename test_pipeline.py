@@ -164,13 +164,18 @@ def test_end_to_end_mini_universe(tmp_path, universe_csv, fake_yfinance, mini_un
     rows = [ln for ln in report.splitlines() if ln.startswith("| ") and not ln.startswith("| Ticker")]
     assert len(rows) == len(signals)
     for ln in rows:
-        assert ln.count("|") == 13, ln                       # 12 columns
+        assert ln.count("|") == 14, ln                       # 13 columns
     by_row = {ln.split(" | ")[0].lstrip("| "): ln for ln in rows}
     for s in signals:                                        # Age column: bars/limit for confirmed, '-' otherwise
         cells = by_row[s["ticker"]].split(" | ")
-        assert cells[8] == (f"{s['bars_since_break']}/{scan.max_breakout_age(s['pattern'])}"
+        assert cells[9] == (f"{s['bars_since_break']}/{scan.max_breakout_age(s['pattern'])}"
                             if s["status"] == "CONFIRMED" else "-"), by_row[s["ticker"]]
-        assert float(cells[3]) == s["max_buy"] and s["max_buy"] > s["entry"] * 0.99   # Max buy = trigger + 5 %
+        assert float(cells[3]) == s["max_buy"] and s["entry"] < s["max_buy"] <= round(s["entry"] * 1.06, 2)
+        assert s["max_buy"] == scan.max_buy_level(s["entry"], s["entry"], s["stop"]) or \
+            s["max_buy"] <= round(s["entry"] * (1 + scan.MAX_RUNAWAY), 2)      # never above the runaway cap
+        assert cells[7] == (str(s["reward_risk"]) if s["reward_risk"] is not None else "-")
+        if s["target"] is not None:                                            # R:R = (target-entry)/(entry-stop)
+            assert s["reward_risk"] == pytest.approx((s["target"] - s["entry"]) / (s["entry"] - s["stop"]), abs=0.01)
     assert "## Closed since the last report" in report and data["closed"] == []   # first run: nothing to close
     for s in signals:
         assert f"| {s['ticker']} | {s['pattern']} | {s['entry']} | {s['max_buy']} | {s['stop']} |" in report
@@ -265,3 +270,23 @@ def test_end_to_end_exit_code_2_when_nothing_downloads(tmp_path, universe_csv, f
     fake_yfinance({})                                           # every symbol "delisted"
     rc, data, report = _run(tmp_path, universe_csv)
     assert rc == 2 and data is None and not (tmp_path / "out").exists()
+
+
+def test_close_out_explains_reward_and_patience_drops(monkeypatch):
+    """A DROPPED row names the reward or patience rule that removed it, judged on its own levels."""
+    df = _frame(*[(100.0, 101.0, 99.0, 100.0)] * 30)                  # flat: no stop, target or fade
+    prev = [{"ticker": "T", "pattern": "Inverse Head & Shoulders", "status": "WATCHLIST",
+             "last_date": "2026-03-10", "entry": 100.0, "stop": 90.0, "target": 103.0,
+             "bars_since_break": None,
+             "notes": "LS 2026-01-05 @95.00, head 2026-01-20 @90.00, RS 2026-02-02 @96.00, "
+                      "neckline 100.00->100.00 (now 100.00)"}]
+    assert scan.close_out(prev, [], {"T": df})[0]["detail"] == "pattern no longer qualifies"
+    monkeypatch.setattr(scan, "MIN_REWARD_RISK", 1.5)
+    out = scan.close_out(prev, [], {"T": df})
+    assert out[0]["outcome"] == "DROPPED" and out[0]["detail"] == "reward:risk 0.3 below the minimum 1.5"
+    monkeypatch.setattr(scan, "MIN_REWARD_RISK", None)
+    monkeypatch.setattr(scan, "MAX_WAIT_BARS", 10)
+    out = scan.close_out(prev, [], {"T": df})
+    assert out[0]["detail"] == "no breakout within 10 bars of the right shoulder on 2026-02-02 (30 bars)"
+    monkeypatch.setattr(scan, "MAX_WAIT_BARS", 40)                    # inside the limit: generic reason
+    assert scan.close_out(prev, [], {"T": df})[0]["detail"] == "pattern no longer qualifies"
