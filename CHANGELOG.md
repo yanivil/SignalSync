@@ -5,6 +5,29 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Added (2026-09-06, after an external review of the HAL and TXN rows)
+- `R:R` column and `reward_risk` field: `(target - entry) / (entry - stop)`
+  at the reported entry. `MIN_REWARD_RISK` drops rows below it (spec: off;
+  tuned: REPLAY_RR). On 2026-09-04, 5 of 18 reported rows were below 1.5 and
+  4 below 1.0, all inverse H&S whose shoulder was months old under a
+  neckline extrapolated to today.
+- `MAX_WAIT_BARS`: a completed pattern whose breakout has not come within N
+  bars of its last anchor (handle low, right shoulder, point 5) is dropped
+  (spec: off; tuned: REPLAY_WAIT). Nothing bounded that wait before; 9 of
+  17 watchlist rows had waited more than 60 sessions, one since May 2025.
+- Wolfe `notes` carry `first target <point 4> (point 4)` next to the EPA.
+- `close_out` names the reward or patience rule that removed a row; the
+  Closed header notes a rule-profile change between runs;
+  `meta.min_reward_risk`, `meta.max_wait_bars`, `meta.max_buy_risk_mult`,
+  `meta.previous_profile`.
+
+### Changed
+- `Max buy` is now the lower of trigger + 5 % and the open at which the
+  risk to the stop reaches `MAX_BUY_RISK_MULT` (1.5) x the planned risk. With
+  the 5 % rule alone a Wolfe fill at Max buy carried 2.7x the planned risk
+  (TXN: 267.86 against a 252.94 stop; now 261.19). The backtest gaps fills
+  above the row's `max_buy` instead of entry + 5 %.
+
 ### Changed (calibration)
 - Tuned profile: Wolfe leg rhythm ±45 % (was ±60 %). Year-long replay:
   ±30 % 8 signals at +0.37 R, ±45 % 28 at +0.13, ±60 % 43 at +0.02; the
