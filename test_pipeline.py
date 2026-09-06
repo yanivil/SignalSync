@@ -290,3 +290,8 @@ def test_close_out_explains_reward_and_patience_drops(monkeypatch):
     assert out[0]["detail"] == "no breakout within 10 bars of the right shoulder on 2026-02-02 (30 bars)"
     monkeypatch.setattr(scan, "MAX_WAIT_BARS", 40)                    # inside the limit: generic reason
     assert scan.close_out(prev, [], {"T": df})[0]["detail"] == "pattern no longer qualifies"
+    monkeypatch.setattr(scan, "MAX_WAIT_BARS", 10)                    # a confirmed row is never a patience drop
+    confirmed = [{**prev[0], "status": "CONFIRMED", "bars_since_break": 2}]
+    assert scan.close_out(confirmed, [], {"T": df})[0]["outcome"] == "EXPIRED"
+    monkeypatch.setattr(scan, "MAX_BREAKOUT_AGE", 500)
+    assert scan.close_out(confirmed, [], {"T": df})[0]["detail"] == "pattern no longer qualifies"

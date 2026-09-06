@@ -169,8 +169,8 @@ MAX_RISK_PCT = {                         # reject setups whose stop is further t
 # Reward, chase and patience (all patterns; added 2026-09-06 after an external
 # review of the HAL and TXN rows, see docs/wiki/03).  ``None`` = rule off.
 MIN_REWARD_RISK: Optional[float] = None  # reject setups whose (target - entry) / (entry - stop) is below this
-MAX_WAIT_BARS: Optional[int] = None      # drop a completed pattern whose breakout has not come within this many
-#                                          bars of its last anchor (handle low, right shoulder, point 5)
+MAX_WAIT_BARS: Optional[int] = None      # drop a WATCHLIST row whose last anchor (handle low, right shoulder,
+#                                          point 5) is more than this many bars old; breakouts are always reported
 MAX_BUY_RISK_MULT: Optional[float] = 1.5  # Max buy is also capped where the risk at the fill reaches this x the
 #                                          planned (entry - stop); None = trigger + MAX_RUNAWAY only
 
@@ -181,6 +181,11 @@ RULE_PROFILES: Dict[str, Dict[str, Any]] = {
         "IHS_SIDE_SYM_TOL": None,        # +-40 % side symmetry removed the best H&S signals (+0.74 R)
         "WW_TIME_SYM_TOL": 0.45,         # replay: 0.30 -> 8 signals/+0.37 R, 0.45 -> 28/+0.13, 0.60 -> 43/+0.02
         "CUP_MAX_RETRACE": 0.618,        # the spec's own "absolute maximum"
+        "MIN_REWARD_RISK": 1.0,          # replay 2026-09-06: 1.0 -> 158 signals/+0.29 R (177/+0.28 without);
+        #                                  1.5 -> 113/+0.30; 2.0 -> 77/+0.29: expectancy-neutral, so only the
+        #                                  indefensible rows (target below one risk unit) go
+        "MAX_WAIT_BARS": 60,             # watchlist only: 97 % of the year's breakouts came within 60 bars of
+        #                                  the anchor; dropping late *breakouts* cost R (they averaged +1.1 R)
     },
     "legacy": {                          # the rules in force until 2026-09-05
         "CUP_MIN_LEN": 30, "CUP_MAX_LEN": 250, "CUP_MAX_RETRACE": None, "CUP_RIM_TOL_OF_DEPTH": None,
@@ -259,8 +264,15 @@ def max_buy_level(trigger: float, entry: float, stop: float) -> float:
 def waited_too_long(completed: int, age: Optional[int], n: int) -> bool:
     """``MAX_WAIT_BARS`` rule: the pattern's last anchor is more than the limit
     behind the breakout bar (``age`` bars before the last bar), or behind the
-    last bar itself when there is no breakout yet.  A completed base that sits
-    for months without breaking out is no longer the pattern that was found."""
+    last bar itself when there is no breakout yet.
+
+    The detectors apply it to WATCHLIST rows only.  The 2026-09-06 replay
+    showed that breakouts arriving late from a long-completed base were the
+    strongest signals of the year (the 8 that waited more than 40 bars
+    averaged +1.1 R), so a breakout is reported whenever it comes; the limit
+    just stops a watchlist row from sitting for months, which 97 % of the
+    year's eventual breakouts never did.
+    """
     if MAX_WAIT_BARS is None:
         return False
     break_bar = n - 1 - age if age is not None else n - 1
@@ -1093,8 +1105,8 @@ def detect_cup_and_handle(df: pd.DataFrame, ticker: str) -> List[Signal]:
             max_risk = MAX_RISK_PCT["Cup & Handle"]
             if risk > max_risk:
                 continue  # rule 4: reject setups whose structural stop is too far
-            if waited_too_long(h_low_idx, age, n):
-                continue  # the handle low is too far behind the breakout (or today)
+            if status == "WATCHLIST" and waited_too_long(h_low_idx, age, n):
+                continue  # handle low too old for a watchlist row (a breakout would still be reported)
             # Quality score (0-100): 50 base
             #   +15 roundness         (0 at CUP_MIN_ROUNDNESS, 15 at R^2 = 1)
             #   +10 depth near 25 %   (0 at 0 % or 50 %, linear)
@@ -1239,8 +1251,8 @@ def detect_inverse_hs(df: pd.DataFrame, ticker: str) -> List[Signal]:
         max_risk = MAX_RISK_PCT["Inverse Head & Shoulders"]
         if risk > max_risk:
             continue
-        if waited_too_long(rs, age, n):
-            continue  # the right shoulder is too far behind the breakout (or today)
+        if status == "WATCHLIST" and waited_too_long(rs, age, n):
+            continue  # right shoulder too old for a watchlist row (a breakout would still be reported)
         # Measured move: neckline minus head, with the neckline read at the
         # head bar (spec) or at the breakout bar (legacy).
         height = head_height if IHS_TARGET_AT_HEAD else trigger - h_v
@@ -1389,7 +1401,7 @@ def detect_bullish_wolfe(df: pd.DataFrame, ticker: str) -> List[Signal]:
         max_risk = MAX_RISK_PCT["Bullish Wolfe Wave"]
         if risk > max_risk:
             continue
-        if waited_too_long(p5, age, n):
+        if status == "WATCHLIST" and waited_too_long(p5, age, n):
             continue  # (WW_MAX_BARS_SINCE_P5 is usually the tighter of the two)
         # ETA = the bar where lines 1-3 and 2-4 meet.  Solving
         #   v1 + s13 (x - p1) = v2 + s24 (x - p2)
@@ -1558,7 +1570,7 @@ def _drop_reason(p: Mapping[str, Any], df: pd.DataFrame) -> str:
     if MIN_REWARD_RISK is not None and rr is not None and rr < MIN_REWARD_RISK:
         return f"reward:risk {rr} below the minimum {MIN_REWARD_RISK}"
     m = _ANCHOR_RE.search(p.get("notes") or "")
-    if MAX_WAIT_BARS is not None and m:
+    if MAX_WAIT_BARS is not None and p.get("status") == "WATCHLIST" and m:
         label = {"RS": "right shoulder", "handle low": "handle low", "5": "point 5"}[m[1]]
         waited = int((df.index > pd.Timestamp(m[2])).sum())
         if waited > MAX_WAIT_BARS:
@@ -1586,8 +1598,8 @@ def render_markdown(signals: List[Signal], meta: Mapping[str, Any],
                  f"{PIVOT_ORDER} bars after it prints)."
                  + (f" Rows with reward:risk below {MIN_REWARD_RISK} are dropped."
                     if MIN_REWARD_RISK is not None else "")
-                 + (f" Patterns still waiting for their breakout more than {MAX_WAIT_BARS} bars after "
-                    f"their last anchor are dropped." if MAX_WAIT_BARS is not None else ""))
+                 + (f" Watchlist rows whose pattern completed more than {MAX_WAIT_BARS} bars ago are "
+                    f"dropped (a breakout is reported whenever it comes)." if MAX_WAIT_BARS is not None else ""))
     if meta.get("skipped_bar"):
         lines.append(f"Newest bar {meta['skipped_bar']} not scanned: complete for "
                      f"{meta.get('skipped_bar_complete', 0)} symbols, still missing OHLC at "
