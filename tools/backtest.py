@@ -36,6 +36,13 @@ Method:
   the horizon and the chart-book style ``success5``: did the high reach +5 %
   above the fill before any *close* below the stop (no target, no intraday
   stop), which is what published "pattern success rates" measure.
+* Per signal it records **features at the scan day**, computed from the
+  history the scan saw (``row_features``): close vs SMA200, SMA50 vs SMA200,
+  the SMA200's change over 40 bars, the distance from the SMA200 in ATR, the
+  stop and target distances in ATR and the bars from the pattern's last anchor
+  (handle low, right shoulder, point 5) to the breakout.  Nothing is added to
+  ``scan.Signal`` or the nightly report; the features exist to be tested
+  against outcomes.
 * Every summary carries, next to hit rate and mean R: median R, standard
   deviation, total R, the deepest drawdown of the cumulative R curve (1 R per
   trade, in scan order), a 95 % bootstrap interval of the mean R and the
@@ -43,6 +50,13 @@ Method:
   *months*, not trades: signals cluster in time (33 in one month, 2 in
   another, over 2024-26), so resampling trades as if independent would
   understate the uncertainty.
+* Two more tables per window: **excursions by horizon** (median MFE and MAE
+  in percent and in ATR at 5 / 10 / 20 / 40 / 60 bars, with the share of
+  signals that had reached the target, hit the stop or neither by then) and
+  **outcome by feature** (hit rate, mean R and interval per bucket of each
+  feature above plus volume ratio, risk %, reward:risk and breakout age).  A
+  feature is worth a rule only if its buckets separate outcomes by more than
+  their intervals, on both windows of a split.
 * ``--split YYYY-MM-DD`` reports the sessions before and from that date as
   separate windows next to the pooled one, so a rule chosen on one window is
   judged on the other -- the out-of-sample check a calibration decision
@@ -94,6 +108,33 @@ GRID = [(extra, basis, mode) for extra in (0.0, 0.25, 0.75) for basis in ("intra
         for mode in TARGET_MODES]
 TRADED = ("target", "stop", "open")          # outcomes with a position; "gap" / "below_stop" / "no_data" have none
 N_BOOT = 2000                                # month-block bootstrap resamples per summary
+HORIZONS = (5, 10, 20, 40, 60)               # bars after the fill for the excursion table
+SLOPE_LOOKBACK = 40                          # bars between the two SMA200 readings of the slope feature
+INF = float("inf")
+# Feature buckets for the outcome-by-feature table: key -> (label, right-inclusive edges, bucket names).
+# Fixed edges, so two replays (or the two windows of a split) are comparable bucket by bucket.
+FEATURE_BUCKETS: Dict[str, Tuple[str, Sequence[float], Sequence[str]]] = {
+    "volume_ratio": ("breakout volume / 20-bar average", (-INF, 0.8, 1.0, 1.3, 2.0, INF),
+                     ("<= 0.8x", "0.8-1.0x", "1.0-1.3x", "1.3-2.0x", "> 2.0x")),
+    "close_vs_sma200": ("close vs SMA200", (-INF, -0.05, 0.0, 0.10, 0.25, INF),
+                        ("> 5% below", "0-5% below", "0-10% above", "10-25% above", "> 25% above")),
+    "sma50_vs_sma200": ("SMA50 vs SMA200", (-INF, -0.05, 0.0, 0.05, INF),
+                        ("> 5% below", "0-5% below", "0-5% above", "> 5% above")),
+    "sma200_slope": (f"SMA200 change over {SLOPE_LOOKBACK} bars", (-INF, -0.02, 0.0, 0.02, 0.05, INF),
+                     ("falling > 2%", "falling 0-2%", "rising 0-2%", "rising 2-5%", "rising > 5%")),
+    "dist_sma200_atr": ("close minus SMA200, in ATR", (-INF, -2.0, 0.0, 3.0, 6.0, INF),
+                        ("< -2 ATR", "-2..0 ATR", "0..3 ATR", "3..6 ATR", "> 6 ATR")),
+    "stop_atr": ("entry minus stop, in ATR", (-INF, 1.5, 3.0, 5.0, INF),
+                 ("<= 1.5 ATR", "1.5-3 ATR", "3-5 ATR", "> 5 ATR")),
+    "risk_pct": ("risk %", (-INF, 4.0, 8.0, 12.0, INF), ("<= 4%", "4-8%", "8-12%", "> 12%")),
+    "reward_risk": ("reward:risk at entry", (-INF, 1.5, 2.5, 4.0, INF), ("<= 1.5", "1.5-2.5", "2.5-4", "> 4")),
+    "wait_bars": ("bars from the last anchor to the breakout", (-INF, 10, 20, 40, 60, INF),
+                  ("<= 10", "11-20", "21-40", "41-60", "> 60")),
+    "bars_since_break": ("breakout age when first reported", (-INF, 0, 1, 3, 8, INF),
+                         ("0", "1", "2-3", "4-8", "> 8")),
+}
+FEATURE_KEYS = ("close_vs_sma200", "sma50_vs_sma200", "sma200_slope", "dist_sma200_atr", "stop_atr",
+                "target_atr", "wait_bars")  # what row_features adds to a row
 
 
 def variant_target(row: dict, mode: str) -> Optional[float]:
@@ -163,6 +204,49 @@ def classify_variant(fill: float, stop: float, target: Optional[float], bars: pd
             return {"outcome": "target", "bars": i, "exit": exit_, "r": (exit_ - fill) / risk if risk > 0 else None}
     last = float(w["Close"].iloc[-1])
     return {"outcome": "open", "bars": len(w), "exit": last, "r": (last - fill) / risk if risk > 0 else None}
+
+
+def row_features(hist: pd.DataFrame, s: scan.Signal, atr_last: float) -> Dict[str, Optional[float]]:
+    """Features of one signal at its scan day, from the history the scan saw.
+
+    * ``close_vs_sma200``, ``sma50_vs_sma200``: ratios minus one (``None`` with
+      fewer than 200 / 50 bars).
+    * ``sma200_slope``: the SMA200 against its value ``SLOPE_LOOKBACK`` bars
+      earlier, minus one (``None`` with fewer than 240 bars).
+    * ``dist_sma200_atr``, ``stop_atr``, ``target_atr``: close minus SMA200,
+      entry minus stop and target minus entry, each in units of the last ATR.
+    * ``wait_bars``: bars from the pattern's last anchor (handle low, right
+      shoulder, point 5, read from ``notes`` like ``scan._drop_reason`` does) to
+      the breakout bar.
+
+    Complexity: O(bars) for the two means.
+    """
+    close = hist["Close"].to_numpy(dtype=float)
+    n = len(close)
+    c = close[-1]
+    s200 = float(close[-200:].mean()) if n >= 200 else None
+    s50 = float(close[-50:].mean()) if n >= 50 else None
+    s200_prev = (float(close[-200 - SLOPE_LOOKBACK:-SLOPE_LOOKBACK].mean())
+                 if n >= 200 + SLOPE_LOOKBACK else None)
+
+    def rel(a: Optional[float], b: Optional[float]) -> Optional[float]:
+        return round(a / b - 1, 4) if a is not None and b else None
+
+    def in_atr(x: Optional[float]) -> Optional[float]:
+        return round(x / atr_last, 3) if x is not None and atr_last else None
+
+    out: Dict[str, Optional[float]] = {
+        "close_vs_sma200": rel(c, s200), "sma50_vs_sma200": rel(s50, s200), "sma200_slope": rel(s200, s200_prev),
+        "dist_sma200_atr": in_atr(c - s200) if s200 is not None else None,
+        "stop_atr": in_atr(s.entry - s.stop),
+        "target_atr": in_atr(s.target - s.entry) if s.target is not None else None,
+        "wait_bars": None}
+    m = scan._ANCHOR_RE.search(s.notes or "")
+    if m and s.bars_since_break is not None:
+        loc = int(hist.index.get_indexer([pd.Timestamp(m[2])])[0])
+        if loc >= 0:
+            out["wait_bars"] = n - 1 - int(s.bars_since_break) - loc
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -325,11 +409,12 @@ def walk_forward(data: Dict[str, pd.DataFrame], days: int, horizon: int,
     :param bars: Bars of history each scan sees (default: everything up to the
         day).  500 mimics the nightly job's 2y download in a longer replay.
     :returns: One dict per first-seen CONFIRMED signal with the signal fields plus
-        ``fill``, ``outcome``, ``bars``, ``exit``, ``r`` (and for cups the parsed
-        ``cup_bottom`` / ``cup_trigger`` for the breakout-level target variant).
-        ``outcome`` is ``target`` / ``stop`` / ``open`` for traded rows, ``gap``
-        (open above Max buy) or ``below_stop`` (open at or below the stop) for
-        rows not traded, ``no_data`` without a bar after the scan day.
+        ``fill``, ``outcome``, ``bars``, ``exit``, ``r``, the :func:`row_features`
+        (and for cups the parsed ``cup_bottom`` / ``cup_trigger`` for the
+        breakout-level target variant).  ``outcome`` is ``target`` / ``stop`` /
+        ``open`` for traded rows, ``gap`` (open above Max buy) or ``below_stop``
+        (open at or below the stop) for rows not traded, ``no_data`` without a
+        bar after the scan day.
 
     Complexity: O(days * symbols * detector cost); ~2 ms per symbol-day.
     """
@@ -352,8 +437,9 @@ def walk_forward(data: Dict[str, pd.DataFrame], days: int, horizon: int,
                 if key in seen:
                     continue
                 after = df[df.index > d]
-                row = {**scan.asdict(s), "scan_day": str(d.date()),
-                       "atr": round(float(scan.atr(hist).iloc[-1]), 4), "cup_bottom": None, "cup_trigger": None}
+                atr_last = round(float(scan.atr(hist).iloc[-1]), 4)
+                row = {**scan.asdict(s), "scan_day": str(d.date()), "atr": atr_last,
+                       "cup_bottom": None, "cup_trigger": None, **row_features(hist, s, atr_last)}
                 if s.pattern == "Cup & Handle":
                     m = re.search(r"bottom \S+ @([\d.]+).*trigger ([\d.]+)", s.notes)
                     if m:
@@ -375,39 +461,114 @@ def walk_forward(data: Dict[str, pd.DataFrame], days: int, horizon: int,
     return list(seen.values())
 
 
-def breakdown(rows: Sequence[dict]) -> dict:
-    """Summary overall, per pattern and per score bucket (rows not traded are excluded from the rates).
+def summarise_rows(sub: Sequence[dict]) -> dict:
+    """One summary of a set of rows (rows not traded are excluded from the rates).
 
-    Each summary carries the ``evaluate_signals.summarise`` counts plus
-    ``signals``, ``gap``, ``below_stop``, ``median_r``, ``std_r``, ``total_r``,
-    ``max_dd`` (cumulative R curve in scan order), the month-block bootstrap
-    ``ci_low`` / ``ci_high`` / ``dd_p95`` / ``blocks`` (see
-    :func:`block_bootstrap`), ``success5``, ``mfe`` and ``mae``.
+    The ``evaluate_signals.summarise`` counts plus ``signals``, ``gap``,
+    ``below_stop``, ``median_r``, ``std_r``, ``total_r``, ``max_dd`` (cumulative R
+    curve in scan order), the month-block bootstrap ``ci_low`` / ``ci_high`` /
+    ``dd_p95`` / ``blocks`` (see :func:`block_bootstrap`), ``success5``, ``mfe``
+    and ``mae``.
     """
-    def summ(sub):
-        traded = sorted((r for r in sub if r["outcome"] in TRADED), key=lambda r: (r["scan_day"], r["ticker"]))
-        rs = [float(r["r"]) for r in traded if r["r"] is not None]
-        decided = [r["success5"] for r in traded if r.get("success5") is not None]
-        boot = block_bootstrap(traded)
-        return {**ev.summarise(traded), "signals": len(sub),
-                "gap": sum(1 for r in sub if r["outcome"] == "gap"),
-                "below_stop": sum(1 for r in sub if r["outcome"] == "below_stop"),
-                "median_r": round(float(np.median(rs)), 3) if rs else None,
-                "std_r": round(float(np.std(rs, ddof=1)), 3) if len(rs) > 1 else None,
-                "total_r": round(float(np.sum(rs)), 2) if rs else None,
-                "max_dd": max_drawdown(rs),
-                "ci_low": boot["ci_low"], "ci_high": boot["ci_high"],
-                "dd_p95": boot["dd_p95"], "blocks": boot["blocks"],
-                "success5": round(sum(decided) / len(decided), 3) if decided else None,
-                "mfe": round(sum(r["mfe"] for r in traded) / len(traded), 4) if traded else None,
-                "mae": round(sum(r["mae"] for r in traded) / len(traded), 4) if traded else None}
-    out = {"overall": summ(rows), "by_pattern": {}, "by_score": {}}
+    traded = sorted((r for r in sub if r["outcome"] in TRADED), key=lambda r: (r["scan_day"], r["ticker"]))
+    rs = [float(r["r"]) for r in traded if r["r"] is not None]
+    decided = [r["success5"] for r in traded if r.get("success5") is not None]
+    boot = block_bootstrap(traded)
+    return {**ev.summarise(traded), "signals": len(sub),
+            "gap": sum(1 for r in sub if r["outcome"] == "gap"),
+            "below_stop": sum(1 for r in sub if r["outcome"] == "below_stop"),
+            "median_r": round(float(np.median(rs)), 3) if rs else None,
+            "std_r": round(float(np.std(rs, ddof=1)), 3) if len(rs) > 1 else None,
+            "total_r": round(float(np.sum(rs)), 2) if rs else None,
+            "max_dd": max_drawdown(rs),
+            "ci_low": boot["ci_low"], "ci_high": boot["ci_high"],
+            "dd_p95": boot["dd_p95"], "blocks": boot["blocks"],
+            "success5": round(sum(decided) / len(decided), 3) if decided else None,
+            "mfe": round(sum(r["mfe"] for r in traded) / len(traded), 4) if traded else None,
+            "mae": round(sum(r["mae"] for r in traded) / len(traded), 4) if traded else None}
+
+
+def breakdown(rows: Sequence[dict]) -> dict:
+    """:func:`summarise_rows` overall, per pattern and per score bucket."""
+    out = {"overall": summarise_rows(rows), "by_pattern": {}, "by_score": {}}
     for p in sorted({r["pattern"] for r in rows}):
-        out["by_pattern"][p] = summ([r for r in rows if r["pattern"] == p])
+        out["by_pattern"][p] = summarise_rows([r for r in rows if r["pattern"] == p])
     for lo, hi in SCORE_BUCKETS:
         sub = [r for r in rows if lo <= r["score"] <= hi]
         if sub:
-            out["by_score"][f"{lo}-{hi}"] = summ(sub)
+            out["by_score"][f"{lo}-{hi}"] = summarise_rows(sub)
+    return out
+
+
+def horizon_table(rows: Sequence[dict], data: Dict[str, pd.DataFrame],
+                  horizons: Sequence[int] = HORIZONS) -> List[dict]:
+    """Excursions and outcome shares of the traded rows at several horizons, overall and per pattern.
+
+    For each horizon ``h``: the median MFE and MAE over the first ``h`` bars
+    after the fill (as a fraction of the fill and in ATR) and the share of
+    rows that ``evaluate_signals.classify`` calls ``target``, ``stop`` or
+    ``open`` within ``h`` bars.  Medians, because a few runaway winners
+    dominate the means.
+
+    :returns: One dict per (slice, horizon): ``slice``, ``horizon``, ``n``,
+        ``median_mfe``, ``median_mae``, ``median_mfe_atr``, ``median_mae_atr``,
+        ``target``, ``stop``, ``open`` (shares).  Slices without rows are omitted.
+
+    Complexity: O(rows * horizons * horizon).
+    """
+    traded = [r for r in rows if r["outcome"] in TRADED]
+    groups = [("all", traded)] + [(p, [r for r in traded if r["pattern"] == p])
+                                  for p in sorted({r["pattern"] for r in traded})]
+    out = []
+    for name, sub in groups:
+        for h in horizons:
+            mfe, mae, mfe_atr, mae_atr, outcomes = [], [], [], [], []
+            for r in sub:
+                bars = data[r["ticker"]]
+                after = bars[bars.index > pd.Timestamp(r["scan_day"])]
+                w = after.iloc[:h]
+                if w.empty:
+                    continue
+                fill, hi, lo = r["fill"], float(w["High"].max()), float(w["Low"].min())
+                mfe.append(hi / fill - 1)
+                mae.append(lo / fill - 1)
+                if r.get("atr"):
+                    mfe_atr.append((hi - fill) / r["atr"])
+                    mae_atr.append((lo - fill) / r["atr"])
+                outcomes.append(ev.classify(fill, r["stop"], r["target"], after, h)["outcome"])
+            n = len(outcomes)
+            if n == 0:
+                continue
+            out.append({"slice": name, "horizon": h, "n": n,
+                        "median_mfe": round(float(np.median(mfe)), 4), "median_mae": round(float(np.median(mae)), 4),
+                        "median_mfe_atr": round(float(np.median(mfe_atr)), 2) if mfe_atr else None,
+                        "median_mae_atr": round(float(np.median(mae_atr)), 2) if mae_atr else None,
+                        "target": round(outcomes.count("target") / n, 3),
+                        "stop": round(outcomes.count("stop") / n, 3),
+                        "open": round(outcomes.count("open") / n, 3)})
+    return out
+
+
+def feature_buckets(rows: Sequence[dict]) -> List[dict]:
+    """Outcome of the traded rows per bucket of every feature in ``FEATURE_BUCKETS``.
+
+    Buckets are right-inclusive intervals between the fixed edges; rows
+    without a value for a feature (e.g. reward:risk without a target) are left
+    out of that feature's buckets and counted in ``missing``.  Empty buckets
+    are omitted.
+
+    :returns: One dict per (feature, bucket): ``key``, ``feature``, ``bucket``,
+        ``missing`` and the :func:`summarise_rows` fields.
+    """
+    traded = [r for r in rows if r["outcome"] in TRADED]
+    out = []
+    for key, (label, edges, names) in FEATURE_BUCKETS.items():
+        valued = [r for r in traded if r.get(key) is not None]
+        for i, name in enumerate(names):
+            sub = [r for r in valued if edges[i] < float(r[key]) <= edges[i + 1]]
+            if sub:
+                out.append({"key": key, "feature": label, "bucket": name, "missing": len(traded) - len(valued),
+                            **summarise_rows(sub)})
     return out
 
 
@@ -415,15 +576,19 @@ def report_sections(rows: Sequence[dict], days: int, horizon: int, split: Option
                     data: Optional[Dict[str, pd.DataFrame]] = None, do_grid: bool = False,
                     other_rows: Optional[Sequence[dict]] = None, other_name: Optional[str] = None) -> List[dict]:
     """One section per window (see :func:`split_windows`): its rows, ``breakdown``
-    stats, the stop / target ``grid`` (with ``do_grid`` and ``data``) and the other
-    profile's stats over the same window (with ``other_rows``)."""
+    stats, the ``feature_buckets``, the ``horizon_table`` (with ``data``), the stop /
+    target ``grid`` (with ``do_grid`` and ``data``) and the other profile's stats
+    over the same window (with ``other_rows``)."""
     windows = split_windows(rows, split)
     others = split_windows(other_rows, split) if other_rows is not None else [(None, None)] * len(windows)
     sections = []
     for (label, rws), (_, o_rws) in zip(windows, others):
-        sec: Dict[str, Any] = {"label": label, "rows": rws, "stats": breakdown(rws), "grid": None, "other": None}
-        if do_grid and data is not None:
-            sec["grid"] = grid(rws, data, horizon)
+        sec: Dict[str, Any] = {"label": label, "rows": rws, "stats": breakdown(rws),
+                               "features": feature_buckets(rws), "horizons": None, "grid": None, "other": None}
+        if data is not None:
+            sec["horizons"] = horizon_table(rws, data)
+            if do_grid:
+                sec["grid"] = grid(rws, data, horizon)
         if o_rws is not None:
             sec["other"] = {"profile": other_name, "stats": breakdown(o_rws)}
         sections.append(sec)
@@ -464,6 +629,33 @@ def _summary_table(stats: dict, prefix: str = "") -> List[str]:
     return lines
 
 
+def _horizon_lines(table: Sequence[dict], label: str) -> List[str]:
+    lines = ["", f"### Excursions by horizon ({label})", "",
+             "Median best and worst excursion from the fill within the first N bars, in percent and in ATR, and "
+             "the share of signals that had reached the target, hit the stop or done neither by then.", "",
+             "| Slice | Bars | N | Median MFE | Median MAE | MFE / ATR | MAE / ATR | Target | Stop | Neither |",
+             "|---|---|---|---|---|---|---|---|---|---|"]
+    for t in table:
+        lines.append(f"| {t['slice']} | {t['horizon']} | {t['n']} | {_pct(t['median_mfe'], True)} | "
+                     f"{_pct(t['median_mae'], True)} | {_r(t['median_mfe_atr'])} | {_r(t['median_mae_atr'])} | "
+                     f"{_pct(t['target'])} | {_pct(t['stop'])} | {_pct(t['open'])} |")
+    return lines
+
+
+def _feature_lines(buckets: Sequence[dict], label: str) -> List[str]:
+    lines = ["", f"### Outcome by feature ({label})", "",
+             "Traded signals bucketed by a feature measured at the scan day. A feature earns a rule only if its "
+             "buckets separate outcomes by more than their intervals, on both windows of a split.", "",
+             "| Feature | Bucket | N | Hit rate | Mean R | Median R | 95% CI |", "|---|---|---|---|---|---|---|"]
+    for b in buckets:
+        lines.append(f"| {b['feature']} | {b['bucket']} | {b['n']} | {_pct(b['hit_rate'])} | {_r(b['mean_r'])} | "
+                     f"{_r(b['median_r'])} | {_ci(b)} |")
+    missing = {b["feature"]: b["missing"] for b in buckets if b["missing"]}
+    if missing:
+        lines += ["", "_Signals without a value: " + ", ".join(f"{k} {v}" for k, v in missing.items()) + "._"]
+    return lines
+
+
 def render(rows: Sequence[dict], sections: Sequence[dict], days: int, horizon: int) -> str:
     """Markdown report (readable as a GitHub step summary): one block per window, then every signal."""
     lines = [f"# Walk-forward backtest: last {days} sessions, horizon {horizon} bars "
@@ -481,6 +673,10 @@ def render(rows: Sequence[dict], sections: Sequence[dict], days: int, horizon: i
                   "chosen on one window is judged on the other."]
     for sec in sections:
         lines += ["", f"## {sec['label'].capitalize()}", ""] + _summary_table(sec["stats"])
+        if sec.get("horizons"):
+            lines += _horizon_lines(sec["horizons"], sec["label"])
+        if sec.get("features"):
+            lines += _feature_lines(sec["features"], sec["label"])
         if sec["grid"]:
             lines += ["", f"### Stop / target variants (same signals, {sec['label']})", "",
                       "Extra ATR = distance added below the reported stop (which already sits 0.25 ATR under the "
@@ -571,13 +767,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     print(render(rows, sections, args.days, args.horizon))
     if args.json:
         pooled = sections[0]
+        keep = ("label", "stats", "features", "horizons", "grid", "other")
         with open(args.json, "w", encoding="utf-8") as fh:
             json.dump({"days": args.days, "horizon": args.horizon, "profile": scan.ACTIVE_PROFILE,
                        "min_score": scan.MIN_SCORE, "bars": args.bars, "split": args.split,
-                       "stats": pooled["stats"], "grid": pooled["grid"],
+                       "stats": pooled["stats"], "features": pooled["features"], "horizons": pooled["horizons"],
+                       "grid": pooled["grid"],
                        "other_profile": ({"profile": other_name, "stats": pooled["other"]["stats"], "rows": other_rows}
                                          if other_rows is not None else None),
-                       "windows": [{k: s[k] for k in ("label", "stats", "grid", "other")} for s in sections[1:]],
+                       "windows": [{k: s[k] for k in keep} for s in sections[1:]],
                        "rows": rows}, fh, indent=2)
     return 0
 

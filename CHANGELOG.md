@@ -5,6 +5,19 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Added (backtest excursions by horizon and outcome by feature, #92)
+- Each backtest window gains an excursions table (median MFE and MAE within
+  5 / 10 / 20 / 40 / 60 bars, in percent and in ATR, with the share of signals
+  at target, at the stop or neither by then, overall and per pattern) and an
+  outcome-by-feature table. Every replay row now carries features measured
+  at the scan day from the history the scan saw: close vs SMA200, SMA50 vs
+  SMA200, the SMA200's change over 40 bars, the distance from the SMA200 in
+  ATR, the stop and target distances in ATR and the bars from the pattern's
+  last anchor to the breakout; the table buckets these, plus volume ratio,
+  risk %, reward:risk and breakout age, on fixed edges with N, hit rate,
+  mean and median R and the month-block interval. Nothing is added to
+  `signals.json` or the report.
+
 ### Added (backtest statistics and out-of-sample split, #91)
 - Every backtest summary (overall, per pattern, per score bucket, other
   profile) carries median R, standard deviation, total R, the deepest drawdown
