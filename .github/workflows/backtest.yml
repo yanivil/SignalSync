@@ -57,7 +57,9 @@ permissions:
 jobs:
   backtest:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # A runner replays about 5 s per session per profile over the full index; --grid runs two
+    # profiles, so 63 sessions take about 10 minutes and a two-year (500-session) replay about 90.
+    timeout-minutes: 180
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0

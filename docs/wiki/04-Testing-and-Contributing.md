@@ -84,12 +84,14 @@ The bootstrap resamples scan **months**, not trades: signals arrive in clusters 
 
 **Out-of-sample check.** `--split YYYY-MM-DD` prints every table three times: all sessions, the sessions before the date, and the sessions from it. A rule chosen on one window is judged on the other; how the windows are used is the protocol in [Configuration and Tuning](03-Configuration-and-Tuning.md). `--bars 500` makes each scan see only its last 500 bars, which is what the nightly's `2y` download gives it, so a `--period 5y --days 500` replay reproduces two years of nightly runs rather than scans with ever-longer histories. Caveats: today's constituents only (survivorship bias), the last `horizon` sessions are still open, and both replayed years to 2026-09 were mostly bull markets.
 
+A runner replays about 5 seconds per session per profile over the full index, and the workflow always runs `--grid`, which adds the other profile's pass:
+
 ```bash
-gh workflow run backtest.yml -f days=63 -f horizon=40                                              # about 2 minutes
+gh workflow run backtest.yml -f days=63 -f horizon=40                                              # about 10 minutes
 ```
 
 ```bash
-gh workflow run backtest.yml -f period=5y -f days=500 -f bars=500 -f split=2025-09-09 -f horizon=60   # two years, about 35 minutes with --grid
+gh workflow run backtest.yml -f period=5y -f days=500 -f bars=500 -f split=2025-09-09 -f horizon=60   # two years, about 90 minutes
 ```
 
 `tools/evaluate_signals.py` reads every version of `output/signals.json` from git history (the daily scan commits one per run), keeps the first appearance of each `CONFIRMED` signal keyed on `(ticker, pattern, stop)`, fetches the bars that followed, and classifies each as `target` (High reached the target before Low touched the stop), `stop`, `open` (neither within the horizon, marked to the last close) or `no_data`. R multiples are `(exit − entry) / (entry − stop)`. Run it on GitHub (`gh workflow run evaluate-signals.yml -f horizon=60`) because market-data hosts may be blocked locally.
