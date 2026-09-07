@@ -5,6 +5,28 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Added (backtest statistics and out-of-sample split, #91)
+- Every backtest summary (overall, per pattern, per score bucket, other
+  profile) carries median R, standard deviation, total R, the deepest drawdown
+  of the cumulative R curve (1 R per trade in scan order), a 95 % bootstrap
+  interval of the mean R and the drawdown exceeded in 5 % of resamples. The
+  bootstrap resamples scan months, not trades: signals cluster in time (33 in
+  June 2025, 2 in March 2026), so a per-trade interval would be too narrow.
+- `--split YYYY-MM-DD` reports the sessions before and from a date as
+  separate windows next to the pooled one, so a rule chosen on one window is
+  judged on the other; `--bars N` limits what each scan sees so a `--period
+  5y --days 500 --bars 500` replay reproduces two years of nightly runs.
+  Workflow inputs `period`, `bars`, `split`. Background: every calibration
+  to date was judged on the year the values were chosen on; a first two-year
+  replay found tuned at +0.30 R out of sample against +0.28 in-sample, legacy
+  at +0.34 against +0.09.
+
+### Fixed
+- Backtest: a next open at or below the stop was scored as a stop with an
+  undefined R, counted in the hit rate but dropped from mean R (INVH
+  2024-10-01, UAL 2025-11-17). It is now `below_stop`: not traded, counted
+  with the gaps (#94).
+
 ### Changed (calibration, 2026-09-06 replay of the review rules)
 - Tuned profile: `MIN_REWARD_RISK = 1.0`. Year-long replay (250 sessions,
   horizon 60, tuned): no minimum 177 signals at +0.28 R, 1.0 -> 158 at
