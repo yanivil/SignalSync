@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Tests for tools/backtest.py: no look-ahead, first-seen signals, fills and breakdowns (offline)."""
+"""Tests for tools/backtest.py: no look-ahead, first-seen signals, fills, statistics and breakdowns (offline)."""
 
 from __future__ import annotations
 
 import os
 import sys
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -40,6 +41,34 @@ def test_walk_forward_marks_gaps_and_no_data(mini_universe):
     assert [r["outcome"] for r in rows] == ["no_data"]
 
 
+def test_walk_forward_does_not_trade_an_open_at_or_below_the_stop(mini_universe):
+    """An open already through the stop is no trade (R would be undefined), counted next to the gaps."""
+    cup = mini_universe["CUP"].copy()
+    (today,) = scan.detect_cup_and_handle(cup, "CUP")          # seen at bar -2, filled at bar -1's open
+    cup.loc[cup.index[-1], ["Open", "Low"]] = [today.stop - 0.01, today.stop - 0.5]
+    (r,) = bt.walk_forward({"CUP": cup}, days=5, horizon=10)
+    assert r["outcome"] == "below_stop" and r["r"] is None and r["fill"] == round(today.stop - 0.01, 2)
+    stats = bt.breakdown([r])["overall"]
+    assert (stats["below_stop"], stats["gap"], stats["n"], stats["mean_r"]) == (1, 0, 0, None)
+    md = bt.render([r], bt.report_sections([r], 5, 10), 5, 10)
+    assert "| all | 1 | 1 | 0 | 0 | 0 | - | - |" in md               # "Not traded" counts it
+
+
+def test_walk_forward_bars_limits_what_each_scan_sees(mini_universe, monkeypatch):
+    seen = []
+    real = scan.scan_symbol
+
+    def spy(sym, df, detectors=None):
+        seen.append(len(df))
+        return real(sym, df, detectors)
+
+    monkeypatch.setattr(scan, "scan_symbol", spy)
+    bt.walk_forward(mini_universe, days=3, horizon=5, bars=120)
+    assert seen and set(seen) == {120}                            # every scan saw exactly the last 120 bars
+    seen.clear()
+    assert bt.walk_forward(mini_universe, days=3, horizon=5, bars=50) == [] and seen == []   # < 60 bars: skipped
+
+
 def _bars(*rows):
     """rows: (open, high, low, close) per day."""
     idx = pd.bdate_range("2026-01-05", periods=len(rows))
@@ -72,6 +101,55 @@ def test_classify_variant_close_vs_intraday_stops():
         "outcome": "stop", "bars": 1, "exit": 93.5, "r": -1.3}
 
 
+# --------------------------------------------------------------------------- #
+# Statistics: drawdown, month-block bootstrap, windows
+# --------------------------------------------------------------------------- #
+def _trade(day, r, ticker="T"):
+    return {"scan_day": day, "ticker": ticker, "r": r}
+
+
+def test_max_drawdown():
+    assert bt.max_drawdown([]) is None
+    assert bt.max_drawdown([1.0, 1.0]) == 0.0
+    assert bt.max_drawdown([-1.0, 2.0]) == -1.0                  # the curve starts at 0: a losing first trade counts
+    assert bt.max_drawdown([2.0, -1.0, -1.0, 0.5]) == -2.0       # peak 2 -> trough 0
+    assert bt.max_drawdown([0.5, -1.0, -1.0, 3.0, -0.5]) == -2.0  # 0.5 -> -1.5 is a fall of 2; -0.5 later is less
+
+
+def test_block_bootstrap_resamples_months():
+    flat = [_trade(f"2026-{m:02d}-10", 1.0) for m in (1, 1, 2, 2, 3, 3)]
+    assert bt.block_bootstrap(flat, n_boot=50) == {"ci_low": 1.0, "ci_high": 1.0, "dd_p95": 0.0, "blocks": 3}
+    # Fewer than two months, or fewer than five trades: an interval would mean nothing.
+    assert bt.block_bootstrap(flat[:2], n_boot=10)["ci_low"] is None
+    assert bt.block_bootstrap(flat[:4], n_boot=10) == {"ci_low": None, "ci_high": None, "dd_p95": None, "blocks": 2}
+    # A mixed sample: the interval brackets the mean, the worst-case drawdown is at least the observed one,
+    # rows without r are ignored, and the result is reproducible.
+    rs = (2.0, -1.0, -1.0, 2.0, -1.0, 2.0, -1.0, -1.0)
+    mixed = [_trade(f"2026-{m:02d}-10", r) for m, r in zip((1, 1, 2, 2, 3, 3, 4, 4), rs)] + [_trade("2026-05-10", None)]
+    b = bt.block_bootstrap(mixed, n_boot=500, seed=1)
+    assert b["blocks"] == 4 and b["ci_low"] < sum(rs) / len(rs) < b["ci_high"]
+    assert b["dd_p95"] <= bt.max_drawdown(rs) <= 0
+    assert bt.block_bootstrap(mixed, n_boot=200) == bt.block_bootstrap(mixed, n_boot=200)
+
+
+def test_split_windows_and_report_sections(mini_universe):
+    rows = bt.walk_forward(mini_universe, days=5, horizon=10)
+    assert bt.split_windows(rows, None) == [("all sessions", rows)]
+    split = max(r["scan_day"] for r in rows)
+    wins = bt.split_windows(rows, split)
+    assert [w[0] for w in wins] == ["all sessions", f"before {split}", f"from {split}"]
+    assert len(wins[1][1]) + len(wins[2][1]) == len(rows) and wins[2][1]
+    assert all(r["scan_day"] < split for r in wins[1][1]) and all(r["scan_day"] >= split for r in wins[2][1])
+    sections = bt.report_sections(rows, 5, 10, split=split, data=mini_universe, do_grid=True)
+    assert [s["label"] for s in sections] == [w[0] for w in wins]
+    assert sections[0]["stats"]["overall"]["signals"] == len(rows) and len(sections[0]["grid"]) == len(bt.GRID)
+    assert sections[2]["stats"]["overall"]["signals"] == len(wins[2][1])
+    md = bt.render(rows, sections, 5, 10)
+    assert "## All sessions" in md and f"## Before {split}" in md and f"## From {split}" in md
+    assert md.count("### Stop / target variants") == 3 and "judged on the other" in md
+    assert "## Signals" in md
+
+
 def test_grid_rescores_the_same_signals(mini_universe):
     rows = bt.walk_forward(mini_universe, days=5, horizon=10)
     g = bt.grid(rows, mini_universe, 10)
@@ -79,8 +157,8 @@ def test_grid_rescores_the_same_signals(mini_universe):
     assert {(x["stop_extra_atr"], x["stop_basis"], x["target_mode"]) for x in g} == set(bt.GRID)
     traded = sum(1 for r in rows if r["outcome"] in ("target", "stop", "open"))
     assert all(x["n"] == traded for x in g)
-    md = bt.render(rows, bt.breakdown(rows), 5, 10, g)
-    assert "## Stop / target variants" in md and "| 0.75 | close | breakout |" in md
+    md = bt.render(rows, bt.report_sections(rows, 5, 10, data=mini_universe, do_grid=True), 5, 10)
+    assert "### Stop / target variants" in md and "| 0.75 | close | breakout |" in md
 
 
 def test_breakout_level_target_applies_to_cups_only(mini_universe):
@@ -126,8 +204,11 @@ def test_profile_pass_replays_the_other_rule_set_and_restores_the_active_one(min
     legacy_targets = {r["ticker"]: r["target"] for r in other["rows"] if r["pattern"] == "Cup & Handle"}
     spec_targets = {r["ticker"]: r["target"] for r in rows if r["pattern"] == "Cup & Handle"}
     assert spec_targets and legacy_targets and spec_targets != legacy_targets      # left-rim vs right-rim measure
-    md = bt.render(rows, bt.breakdown(rows), 5, 10, None, other)
-    assert "## Rule profile comparison: spec (above) vs legacy (below)" in md and "| legacy: all |" in md
+    sections = bt.report_sections(rows, 5, 10, other_rows=other["rows"], other_name="legacy")
+    assert sections[0]["other"]["stats"]["overall"]["signals"] == other["stats"]["overall"]["signals"]
+    md = bt.render(rows, sections, 5, 10)
+    assert "### Rule profile comparison: spec (above) vs legacy (below), all sessions" in md
+    assert "| legacy: all |" in md
 
 
 def test_breakdown_and_render():
@@ -140,13 +221,18 @@ def test_breakdown_and_render():
     rows = [row("Cup & Handle", 65, "target", 2.0), row("Cup & Handle", 72, "stop", -1.0),
             row("Bullish Wolfe Wave", 85, "open", 0.4), row("Cup & Handle", 91, "gap", None)]
     stats = bt.breakdown(rows)
-    assert stats["overall"]["signals"] == 4 and stats["overall"]["gap"] == 1
-    assert stats["overall"]["target"] == 1 and stats["overall"]["stop"] == 1 and stats["overall"]["open"] == 1
-    assert stats["overall"]["hit_rate"] == 0.5 and stats["overall"]["mean_r"] == round((2.0 - 1.0 + 0.4) / 3, 3)
+    o = stats["overall"]
+    assert (o["signals"], o["gap"], o["below_stop"]) == (4, 1, 0)
+    assert (o["target"], o["stop"], o["open"]) == (1, 1, 1)
+    assert o["hit_rate"] == 0.5 and o["mean_r"] == round((2.0 - 1.0 + 0.4) / 3, 3)
+    assert o["median_r"] == 0.4 and o["total_r"] == 1.4
+    assert o["std_r"] == round(float(np.std([2.0, -1.0, 0.4], ddof=1)), 3)
+    assert o["max_dd"] == -1.0                                   # 2 -> 1 in scan order
+    assert o["ci_low"] is None and o["dd_p95"] is None and o["blocks"] == 1   # one month: no interval
     assert set(stats["by_score"]) == {"60-69", "70-79", "80-89", "90-100"}
     assert stats["by_pattern"]["Bullish Wolfe Wave"]["hit_rate"] is None    # nothing resolved
-    assert stats["overall"]["success5"] == 0.5 and stats["overall"]["mfe"] == 0.08
-    md = bt.render(rows, stats, 63, 40)
-    assert "| all | 4 | 1 | 1 | 1 | 1 | 50% | +0.47 | 50% | +8.0% | -2.0% |" in md
+    assert o["success5"] == 0.5 and o["mfe"] == 0.08
+    md = bt.render(rows, bt.report_sections(rows, 63, 40), 63, 40)
+    assert "| all | 4 | 1 | 1 | 1 | 1 | 50% | +0.47 | +0.40 | +1.40 | - | -1.00 | - | 50% | +8.0% | -2.0% |" in md
     assert "| 2026-01-05 | T | Cup & Handle | 91 | 100.0 | 100.5 | 95.0 | 110.0 | gap | 0 | - |" in md
     assert isinstance(pd.DataFrame(rows), pd.DataFrame)
