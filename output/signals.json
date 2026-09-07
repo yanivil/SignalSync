@@ -1,6 +1,6 @@
 {
   "meta": {
-    "run_date": "2026-09-06 05:58",
+    "run_date": "2026-09-07 06:07",
     "universe": 503,
     "scanned": 502,
     "errors": 1,
@@ -17,12 +17,16 @@
     "profile": "tuned",
     "min_score": 60,
     "max_breakout_age": 3,
+    "min_reward_risk": 1.0,
+    "max_wait_bars": 60,
+    "max_buy_risk_mult": 1.5,
     "max_breakout_age_by_pattern": {
       "Cup & Handle": 3,
       "Inverse Head & Shoulders": 8,
       "Bullish Wolfe Wave": 8
     },
-    "previous_run": "2026-09-05 06:36"
+    "previous_run": "2026-09-06 05:58",
+    "previous_profile": "tuned"
   },
   "signals": [
     {
@@ -40,75 +44,8 @@
       "volume_ratio": 0.9,
       "trend": "close above SMA200, SMA50 < SMA200, SMA200 rising/flat",
       "notes": "LS 2026-07-02 @32.44, head 2026-07-30 @30.84, RS 2026-08-26 @32.88, neckline 36.03->35.91 (now 35.86)",
-      "max_buy": 37.68
-    },
-    {
-      "ticker": "TYL",
-      "pattern": "Inverse Head & Shoulders",
-      "status": "WATCHLIST",
-      "entry": 367.82,
-      "stop": 325.98,
-      "risk_pct": 11.37,
-      "target": 403.33,
-      "score": 87,
-      "last_close": 364.03,
-      "last_date": "2026-09-04",
-      "bars_since_break": null,
-      "volume_ratio": null,
-      "trend": "close above SMA200, SMA50 < SMA200, SMA200 falling",
-      "notes": "LS 2026-03-25 @327.38, head 2026-04-10 @314.07, RS 2026-04-23 @328.61, neckline 347.79->350.83 (now 367.82)",
-      "max_buy": 386.21
-    },
-    {
-      "ticker": "STE",
-      "pattern": "Inverse Head & Shoulders",
-      "status": "WATCHLIST",
-      "entry": 225.94,
-      "stop": 214.22,
-      "risk_pct": 5.19,
-      "target": 249.72,
-      "score": 83,
-      "last_close": 224.59,
-      "last_date": "2026-09-04",
-      "bars_since_break": null,
-      "volume_ratio": null,
-      "trend": "close below SMA200, SMA50 < SMA200, SMA200 falling",
-      "notes": "LS 2025-03-21 @213.65, head 2025-04-09 @202.15, RS 2025-05-01 @215.43, neckline 225.94->225.94 (now 225.94)",
-      "max_buy": 237.23
-    },
-    {
-      "ticker": "AFL",
-      "pattern": "Inverse Head & Shoulders",
-      "status": "WATCHLIST",
-      "entry": 122.03,
-      "stop": 107.49,
-      "risk_pct": 11.91,
-      "target": 128.94,
-      "score": 82,
-      "last_close": 117.21,
-      "last_date": "2026-09-04",
-      "bars_since_break": null,
-      "volume_ratio": null,
-      "trend": "close above SMA200, SMA50 > SMA200, SMA200 rising/flat",
-      "notes": "LS 2026-03-09 @107.16, head 2026-03-24 @104.69, RS 2026-04-13 @107.97, neckline 110.69->112.61 (now 122.03)",
-      "max_buy": 128.13
-    },
-    {
-      "ticker": "MSI",
-      "pattern": "Inverse Head & Shoulders",
-      "status": "WATCHLIST",
-      "entry": 468.12,
-      "stop": 399.25,
-      "risk_pct": 14.71,
-      "target": 504.38,
-      "score": 79,
-      "last_close": 468.05,
-      "last_date": "2026-09-04",
-      "bars_since_break": null,
-      "volume_ratio": null,
-      "trend": "close above SMA200, SMA50 > SMA200, SMA200 rising/flat",
-      "notes": "LS 2026-06-08 @400.42, head 2026-06-24 @389.02, RS 2026-07-21 @401.58, neckline 417.72->432.00 (now 468.12)",
-      "max_buy": 491.53
+      "max_buy": 37.68,
+      "reward_risk": 1.16
     },
     {
       "ticker": "CBOE",
@@ -125,7 +62,8 @@
       "volume_ratio": null,
       "trend": "close above SMA200, SMA50 < SMA200, SMA200 rising/flat",
       "notes": "LS 2026-06-02 @269.21, head 2026-06-29 @226.52, RS 2026-08-19 @272.60, neckline 305.34->310.20 (now 313.77)",
-      "max_buy": 329.46
+      "max_buy": 329.46,
+      "reward_risk": 1.84
     },
     {
       "ticker": "FIS",
@@ -142,58 +80,8 @@
       "volume_ratio": null,
       "trend": "close below SMA200, SMA50 < SMA200, SMA200 falling",
       "notes": "LS 2026-05-15 @40.86, head 2026-06-22 @37.42, RS 2026-07-23 @39.96, neckline 44.29->43.67 (now 43.12)",
-      "max_buy": 45.28
-    },
-    {
-      "ticker": "HBAN",
-      "pattern": "Cup & Handle",
-      "status": "WATCHLIST",
-      "entry": 17.76,
-      "stop": 16.75,
-      "risk_pct": 5.66,
-      "target": 20.73,
-      "score": 78,
-      "last_close": 17.03,
-      "last_date": "2026-09-04",
-      "bars_since_break": null,
-      "volume_ratio": null,
-      "trend": "close above SMA200, SMA50 > SMA200, SMA200 rising/flat",
-      "notes": "left rim 2025-09-19 @17.44, bottom 2025-10-29 @14.64 (depth 16%), right rim 2025-12-22 @17.61, handle low 2026-01-02 @16.82 (depth 4.5%), trigger 17.76",
-      "max_buy": 18.65
-    },
-    {
-      "ticker": "MNST",
-      "pattern": "Cup & Handle",
-      "status": "WATCHLIST",
-      "entry": 44.02,
-      "stop": 42.4,
-      "risk_pct": 3.68,
-      "target": 52.92,
-      "score": 76,
-      "last_close": 43.82,
-      "last_date": "2026-09-04",
-      "bars_since_break": null,
-      "volume_ratio": null,
-      "trend": "close above SMA200, SMA50 > SMA200, SMA200 rising/flat",
-      "notes": "left rim 2026-02-27 @43.69, bottom 2026-03-31 @35.43 (depth 19%), right rim 2026-05-18 @44.33, handle low 2026-05-21 @42.74 (depth 3.6%), trigger 44.02",
-      "max_buy": 46.22
-    },
-    {
-      "ticker": "FOX",
-      "pattern": "Cup & Handle",
-      "status": "WATCHLIST",
-      "entry": 59.37,
-      "stop": 55.44,
-      "risk_pct": 6.61,
-      "target": 68.54,
-      "score": 75,
-      "last_close": 58.42,
-      "last_date": "2026-09-04",
-      "bars_since_break": null,
-      "volume_ratio": null,
-      "trend": "close above SMA200, SMA50 < SMA200, SMA200 rising/flat",
-      "notes": "left rim 2025-09-30 @58.68, bottom 2025-10-16 @50.20 (depth 14%), right rim 2025-10-30 @59.38, handle low 2025-11-04 @55.82 (depth 6.0%), trigger 59.37",
-      "max_buy": 62.33
+      "max_buy": 44.89,
+      "reward_risk": 1.85
     },
     {
       "ticker": "HAS",
@@ -210,7 +98,8 @@
       "volume_ratio": null,
       "trend": "close above SMA200, SMA50 > SMA200, SMA200 rising/flat",
       "notes": "left rim 2026-05-07 @97.30, bottom 2026-07-08 @74.63 (depth 23%), right rim 2026-08-14 @97.34, handle low 2026-08-20 @92.01 (depth 5.5%), trigger 95.99",
-      "max_buy": 100.79
+      "max_buy": 98.28,
+      "reward_risk": 4.96
     },
     {
       "ticker": "PH",
@@ -227,7 +116,8 @@
       "volume_ratio": null,
       "trend": "close above SMA200, SMA50 > SMA200, SMA200 rising/flat",
       "notes": "left rim 2026-04-17 @1024.62, bottom 2026-06-01 @813.37 (depth 21%), right rim 2026-06-25 @1001.77, handle low 2026-07-07 @927.47 (depth 7.4%), trigger 980.43",
-      "max_buy": 1029.45
+      "max_buy": 1009.98,
+      "reward_risk": 3.19
     },
     {
       "ticker": "XOM",
@@ -244,7 +134,8 @@
       "volume_ratio": null,
       "trend": "close above SMA200, SMA50 > SMA200, SMA200 rising/flat",
       "notes": "LS 2026-05-29 @143.78, head 2026-06-25 @134.08, RS 2026-08-04 @148.13, neckline 153.91->158.05 (now 160.98)",
-      "max_buy": 169.03
+      "max_buy": 167.9,
+      "reward_risk": 1.55
     },
     {
       "ticker": "BKR",
@@ -261,58 +152,8 @@
       "volume_ratio": null,
       "trend": "close above SMA200, SMA50 > SMA200, SMA200 rising/flat",
       "notes": "left rim 2026-06-04 @66.00, bottom 2026-07-02 @52.08 (depth 21%), right rim 2026-08-17 @65.44, handle low 2026-08-27 @60.87 (depth 7.0%), trigger 65.27",
-      "max_buy": 68.53
-    },
-    {
-      "ticker": "WM",
-      "pattern": "Inverse Head & Shoulders",
-      "status": "WATCHLIST",
-      "entry": 219.55,
-      "stop": 205.19,
-      "risk_pct": 6.54,
-      "target": 244.35,
-      "score": 73,
-      "last_close": 218.99,
-      "last_date": "2026-09-04",
-      "bars_since_break": null,
-      "volume_ratio": null,
-      "trend": "close below SMA200, SMA50 > SMA200, SMA200 rising/flat",
-      "notes": "LS 2025-10-16 @209.15, head 2025-11-03 @191.77, RS 2025-12-10 @206.02, neckline 216.44->216.83 (now 219.55)",
-      "max_buy": 230.53
-    },
-    {
-      "ticker": "KMB",
-      "pattern": "Inverse Head & Shoulders",
-      "status": "WATCHLIST",
-      "entry": 109.58,
-      "stop": 93.86,
-      "risk_pct": 14.35,
-      "target": 115.29,
-      "score": 70,
-      "last_close": 104.96,
-      "last_date": "2026-09-04",
-      "bars_since_break": null,
-      "volume_ratio": null,
-      "trend": "close above SMA200, SMA50 > SMA200, SMA200 falling",
-      "notes": "LS 2025-12-23 @95.90, head 2026-01-07 @92.69, RS 2026-01-29 @94.39, neckline 98.19->99.27 (now 109.58)",
-      "max_buy": 115.06
-    },
-    {
-      "ticker": "LLY",
-      "pattern": "Cup & Handle",
-      "status": "WATCHLIST",
-      "entry": 1181.04,
-      "stop": 1042.6,
-      "risk_pct": 11.72,
-      "target": 1480.66,
-      "score": 64,
-      "last_close": 1149.36,
-      "last_date": "2026-09-04",
-      "bars_since_break": null,
-      "volume_ratio": null,
-      "trend": "close above SMA200, SMA50 > SMA200, SMA200 rising/flat",
-      "notes": "left rim 2026-02-04 @1108.64, bottom 2026-04-29 @847.83 (depth 24%), right rim 2026-05-28 @1147.46, handle low 2026-06-02 @1050.64 (depth 8.4%), trigger 1181.04",
-      "max_buy": 1240.09
+      "max_buy": 67.67,
+      "reward_risk": 2.79
     },
     {
       "ticker": "VRT",
@@ -329,139 +170,118 @@
       "volume_ratio": null,
       "trend": "close above SMA200, SMA50 > SMA200, SMA200 rising/flat",
       "notes": "LS 2026-07-17 @272.93, head 2026-07-29 @220.92, RS 2026-08-24 @249.97, neckline 313.61->300.30 (now 289.34)",
-      "max_buy": 303.81
+      "max_buy": 303.81,
+      "reward_risk": 2.09
     }
   ],
   "closed": [
     {
-      "ticker": "TXN",
-      "pattern": "Bullish Wolfe Wave",
-      "was": "CONFIRMED",
+      "ticker": "TYL",
+      "pattern": "Inverse Head & Shoulders",
+      "was": "WATCHLIST",
       "since": "2026-09-04",
-      "entry": 258.44,
-      "stop": 252.94,
-      "target": 312.19,
+      "entry": 367.82,
+      "stop": 325.98,
+      "target": 403.33,
       "outcome": "DROPPED",
       "detail": "no bars since the last report"
     },
     {
-      "ticker": "HSIC",
-      "pattern": "Cup & Handle",
+      "ticker": "STE",
+      "pattern": "Inverse Head & Shoulders",
       "was": "WATCHLIST",
       "since": "2026-09-04",
-      "entry": 91.69,
-      "stop": 87.2,
-      "target": 112.28,
+      "entry": 225.94,
+      "stop": 214.22,
+      "target": 249.72,
       "outcome": "DROPPED",
       "detail": "no bars since the last report"
     },
     {
-      "ticker": "TECH",
-      "pattern": "Cup & Handle",
+      "ticker": "AFL",
+      "pattern": "Inverse Head & Shoulders",
       "was": "WATCHLIST",
       "since": "2026-09-04",
-      "entry": 72.58,
-      "stop": 72.09,
-      "target": 101.36,
-      "outcome": "DROPPED",
-      "detail": "no bars since the last report"
-    },
-    {
-      "ticker": "VRTX",
-      "pattern": "Cup & Handle",
-      "was": "WATCHLIST",
-      "since": "2026-09-04",
-      "entry": 553.47,
-      "stop": 528.86,
-      "target": 622.14,
-      "outcome": "DROPPED",
-      "detail": "no bars since the last report"
-    },
-    {
-      "ticker": "KKR",
-      "pattern": "Cup & Handle",
-      "was": "WATCHLIST",
-      "since": "2026-09-04",
-      "entry": 111.0,
-      "stop": 104.66,
-      "target": 130.9,
+      "entry": 122.03,
+      "stop": 107.49,
+      "target": 128.94,
       "outcome": "DROPPED",
       "detail": "no bars since the last report"
     },
     {
       "ticker": "MSI",
-      "pattern": "Cup & Handle",
-      "was": "WATCHLIST",
-      "since": "2026-09-04",
-      "entry": 479.84,
-      "stop": 453.45,
-      "target": 587.22,
-      "outcome": "DROPPED",
-      "detail": "no bars since the last report"
-    },
-    {
-      "ticker": "WFC",
-      "pattern": "Cup & Handle",
-      "was": "WATCHLIST",
-      "since": "2026-09-04",
-      "entry": 90.34,
-      "stop": 83.05,
-      "target": 112.27,
-      "outcome": "DROPPED",
-      "detail": "no bars since the last report"
-    },
-    {
-      "ticker": "BIIB",
-      "pattern": "Cup & Handle",
-      "was": "WATCHLIST",
-      "since": "2026-09-04",
-      "entry": 222.11,
-      "stop": 212.24,
-      "target": 255.8,
-      "outcome": "DROPPED",
-      "detail": "no bars since the last report"
-    },
-    {
-      "ticker": "VZ",
       "pattern": "Inverse Head & Shoulders",
       "was": "WATCHLIST",
       "since": "2026-09-04",
-      "entry": 50.51,
-      "stop": 44.72,
-      "target": 60.94,
+      "entry": 468.12,
+      "stop": 399.25,
+      "target": 504.38,
       "outcome": "DROPPED",
       "detail": "no bars since the last report"
     },
     {
-      "ticker": "PKG",
+      "ticker": "HBAN",
       "pattern": "Cup & Handle",
       "was": "WATCHLIST",
       "since": "2026-09-04",
-      "entry": 241.81,
-      "stop": 221.04,
-      "target": 288.31,
+      "entry": 17.76,
+      "stop": 16.75,
+      "target": 20.73,
       "outcome": "DROPPED",
       "detail": "no bars since the last report"
     },
     {
-      "ticker": "ARE",
+      "ticker": "MNST",
       "pattern": "Cup & Handle",
       "was": "WATCHLIST",
       "since": "2026-09-04",
-      "entry": 53.98,
-      "stop": 47.64,
-      "target": 68.79,
+      "entry": 44.02,
+      "stop": 42.4,
+      "target": 52.92,
       "outcome": "DROPPED",
       "detail": "no bars since the last report"
     },
     {
-      "ticker": "EL",
+      "ticker": "FOX",
       "pattern": "Cup & Handle",
       "was": "WATCHLIST",
       "since": "2026-09-04",
-      "entry": 107.07,
-      "stop": 97.74,
-      "target": 150.55,
+      "entry": 59.37,
+      "stop": 55.44,
+      "target": 68.54,
+      "outcome": "DROPPED",
+      "detail": "no bars since the last report"
+    },
+    {
+      "ticker": "WM",
+      "pattern": "Inverse Head & Shoulders",
+      "was": "WATCHLIST",
+      "since": "2026-09-04",
+      "entry": 219.55,
+      "stop": 205.19,
+      "target": 244.35,
+      "outcome": "DROPPED",
+      "detail": "no bars since the last report"
+    },
+    {
+      "ticker": "KMB",
+      "pattern": "Inverse Head & Shoulders",
+      "was": "WATCHLIST",
+      "since": "2026-09-04",
+      "entry": 109.58,
+      "stop": 93.86,
+      "target": 115.29,
+      "outcome": "DROPPED",
+      "detail": "no bars since the last report"
+    },
+    {
+      "ticker": "LLY",
+      "pattern": "Cup & Handle",
+      "was": "WATCHLIST",
+      "since": "2026-09-04",
+      "entry": 1181.04,
+      "stop": 1042.6,
+      "target": 1480.66,
       "outcome": "DROPPED",
       "detail": "no bars since the last report"
     }
