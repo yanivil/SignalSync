@@ -4,6 +4,8 @@
 #   gh workflow run backtest.yml -f period=5y -f days=500 -f bars=500 -f split=2025-09-09 -f horizon=60
 # (the second form replays two years with each scan seeing the nightly's 500-bar
 # window and reports the two years side by side: the out-of-sample check).
+#   gh workflow run backtest.yml -f period=10y -f end=2022-12-30 -f days=250 -f bars=500 -f asof=true -f horizon=60
+# (a past year on the index as it was then: point-in-time membership).
 # Also runs on pushes that touch its own files (first registration / smoke test).
 name: backtest
 
@@ -46,6 +48,18 @@ on:
         description: "YYYY-MM-DD: also report the sessions before and from this date as separate windows"
         required: false
         default: ""
+      end:
+        description: "YYYY-MM-DD: replay the sessions on or before this date (a past year on its own)"
+        required: false
+        default: ""
+      asof:
+        description: "true = point-in-time index membership from the constituent dataset's git history"
+        required: false
+        default: "false"
+      grid:
+        description: "true = stop / target variants and the other profile's pass (doubles the runtime)"
+        required: false
+        default: "true"
   push:
     paths:
       - tools/backtest.py
@@ -59,7 +73,8 @@ jobs:
     runs-on: ubuntu-latest
     # A runner replays about 5 s per session per profile over the full index; --grid runs two
     # profiles, so 63 sessions take about 10 minutes and a two-year (500-session) replay about 90.
-    timeout-minutes: 180
+    # Multi-year replays: one year per dispatch (-f end=... -f days=250), grid=false halves the time.
+    timeout-minutes: 360
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
@@ -79,11 +94,16 @@ jobs:
           PERIOD: ${{ github.event.inputs.period || '2y' }}
           BARS: ${{ github.event.inputs.bars || '' }}
           SPLIT: ${{ github.event.inputs.split || '' }}
+          END: ${{ github.event.inputs.end || '' }}
+          ASOF: ${{ github.event.inputs.asof || 'false' }}
+          GRID: ${{ github.event.inputs.grid || 'true' }}
         run: |
-          if [ "$ABLATE" = "true" ]; then MODE=--ablate; else MODE=--grid; fi
+          if [ "$ABLATE" = "true" ]; then MODE=(--ablate); elif [ "$GRID" = "true" ]; then MODE=(--grid); else MODE=(); fi
           cmd=(python tools/backtest.py --days "$DAYS" --horizon "$HORIZON" --min-score "$MIN_SCORE"
-               --profile "$PROFILE" --period "$PERIOD" "$MODE" --json backtest.json)
+               --profile "$PROFILE" --period "$PERIOD" "${MODE[@]}" --json backtest.json)
           if [ -n "$BARS" ]; then cmd+=(--bars "$BARS"); fi
           if [ -n "$SPLIT" ]; then cmd+=(--split "$SPLIT"); fi
+          if [ -n "$END" ]; then cmd+=(--end "$END"); fi
+          if [ "$ASOF" = "true" ]; then cmd+=(--constituents-asof); fi
           for kv in $OVERRIDES; do cmd+=(--set "$kv"); done
           "${cmd[@]}" | tee -a "$GITHUB_STEP_SUMMARY"

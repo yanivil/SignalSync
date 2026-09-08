@@ -75,6 +75,12 @@ def test_load_symbols_from_csv_handles_header_variants_and_junk(tmp_path):
     assert scan.load_sp500_symbols(str(p)) == ["AAPL", "BRK-B"]   # first column when no 'Symbol'; upper-cased
 
 
+def test_symbols_from_csv_normalises_like_the_loader():
+    assert scan.symbols_from_csv("Symbol,Name\nbrk.b,Berkshire\n AAPL ,Apple\n,blank\nAAPL,dup\n") == ["AAPL", "BRK-B"]
+    assert scan.symbols_from_csv("Ticker,Name\nmsft,Microsoft\n") == ["MSFT"]     # first column when no 'Symbol'
+    assert scan.symbols_from_csv("Symbol\n") == []
+
+
 def test_load_symbols_rejects_an_oversized_download(monkeypatch):
     import io
 
