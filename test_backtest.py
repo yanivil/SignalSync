@@ -86,6 +86,22 @@ def test_row_features_match_hand_computation(mini_universe):
     assert f["target_atr"] == round((s.target - s.entry) / atr_last, 3) > 0
     anchor = cup.index.get_loc(pd.Timestamp(re.search(r"handle low (\S+)", s.notes)[1]))
     assert f["wait_bars"] == len(cup) - 1 - s.bars_since_break - anchor >= 1   # the handle low precedes the break
+    # The breakout bar and the cup / handle volumes, recomputed from the frame and the notes.
+    b = len(cup) - 1 - s.bars_since_break
+    high, low, vol = (cup[c].to_numpy() for c in ("High", "Low", "Volume"))
+    assert f["break_close_pos"] == round((close.iloc[b] - low[b]) / (high[b] - low[b]), 3)
+    assert 0 <= f["break_close_pos"] <= 1
+    assert f["break_over_prior_high"] == (1.0 if close.iloc[b] > high[b - 1] else 0.0)
+    base = vol[b - scan.VOLUME_AVG_LEN:b]
+    assert f["volume_z"] == round((vol[b] - base.mean()) / base.std(ddof=1), 2) > 1.0   # the fixture's 3x volume bar
+    a = cup.index.get_loc(pd.Timestamp(re.search(r"left rim (\S+)", s.notes)[1]))
+    rb = cup.index.get_loc(pd.Timestamp(re.search(r"right rim (\S+)", s.notes)[1]))
+    assert f["handle_volume_ratio"] == round(vol[rb + 1:b].mean() / vol[a:rb + 1].mean(), 3)
+    handle_v = vol[rb + 1:b]
+    assert f["handle_volume_slope"] == round(np.polyfit(np.arange(len(handle_v)), handle_v, 1)[0] / handle_v.mean(), 4)
+    bottom = float(re.search(r"bottom \S+ @([\d.]+)", s.notes)[1])
+    rim_b = float(re.search(r"right rim \S+ @([\d.]+)", s.notes)[1])
+    assert f["depth_atr"] == round((rim_b - bottom) / atr_last, 3) > 3
     # Too little history for the averages: those features are None, the ATR-based ones and the wait remain.
     short = bt.row_features(cup.iloc[-150:], s, atr_last)
     assert short["close_vs_sma200"] is None and short["sma200_slope"] is None and short["dist_sma200_atr"] is None
@@ -96,6 +112,24 @@ def test_row_features_match_hand_computation(mini_universe):
                             None, "", "5 2020-01-01 @95.00")
     g = bt.row_features(cup, no_target, 0.0)
     assert g["target_atr"] is None and g["stop_atr"] is None and g["wait_bars"] is None   # anchor date not in hist
+    assert g["depth_atr"] is None and g["handle_volume_ratio"] is None                    # no anchors, not a cup
+    assert g["break_close_pos"] is not None and g["volume_z"] is not None                 # the last bar still is a bar
+
+
+def test_row_features_per_pattern(mini_universe):
+    ihs, ww = mini_universe["IHS"], mini_universe["WW"]
+    (si,) = scan.detect_inverse_hs(ihs, "IHS")
+    fi = bt.row_features(ihs, si, float(scan.atr(ihs).iloc[-1]))
+    anchors = re.search(r"LS \S+ @([\d.]+), head \S+ @([\d.]+), RS \S+ @([\d.]+)", si.notes)
+    ls, head, rs = (float(x) for x in anchors.groups())
+    assert fi["depth_atr"] == round((min(ls, rs) - head) / float(scan.atr(ihs).iloc[-1]), 3) > 0
+    assert fi["handle_volume_ratio"] is None and fi["handle_volume_slope"] is None          # cups only
+    (sw,) = scan.detect_bullish_wolfe(ww, "WW")
+    fw = bt.row_features(ww, sw, float(scan.atr(ww).iloc[-1]))
+    p1 = float(re.search(r"^1 \S+ @([\d.]+)", sw.notes)[1])
+    p5 = float(re.search(r", 5 \S+ @([\d.]+);", sw.notes)[1])
+    assert fw["depth_atr"] == round((p1 - p5) / float(scan.atr(ww).iloc[-1]), 3) > 0
+    assert fw["break_over_prior_high"] in (0.0, 1.0) and fw["volume_z"] is not None
 
 
 def test_walk_forward_rows_carry_replay_features(mini_universe):
@@ -270,19 +304,21 @@ def test_split_windows_and_report_sections(mini_universe):
     assert "## All sessions" in md and f"## Before {split}" in md and f"## From {split}" in md
     assert md.count("### Stop / target variants") == 3 and "judged on the other" in md
     assert "### Excursions by horizon (all sessions)" in md and "### Outcome by feature (all sessions)" in md
-    assert "| entry minus stop, in ATR |" in md
+    assert "| entry minus stop, in ATR |" in md and "| breakout bar close within its range |" in md
+    assert "| handle volume / cup volume (cups) |" in md and "| pattern depth in ATR |" in md
     assert "## Signals" in md
 
 
 def test_grid_rescores_the_same_signals(mini_universe):
     rows = bt.walk_forward(mini_universe, days=5, horizon=10)
     g = bt.grid(rows, mini_universe, 10)
-    assert len(g) == len(bt.GRID) == 18
+    assert len(g) == len(bt.GRID) == 24
     assert {(x["stop_extra_atr"], x["stop_basis"], x["target_mode"]) for x in g} == set(bt.GRID)
     traded = sum(1 for r in rows if r["outcome"] in ("target", "stop", "open"))
     assert all(x["n"] == traded for x in g)
     md = bt.render(rows, bt.report_sections(rows, 5, 10, data=mini_universe, do_grid=True), 5, 10)
     assert "### Stop / target variants" in md and "| 0.75 | close | breakout |" in md
+    assert "| 1.0 | intraday | full |" in md and "1.25 ATR under it" in md
 
 
 def test_breakout_level_target_applies_to_cups_only(mini_universe):

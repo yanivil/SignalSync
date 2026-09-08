@@ -39,10 +39,13 @@ Method:
 * Per signal it records **features at the scan day**, computed from the
   history the scan saw (``row_features``): close vs SMA200, SMA50 vs SMA200,
   the SMA200's change over 40 bars, the distance from the SMA200 in ATR, the
-  stop and target distances in ATR and the bars from the pattern's last anchor
-  (handle low, right shoulder, point 5) to the breakout.  Nothing is added to
-  ``scan.Signal`` or the nightly report; the features exist to be tested
-  against outcomes.
+  stop and target distances in ATR, the bars from the pattern's last anchor
+  (handle low, right shoulder, point 5) to the breakout, the pattern's depth
+  in ATR, and on the breakout bar its close's position within the bar's range,
+  whether that close cleared the prior bar's high, and its volume z-score
+  against the prior 20 bars; for cups also the handle's volume against the
+  cup's and the handle's volume slope.  Nothing is added to ``scan.Signal`` or
+  the nightly report; the features exist to be tested against outcomes.
 * Per signal it also records the **market context at the scan day** from
   ``scan.market_series``: the SPY regime (close and SMA50 against the SMA200),
   the VIX and the breadth of the universe.  The summaries add a per-regime
@@ -76,8 +79,8 @@ Method:
   renamed symbols), which is the survivorship bias that remains.  Needs a
   ``--period`` long enough to reach the window (``10y`` for 2016 onwards).
 * ``--grid`` re-scores the same signals under stop / target variants: extra
-  ATR below the reported stop (0 / 0.25 / 0.75, i.e. ~0.25 / 0.5 / 1.0 ATR
-  under the structural low), intraday vs close-based stops, and three target
+  ATR below the reported stop (0 / 0.25 / 0.75 / 1.0, i.e. ~0.25 / 0.5 / 1.0
+  / 1.25 ATR under the structural low), intraday vs close-based stops, and three target
   sizes: the reported measured move, half of it, and (cups only) the
   Investopedia measure -- cup bottom to the handle breakout level instead of
   bottom to the left rim.
@@ -120,7 +123,7 @@ log = logging.getLogger("backtest")
 
 SCORE_BUCKETS = ((60, 69), (70, 79), (80, 89), (90, 100))
 TARGET_MODES = ("full", "half", "breakout")
-GRID = [(extra, basis, mode) for extra in (0.0, 0.25, 0.75) for basis in ("intraday", "close")
+GRID = [(extra, basis, mode) for extra in (0.0, 0.25, 0.75, 1.0) for basis in ("intraday", "close")
         for mode in TARGET_MODES]
 TRADED = ("target", "stop", "open")          # outcomes with a position; "gap" / "below_stop" / "no_data" have none
 N_BOOT = 2000                                # month-block bootstrap resamples per summary
@@ -151,9 +154,16 @@ FEATURE_BUCKETS: Dict[str, Tuple[str, Sequence[float], Sequence[str]]] = {
     "vix": ("VIX at the scan day", (-INF, 15.0, 20.0, 25.0, INF), ("<= 15", "15-20", "20-25", "> 25")),
     "breadth": ("share of the universe above its SMA200", (-INF, 0.4, 0.55, 0.7, INF),
                 ("<= 40%", "40-55%", "55-70%", "> 70%")),
+    "depth_atr": ("pattern depth in ATR", (-INF, 3.0, 6.0, 10.0, INF), ("<= 3 ATR", "3-6 ATR", "6-10 ATR", "> 10 ATR")),
+    "break_close_pos": ("breakout bar close within its range", (-INF, 0.5, 0.8, INF), ("<= 50%", "50-80%", "> 80%")),
+    "break_over_prior_high": ("breakout close above the prior bar's high", (-INF, 0.5, INF), ("no", "yes")),
+    "volume_z": ("breakout volume z-score, 20 bars", (-INF, 0.0, 1.5, 3.0, INF), ("<= 0", "0-1.5", "1.5-3", "> 3")),
+    "handle_volume_ratio": ("handle volume / cup volume (cups)", (-INF, 0.7, 1.0, INF), ("<= 0.7", "0.7-1.0", "> 1.0")),
+    "handle_volume_slope": ("handle volume slope (cups)", (-INF, 0.0, INF), ("falling", "rising or flat")),
 }
 FEATURE_KEYS = ("close_vs_sma200", "sma50_vs_sma200", "sma200_slope", "dist_sma200_atr", "stop_atr",
-                "target_atr", "wait_bars")  # what row_features adds to a row
+                "target_atr", "wait_bars", "depth_atr", "break_close_pos", "break_over_prior_high", "volume_z",
+                "handle_volume_ratio", "handle_volume_slope")  # what row_features adds to a row
 MARKET_KEYS = ("regime", "vix", "breadth", "index_vs_sma200_pct")  # what the market context adds to a row
 REGIMES = ("bull", "neutral", "bear")
 
@@ -239,8 +249,19 @@ def row_features(hist: pd.DataFrame, s: scan.Signal, atr_last: float) -> Dict[st
     * ``wait_bars``: bars from the pattern's last anchor (handle low, right
       shoulder, point 5, read from ``notes`` like ``scan._drop_reason`` does) to
       the breakout bar.
+    * ``depth_atr``: the pattern's height in ATR -- cup bottom to right rim,
+      the shallower shoulder to the head, Wolfe point 1 to point 5.
+    * ``break_close_pos``: where the breakout bar closed within its own range
+      (0 = at the low, 1 = at the high); ``break_over_prior_high``: 1.0 when
+      that close cleared the previous bar's high; ``volume_z``: the breakout
+      bar's volume as a z-score against the ``scan.VOLUME_AVG_LEN`` bars before
+      it (``None`` when those have no spread).
+    * ``handle_volume_ratio`` and ``handle_volume_slope`` (cups only): the
+      handle bars' mean volume over the cup bars' mean volume, and the slope of
+      a line through the handle's volume as a fraction of its mean per bar
+      (negative = drying up).
 
-    Complexity: O(bars) for the two means.
+    Complexity: O(bars) for the means and the anchor look-ups.
     """
     close = hist["Close"].to_numpy(dtype=float)
     n = len(close)
@@ -261,12 +282,56 @@ def row_features(hist: pd.DataFrame, s: scan.Signal, atr_last: float) -> Dict[st
         "dist_sma200_atr": in_atr(c - s200) if s200 is not None else None,
         "stop_atr": in_atr(s.entry - s.stop),
         "target_atr": in_atr(s.target - s.entry) if s.target is not None else None,
-        "wait_bars": None}
-    m = scan._ANCHOR_RE.search(s.notes or "")
-    if m and s.bars_since_break is not None:
-        loc = int(hist.index.get_indexer([pd.Timestamp(m[2])])[0])
-        if loc >= 0:
-            out["wait_bars"] = n - 1 - int(s.bars_since_break) - loc
+        "wait_bars": None, "depth_atr": None, "break_close_pos": None, "break_over_prior_high": None,
+        "volume_z": None, "handle_volume_ratio": None, "handle_volume_slope": None}
+    notes = s.notes or ""
+
+    def loc(day: str) -> int:
+        return int(hist.index.get_indexer([pd.Timestamp(day)])[0])
+
+    m = scan._ANCHOR_RE.search(notes)
+    b = n - 1 - int(s.bars_since_break) if s.bars_since_break is not None else None
+    if m and b is not None:
+        anchor = loc(m[2])
+        if anchor >= 0:
+            out["wait_bars"] = b - anchor
+    # Pattern depth from the anchors in the notes.
+    depth = None
+    if s.pattern == "Cup & Handle":
+        m = re.search(r"bottom \S+ @([\d.]+).*right rim \S+ @([\d.]+)", notes)
+        depth = float(m[2]) - float(m[1]) if m else None
+    elif s.pattern == "Inverse Head & Shoulders":
+        m = re.search(r"LS \S+ @([\d.]+), head \S+ @([\d.]+), RS \S+ @([\d.]+)", notes)
+        depth = min(float(m[1]), float(m[3])) - float(m[2]) if m else None
+    elif s.pattern == "Bullish Wolfe Wave":
+        m1, m5 = re.search(r"^1 \S+ @([\d.]+)", notes), re.search(r", 5 \S+ @([\d.]+);", notes)
+        depth = float(m1[1]) - float(m5[1]) if m1 and m5 else None
+    out["depth_atr"] = in_atr(depth)
+    # The breakout bar: close position, prior-high clearance, volume z-score.
+    if b is not None and b >= 1:
+        high, low = hist["High"].to_numpy(dtype=float), hist["Low"].to_numpy(dtype=float)
+        rng = high[b] - low[b]
+        out["break_close_pos"] = round((close[b] - low[b]) / rng, 3) if rng > 0 else None
+        out["break_over_prior_high"] = 1.0 if close[b] > high[b - 1] else 0.0
+        if "Volume" in hist.columns:
+            vol = hist["Volume"].to_numpy(dtype=float)
+            base = vol[max(0, b - scan.VOLUME_AVG_LEN):b]
+            base = base[~np.isnan(base)]
+            if len(base) > 1 and not np.isnan(vol[b]):
+                sd = float(base.std(ddof=1))
+                out["volume_z"] = round((vol[b] - float(base.mean())) / sd, 2) if sd > 0 else None
+            # Cups: does the handle's volume dry up against the cup's?
+            if s.pattern == "Cup & Handle":
+                m = re.search(r"left rim (\S+) @.*right rim (\S+) @", notes)
+                a, rb = (loc(m[1]), loc(m[2])) if m else (-1, -1)
+                if 0 <= a < rb and b - 1 >= rb + 1:
+                    cup_v, handle_v = vol[a:rb + 1], vol[rb + 1:b]
+                    cup_mean, handle_mean = float(np.nanmean(cup_v)), float(np.nanmean(handle_v))
+                    if cup_mean > 0 and not np.isnan(handle_mean):
+                        out["handle_volume_ratio"] = round(handle_mean / cup_mean, 3)
+                    if len(handle_v) >= 3 and handle_mean > 0 and not np.isnan(handle_v).any():
+                        slope = float(np.polyfit(np.arange(len(handle_v)), handle_v, 1)[0])
+                        out["handle_volume_slope"] = round(slope / handle_mean, 4)
     return out
 
 
@@ -747,7 +812,8 @@ def render(rows: Sequence[dict], sections: Sequence[dict], days: int, horizon: i
         if sec["grid"]:
             lines += ["", f"### Stop / target variants (same signals, {sec['label']})", "",
                       "Extra ATR = distance added below the reported stop (which already sits 0.25 ATR under the "
-                      "structural low). Target: full = reported measured move; half = halfway to it; breakout = "
+                      "structural low; 1.0 extra is 1.25 ATR under it). Target: full = reported measured move; "
+                      "half = halfway to it; breakout = "
                       "cups measured from the bottom to the handle breakout level (Investopedia), others "
                       "unchanged.", "",
                       "| Extra ATR | Stop basis | Target | Target | Stop | Open | Hit rate | Mean R |",
