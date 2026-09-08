@@ -93,6 +93,22 @@ What the ten years overturned from the two-year window, each a lesson in what on
 
 **Open questions:** #99 and #101 (the deep-down-trend and bear-regime contexts, information first, no rule), #108 (the drawdowns), #109 (cups), and #97 (a per-signal probability model, whose first revisit condition the ten years now meet).
 
+### A second review, tested (2026-09-08)
+
+A second external review proposed a converging-wedge check for Wolfe (already the code: the 2-4 line must fall faster than 1-3 and the target is their intersection), a convex quadratic cup fit (already the code, with the U-versus-V test the review lacks), close-based confirmation (already the code), ATR-buffered stops (already the code, at 0.25 ATR), a volume z-score gate, a reward:risk floor of 2.0, a handle volume decay rule for cups, a confirmation candle, and a macro filter inhibiting alerts below the SPY 200-day average or above VIX 25. The testable items were replayed over the same eleven years with the features recorded on every row (runs 34255129970 to 34255999955; the second set with `CUP_MIN_ROUNDNESS=0.8`; the stop variant on the two-year grid, run 34256064869):
+
+| Proposal | Ten-year result | Verdict |
+|---|---|---|
+| Volume z-score of 1.5 as a gate | monotone: at or below 0 +0.16 R on 795 signals, 0-1.5 +0.25 on 520, 1.5-3 +0.31 on 171, above 3 +0.34 on 144; the gate keeps 315 of 1630 signals at +0.32 and drops 1315 at +0.20 | a feature, not a gate |
+| Confirmation candle: close above the prior bar's high | with it +0.19 R on 1405; without it +0.42 R on 225, positive in 9 of 11 years | reversed |
+| Strong close within the breakout bar's range | at or below 50 % +0.24, 50-80 % +0.24, above 80 % +0.21 | no effect |
+| Handle volume must decay (cups) | handle over cup volume at or below 0.7 +0.06 R, 0.7-1.0 +0.01, above 1.0 +0.06; falling slope +0.05, rising +0.01 | no effect |
+| Cup R² of 0.80 instead of 0.70 | cups 127 traded at −0.10 R against 307 at +0.03; the 180 removed ran +0.12 | worse |
+| Larger swings (the ATR-pivot idea), read as pattern depth in ATR | at or below 3 ATR +0.26 R on 949 with a 42 % hit rate, above 10 ATR +0.26 on 116 with a 15 % hit rate | shallow patterns hit more often; no gate |
+| Stop 1.2 ATR under the pivot | two-year grid on 327 signals: the reported stop (0.25 ATR under the low) +0.29 R at a 41 % hit rate; 1.25 ATR under it +0.20 R at 49 %, and the same order in both windows (+0.30 against +0.21 unseen, +0.27 against +0.19 tuning year); the risk unit grows faster than the stop-outs fall | worse per trade |
+| Reward:risk floor of 2.0 | rows at or below 1.5 ran +0.20 R with a 54 % hit rate over ten years (#100) | rejected |
+| Inhibit alerts in a SPY bear regime or above VIX 25 | bear regime +0.59 R on 226, VIX above 25 +0.50 R in 8 of 8 years (#101) | contradicted |
+
 ### Market context (2026-09-08)
 
 The report header and every backtest row carry the SPY regime (close and SMA50 against the SMA200), the VIX and the breadth of the universe, and the backtest summaries add a per-regime slice with VIX and breadth among the feature buckets. Over the ten years on the point-in-time index (the section above), signals scanned in a SPY bear regime ran +0.59 R on 226 against +0.16 on 1190 in bull regimes, positive in five of the six years with bear sessions, and signals scanned at a VIX above 25 ran +0.50 R in eight of eight years; a VIX below 15, negative in the two-year window, ran +0.21 R pooled. Nothing gates on the context; #101 tracks how the report should present it.
