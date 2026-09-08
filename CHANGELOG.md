@@ -5,6 +5,16 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed (docs: out-of-sample protocol, #96)
+- Tuning page: the two-year out-of-sample table per profile and pattern
+  (backtest run 34186512341), the rule a constant change must pass (chosen on
+  one window, confirmed on another, the sign agreeing in both, the pooled
+  month-block interval excluding zero), a ledger of the adopted values with
+  the windows and runs that judged them (the Wolfe rhythm value failed its
+  unseen window), the hypotheses under test, and the note that the quality
+  score gates but does not rank. README limitations state the out-of-sample
+  status instead of "measured by replay".
+
 ### Added (market context, #93)
 - `meta.market` and one report header line: the SPY close against its
   SMA200 and its SMA50 against the SMA200, the regime those name (bull, bear,

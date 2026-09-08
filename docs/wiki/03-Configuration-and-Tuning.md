@@ -42,6 +42,35 @@ An external review of the 2026-09-04 report (HAL entered late at R:R 1.16 on a 1
 
 Reading: a reward:risk minimum trades hit rate for payoff almost exactly (small targets are hit more often and pay less), so it is set at 1.0, where it removes only rows whose target is below one risk unit at no cost in mean R. A patience limit on *breakouts* is wrong in every variant: the longer a base waited, the better its eventual breakout did. The limit therefore applies to watchlist rows only, where it costs nothing (a breakout is reported whenever it comes) and where 97 % of the year's eventual breakouts would have survived a 60-bar limit anyway.
 
+### Out-of-sample check and the rule for changing a constant (2026-09-08)
+
+Every calibration above was judged on the year the candidate values were chosen on. The ablation that produced the tuned profile ran on 63 sessions in which the spec profile fired 4 times (run 33968787516), and the profile and its later thresholds were then confirmed on the 250 sessions that contain those 63. Nothing was scored on data the choice had not seen. The two-year replay below holds out the year before 2025-09-09, which no decision used: 500 sessions to 2026-09-04, each scan seeing 500 bars like the nightly, horizon 60, `gh workflow run backtest.yml -f profile=tuned -f period=5y -f days=500 -f bars=500 -f split=2025-09-09 -f horizon=60` (run 34186512341, 97 minutes, which replays spec alongside tuned; the legacy rows come from a local replay of the same window on 2026-09-07 that matched the run within a signal and a cent of R on every tuned and spec row).
+
+| Profile | Window | Signals | Hit rate | Mean R | 95 % CI, month blocks | Max drawdown |
+|---|---|---|---|---|---|---|
+| tuned | before 2025-09-09, unseen | 167 | 36 % | +0.30 | [−0.11, +0.58] | −17 R |
+| tuned | from 2025-09-09, the tuning year | 159 | 45 % | +0.28 | [+0.02, +0.51] | −10 R |
+| spec | unseen | 30 | 52 % | +0.53 | [+0.11, +0.93] | −2 R |
+| spec | tuning year | 22 | 54 % | +0.24 | [−0.12, +0.60] | −4 R |
+| legacy (local replay) | unseen | 304 | 37 % | +0.34 | [+0.01, +0.62] | −27 R |
+| legacy (local replay) | tuning year | 359 | 31 % | +0.09 | [−0.12, +0.33] | −26 R |
+
+Per pattern under tuned: inverse H&S +0.35 R on 132 signals in the unseen year and +0.32 on 112 in the tuning year; cup +0.23 on 21 and +0.16 on 22, with a hit rate near 25 % in both; Wolfe −0.16 on 14 and +0.19 on 25. The tuned expectancy held out of sample and legacy's did not, which is the real argument for the 2026-09-05 switch; Wolfe did not hold (#102). The quality score gates but does not rank: its buckets ran +0.29, +0.25, +0.39 and −0.08 R from 60-69 to 90-100 over both years, and a model fitted on one year gives it no weight on the other (#82, #97). It stays the minimum-60 gate.
+
+Read all of it with four caveats. Both years were mostly bull markets (70 % and 95 % of sessions in the bull regime). The universe is today's constituents. Signals cluster in time (33 in June 2025, 2 in March 2026), which is why the intervals resample months rather than trades. And the feature findings in the issues below came from one exploratory pass over ten features, so some stable-looking splits are chance.
+
+**The rule.** A candidate value is chosen on one window and confirmed on another it never saw, with `--split` on the same replay. It becomes the default only if the sign of its effect on mean R agrees in both windows and the pooled month-block interval of the adopted variant's mean R excludes zero; a slice of fewer than about 30 traded signals decides nothing. The windows and run IDs that judged each adopted value are kept in the ledger below, and a value that fails the unseen window is reported as such, not quietly kept.
+
+| Adopted value | Chosen on | Confirmed on | Unseen window |
+|---|---|---|---|
+| tuned profile, four relaxations | 63 sessions to 2026-09-04, run 33968787516 | 250 sessions to 2026-09-04, run 33973275310 | held: +0.30 R, run 34186512341 |
+| `WW_TIME_SYM_TOL` 0.45 | 250 sessions to 2026-09-04, run 33985398488 | none | failed: Wolfe −0.16 R on 12 traded rows (#102) |
+| `MIN_REWARD_RISK` 1.0, `MAX_WAIT_BARS` 60 | 250 sessions to 2026-09-04, runs 34023518929 to 34023527178 | none on their own | untested alone; the profile that includes them held |
+| `CUP_TRIGGER` handle_high, kept | 250 sessions, run 33985391832 against 33973275310 | none | untested |
+| `WATCH_PROXIMITY` 5 % | the 2026-09-04 report, 10 of 17 rows lost in a day | none | a reporting choice, not a replay question |
+
+**Hypotheses under test**, each needing the rule above and most the multi-year replay of #95: #98 breakout age at first report, #99 the SMA50-to-SMA200 band, #100 reward:risk of 4 or more, #101 VIX below 15, #102 Wolfe out of sample. Deferred: #97, a per-signal probability model, premature at about 120 resolved trades a year.
+
 ### Market context (2026-09-08)
 
 The report header and every backtest row carry the SPY regime (close and SMA50 against the SMA200), the VIX and the breadth of the universe, and the backtest summaries add a per-regime slice with VIX and breadth among the feature buckets. In the two-year local replay, tuned signals scanned in a non-bull SPY regime ran +0.68 R on 75 rows against +0.17 on 237 bull-regime rows, and rows scanned at a VIX below 15 were negative in both years (−0.55 on 16, −0.19 on 19). The non-bull rows all came from March to June 2025, one episode, so nothing gates on the context; issues #93 and #101 track the evidence and a rule would need the multi-year replay of #95.
@@ -57,7 +86,7 @@ The report header and every backtest row carry the SPY regime (close and SMA50 a
 | `--period` | `2y` | yfinance period; `2y` gives about 500 daily bars, enough for SMA200 plus a 250-bar cup |
 | `--min-score` | 60 | overrides `MIN_SCORE` for the run and is echoed in `meta.min_score` |
 | `--max-age` | 3 | overrides `MAX_BREAKOUT_AGE`; the effective per-pattern limits are in `meta.max_breakout_age_by_pattern` |
-| `--profile` | `spec` | rule profile, `spec` or `legacy`; echoed in `meta.profile` |
+| `--profile` | `spec` | rule profile, `spec`, `tuned` or `legacy`; echoed in `meta.profile` |
 | `--out-dir` | `output` | destination for `signals.json` and `report.md` |
 | `-v` | off | DEBUG logging, including per-symbol last-bar detail |
 
@@ -67,7 +96,7 @@ The report header and every backtest row carry the SPY regime (close and SMA50 a
 |---|---|---|---|---|
 | `PIVOT_ORDER` | 5 | bars on each side needed to call a swing high/low | fewer bars: more (noisier) pivots, patterns visible sooner | fewer, cleaner pivots; H&S/Wolfe seen later; `BREAKOUT_AGE_LAG` follows it automatically |
 | `ATR_LEN` | 14 | ATR window used for stops and the head/overshoot tests | | |
-| `MIN_SCORE` | 60 | minimum quality score reported | more marginal setups | only the cleanest geometry |
+| `MIN_SCORE` | 60 | minimum quality score reported; a gate, not a ranking (score buckets do not order outcomes in replay, #82) | more marginal setups | only the cleanest geometry |
 | `MAX_BREAKOUT_AGE` | 3 | max bars since the confirming close (Cup); +`PIVOT_ORDER` for H&S and Wolfe | older breakouts reported | only fresh breakouts |
 | `BREAKOUT_AGE_LAG` | Cup 0, H&S 5, Wolfe 5 | extra age tolerated because the last pivot lags | | |
 | `MAX_RUNAWAY` | 0.05 | close more than this above the trigger = chasing, dropped | | |
@@ -180,4 +209,4 @@ python -m pytest test_patterns.py -k "violations or controls" -q
 
 For real-data effect, run the backtest (see [Testing and Contributing](04-Testing-and-Contributing.md)): it replays the active profile and the other one on the same prices, and re-scores the signals under stop and target variants. Any constant can be overridden for one replay without a code change: `gh workflow run backtest.yml -f overrides="CUP_TRIGGER=rim_b WW_TIME_SYM_TOL=0.45"` (locally `--set KEY=VALUE`). Change one constant, re-run, and only then change the default.
 
-Every calibration above was judged on a single year, the one the candidate values were chosen on. The backtest now reports a 95 % interval of the mean R (resampling scan months, because signals cluster in time) and, with `-f split=YYYY-MM-DD`, the sessions before and from a date as separate windows, so a value chosen on one window can be confirmed on the other before it becomes the default: `gh workflow run backtest.yml -f period=5y -f days=500 -f bars=500 -f split=2025-09-09 -f horizon=60`. A first such replay (2026-09-07, local) found the tuned profile at +0.30 R on 167 signals in the year before 2025-09-09, which no decision had used, against +0.28 R on 159 in the tuning year; legacy fell from +0.34 to +0.09 between the same two windows.
+Judge a candidate on a window it was not chosen on. The backtest reports a 95 % interval of the mean R (resampling scan months, because signals cluster in time) and, with `-f split=YYYY-MM-DD`, the sessions before and from a date as separate windows: `gh workflow run backtest.yml -f period=5y -f days=500 -f bars=500 -f split=2025-09-09 -f horizon=60`. The rule a change must pass, the evidence so far and the ledger of adopted values are in the out-of-sample section above.
