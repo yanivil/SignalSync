@@ -109,6 +109,25 @@ A second external review proposed a converging-wedge check for Wolfe (already th
 | Reward:risk floor of 2.0 | rows at or below 1.5 ran +0.20 R with a 54 % hit rate over ten years (#100) | rejected |
 | Inhibit alerts in a SPY bear regime or above VIX 25 | bear regime +0.59 R on 226, VIX above 25 +0.50 R in 8 of 8 years (#101) | contradicted |
 
+### Per-ticker fear and greed, tested (2026-09-08)
+
+A trader's suggestion: read a per-ticker fear-and-greed indicator, as the TradingView community scripts do, to tell whether a stock is being bought or sold too hard. The replay's version, `fear_greed` in `tools/backtest.py`, is the equal-weight 0-100 composite of RSI 14, the MACD histogram's percentile within the trailing year and Bollinger %B that those scripts share, read at the scan day and at the pattern's last low, and replayed over the same eleven years (runs 34267945406 to 34268343900). The direction the trader expected is what the data shows, in both readings:
+
+| Reading | Zone | N traded | Hit rate | Mean R | Positive years |
+|---|---|---|---|---|---|
+| at the scan day | fear, 20-40 | 73 | 23 % | +0.61 | 6 of 11 |
+| at the scan day | neutral, 40-60 | 174 | 40 % | +0.45 | 10 of 11 |
+| at the scan day | greed, 60-80 | 957 | 33 % | +0.20 | 10 of 11 |
+| at the scan day | extreme greed, above 80 | 427 | 42 % | +0.12 | 8 of 11 |
+| at the pattern's last low | extreme fear, below 20 | 112 | 35 % | +0.30 | 7 of 11 |
+| at the pattern's last low | fear | 352 | 34 % | +0.28 | 8 of 11 |
+| at the pattern's last low | neutral | 616 | 39 % | +0.24 | 10 of 11 |
+| at the pattern's last low | greed | 534 | 33 % | +0.15 | 8 of 11 |
+
+A confirmed breakout is almost never fearful by construction (one row below 20 in ten years), so at the scan day the scale runs from fear to extreme greed, and the greedier the stock at its breakout, the lower the mean R; the higher hit rate of the greediest bucket does not compensate, because its wins are smaller. Bases that formed in fear paid about twice what bases formed in greed did. Of the components, the stretch measures carry the effect and momentum does not: RSI 30-50 at the breakout ran +0.55 R on 230 signals against +0.18 for 50-70 and +0.12 above 70, the lower bucket ahead in 8 of 11 years; Bollinger %B in the lower half ran +0.53 on 185, the upper half +0.26 on 991 and a close above the upper band +0.04 on 453, the upper half ahead of the above-band bucket in 10 of 11 years (the exception, 2017, a tie at +0.44 against +0.45); the MACD percentile ran +0.18 to +0.26 across its buckets with the strongest momentum slightly best.
+
+The one candidate rule this produces is the Bollinger stretch: a breakout bar that closes above its upper band. Leaving those 453 signals out would keep 1179 signals at +0.30 R against 1632 at +0.22, at a cost of 16 R of the ten-year total of 367. Under the protocol it remains a hypothesis: the gate has to be replayed as a rule on its own, so that its effect on the drawdown and per pattern is measured, and the reading belongs in the report as information first.
+
 ### Market context (2026-09-08)
 
 The report header and every backtest row carry the SPY regime (close and SMA50 against the SMA200), the VIX and the breadth of the universe, and the backtest summaries add a per-regime slice with VIX and breadth among the feature buckets. Over the ten years on the point-in-time index (the section above), signals scanned in a SPY bear regime ran +0.59 R on 226 against +0.16 on 1190 in bull regimes, positive in five of the six years with bear sessions, and signals scanned at a VIX above 25 ran +0.50 R in eight of eight years; a VIX below 15, negative in the two-year window, ran +0.21 R pooled. Nothing gates on the context; #101 tracks how the report should present it.
