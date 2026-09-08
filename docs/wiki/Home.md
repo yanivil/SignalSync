@@ -15,7 +15,7 @@
 * **🛡️ Strictly Defined Risk:** Every confirmed signal includes an entry price, an ATR-buffered structural stop, and a reference target. Setups requiring >15% risk are automatically dropped.
 * **📐 No Forced Patterns:** Strict geometric curvature algorithms (parabolic regression vs. V-shapes) coupled with a composite quality score ($\ge 60$).
 * **📈 Trend-Gated:** Built-in SMA50 / SMA200 trend gates prevent fighting dominant macro momentum.
-* **🔬 Rigorously Backtested:** Includes a walk-forward replay engine and historical git signal tracker to measure real hit rates and R multiples.
+* **🔬 Rigorously Backtested:** Includes a walk-forward replay engine with an out-of-sample split and month-block confidence intervals, and a historical git signal tracker, to measure real hit rates and R multiples.
 * **⚡ Serverless & Free:** Runs completely within GitHub Actions free tier using Yahoo Finance data. No servers, no subscriptions.
 
 ---

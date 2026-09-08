@@ -152,7 +152,8 @@ docs/wiki/                           documentation, mirrored into the GitHub wik
 * Swing points are only recognised 5 bars after they print, so Inverse H&S and Wolfe confirmations can be reported up to 5 bars late.
 * Cup bases must be explained at least as well by a parabola as by a two-legged V; the rule is calibrated on reference shapes, not on market data (see the pattern catalog).
 * The spec profile requires breakout volume (1.4× for cups, 1.3× for H&S) and caps a cup at half its preceding advance, so it confirms far fewer setups than the legacy rules; breakouts without volume appear on the watchlist marked as such.
-* Signal quality is measured by replay, not proven live: `tools/backtest.py` (the `backtest` workflow) runs the scanner walk-forward over past sessions on today's constituents (survivorship bias), and `tools/evaluate_signals.py` scores the signals the nightly job actually committed.
+* Signal quality is measured by replay, not proven live. `tools/backtest.py` (the `backtest` workflow) runs the scanner walk-forward over past sessions and `tools/evaluate_signals.py` scores the signals the nightly job actually committed. Every rule value was chosen on the year to 2026-09-04; a two-year replay that holds out the year before found the tuned profile at +0.30 R out of sample against +0.28 in the tuning year, on mostly bull markets and today's constituents (survivorship bias), and the Wolfe detector negative out of sample. The [tuning page](docs/wiki/03-Configuration-and-Tuning.md) states the check every further change must pass.
+* The quality score is a gate, not a ranking: its buckets do not order outcomes in replay.
 * Yahoo Finance data is unofficial. Symbols with fewer than 60 bars are skipped and counted in `meta.errors`.
 * There is no persistent price cache: every run re-downloads two years of history for the whole universe.
 
