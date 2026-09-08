@@ -117,20 +117,20 @@ def test_row_features_match_hand_computation(mini_universe):
 
 
 def test_fear_greed_components_and_score():
-    rising = bt.fear_greed(100 * 1.01 ** np.arange(300))            # accelerating rise: everything stretched up
+    rising = scan.fear_greed(100 * 1.01 ** np.arange(300))          # accelerating rise: everything stretched up
     assert rising["rsi"] == 100.0 and rising["macd_pct"] > 90 and rising["bb_pctb"] > 0.5 and rising["score"] > 80
-    falling = bt.fear_greed(100 * 0.99 ** np.arange(300))
+    falling = scan.fear_greed(100 * 0.99 ** np.arange(300))
     assert falling["rsi"] == 0.0 and falling["macd_pct"] < 10 and falling["bb_pctb"] < 0.5 and falling["score"] < 20
-    flat = bt.fear_greed(np.full(300, 50.0))                         # never moved: neutral, and no bands
+    flat = scan.fear_greed(np.full(300, 50.0))                       # never moved: neutral, and no bands
     assert flat == {"rsi": 50.0, "macd_pct": 50.0, "bb_pctb": None, "score": 50.0}
-    short = bt.fear_greed(np.arange(10, dtype=float))                # too short for every component
+    short = scan.fear_greed(np.arange(10, dtype=float))              # too short for every component
     assert short == {"rsi": None, "macd_pct": None, "bb_pctb": None, "score": None}
     # RSI by hand on a 15-bar series: gains 1 on ten bars, losses 1 on four -> avg gain 10/14, avg loss 4/14 -> RS 2.5.
     steps = np.array([1, 1, 1, -1, 1, 1, -1, 1, 1, 1, -1, 1, 1, -1], dtype=float)
-    assert bt._rsi(np.concatenate([[100.0], 100 + np.cumsum(steps)])) == round(100 - 100 / 3.5, 2)
+    assert scan._rsi(np.concatenate([[100.0], 100 + np.cumsum(steps)])) == round(100 - 100 / 3.5, 2)
     # %B is the close's position between the bands: outside them beyond 0 or 1.
     spike = np.concatenate([np.full(19, 100.0), [110.0]])
-    fg = bt.fear_greed(np.concatenate([np.full(30, 100.0), spike]))
+    fg = scan.fear_greed(np.concatenate([np.full(30, 100.0), spike]))
     assert fg["bb_pctb"] > 1.0 and fg["score"] is not None
 
 
@@ -139,14 +139,18 @@ def test_row_features_fear_greed_at_scan_day_and_base(mini_universe):
     (s,) = scan.detect_cup_and_handle(cup, "CUP")
     f = bt.row_features(cup, s, float(scan.atr(cup).iloc[-1]))
     close = cup["Close"].to_numpy()
-    fg = bt.fear_greed(close)
+    fg = scan.fear_greed(close)
     assert (f["fg_score"], f["fg_rsi"], f["fg_macd_pct"], f["fg_bb_pctb"]) == (
         fg["score"], fg["rsi"], fg["macd_pct"], fg["bb_pctb"])
+    assert s.fear_greed is None                                       # a detector alone does not set it ...
+    (sig,) = scan.scan_symbol("CUP", cup, detectors=(scan.detect_cup_and_handle,))
+    assert sig.fear_greed == fg["score"]                              # ... scan_symbol does, once per symbol
     anchor = cup.index.get_loc(pd.Timestamp(re.search(r"handle low (\S+)", s.notes)[1]))
-    assert f["fg_base"] == bt.fear_greed(close[:anchor + 1])["score"]
+    assert f["fg_base"] == scan.fear_greed(close[:anchor + 1])["score"]
     assert 0 <= f["fg_base"] < f["fg_score"] <= 100                   # the base is fearful, the breakout greedy
     rows = bt.walk_forward(mini_universe, days=5, horizon=10)
     assert all(r["fg_score"] is not None and r["fg_base"] is not None for r in rows)
+    assert all(r["fear_greed"] == r["fg_score"] for r in rows)        # the report's reading equals the feature
     md = bt.render(rows, bt.report_sections(rows, 5, 10), 5, 10)
     assert "| fear and greed at the scan day |" in md and "| fear and greed at the pattern's last low |" in md
 

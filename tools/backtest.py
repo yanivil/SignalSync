@@ -46,7 +46,8 @@ Method:
   against the prior 20 bars; for cups also the handle's volume against the
   cup's and the handle's volume slope.  Nothing is added to ``scan.Signal`` or
   the nightly report; the features exist to be tested against outcomes.
-* Per signal it records a **per-ticker fear-and-greed reading** (``fear_greed``):
+* Per signal it records the **per-ticker fear-and-greed reading**
+  (``scan.fear_greed``, the same composite the report's F&G column shows):
   the equal-weight 0-100 composite of RSI 14, the MACD histogram's percentile
   within the trailing year and Bollinger %B that the TradingView community
   indicators of that name share, read at the scan day and at the pattern's
@@ -134,8 +135,6 @@ TRADED = ("target", "stop", "open")          # outcomes with a position; "gap" /
 N_BOOT = 2000                                # month-block bootstrap resamples per summary
 HORIZONS = (5, 10, 20, 40, 60)               # bars after the fill for the excursion table
 SLOPE_LOOKBACK = 40                          # bars between the two SMA200 readings of the slope feature
-FG_RSI_LEN, FG_BB_LEN, FG_MACD = 14, 20, (12, 26, 9)   # the fear-and-greed composite's oscillators
-FG_LOOKBACK = 250                            # bars for the MACD histogram's percentile rank
 INF = float("inf")
 # Feature buckets for the outcome-by-feature table: key -> (label, right-inclusive edges, bucket names).
 # Fixed edges, so two replays (or the two windows of a split) are comparable bucket by bucket.
@@ -254,73 +253,6 @@ def classify_variant(fill: float, stop: float, target: Optional[float], bars: pd
     return {"outcome": "open", "bars": len(w), "exit": last, "r": (last - fill) / risk if risk > 0 else None}
 
 
-def _rsi(close: np.ndarray, n: int = FG_RSI_LEN) -> Optional[float]:
-    """Wilder's RSI of the last bar (an ``n``-bar simple seed, then ``(n - 1) / n`` smoothing).
-
-    :returns: 0-100, rounded to 2 dp; 50 on a series that never moved; ``None`` with fewer than ``n + 1`` bars.
-    """
-    if len(close) < n + 1:
-        return None
-    delta = np.diff(np.asarray(close, dtype=float))
-    gains, losses = np.clip(delta, 0.0, None), np.clip(-delta, 0.0, None)
-    avg_gain, avg_loss = float(gains[:n].mean()), float(losses[:n].mean())
-    for gain, loss in zip(gains[n:], losses[n:]):
-        avg_gain = (avg_gain * (n - 1) + gain) / n
-        avg_loss = (avg_loss * (n - 1) + loss) / n
-    if avg_gain == 0 and avg_loss == 0:
-        return 50.0
-    if avg_loss == 0:
-        return 100.0
-    return round(100 - 100 / (1 + avg_gain / avg_loss), 2)
-
-
-def fear_greed(close: np.ndarray) -> Dict[str, Optional[float]]:
-    """A per-ticker fear-and-greed reading of the last bar: 0 = extreme fear, 100 = extreme greed.
-
-    The TradingView community indicators of that name are composites of
-    standard oscillators computed on the symbol itself.  This is a documented,
-    equal-weight version of the three price-based components they share:
-
-    * ``rsi``: RSI 14 (:func:`_rsi`);
-    * ``macd_pct``: the MACD (12, 26, 9) histogram as its mid-rank percentile
-      within the trailing ``FG_LOOKBACK`` bars, so 50 means an average reading
-      for this stock and 99 its most bullish momentum of the year;
-    * ``bb_pctb``: Bollinger %B over 20 bars and 2 standard deviations, i.e. the
-      close's position between the bands (below 0 or above 1 = outside them),
-      unclipped and rounded to 3 dp;
-    * ``score``: the mean of RSI, the MACD percentile and %B clipped to 0-100,
-      over the components the history allows.
-
-    Above 80 the TradingView scripts call it extreme greed, below 20 extreme
-    fear.  Nothing gates on it; it exists to be tested (docs/wiki/03).
-
-    :returns: The four keys, ``None`` where the history is too short.
-
-    Complexity: O(bars).
-    """
-    close = np.asarray(close, dtype=float)
-    out: Dict[str, Optional[float]] = {"rsi": _rsi(close), "macd_pct": None, "bb_pctb": None, "score": None}
-    fast, slow, signal = FG_MACD
-    if len(close) >= slow + signal:
-        s = pd.Series(close)
-        macd = s.ewm(span=fast, adjust=False).mean() - s.ewm(span=slow, adjust=False).mean()
-        hist = (macd - macd.ewm(span=signal, adjust=False).mean()).to_numpy()
-        window = hist[-FG_LOOKBACK:]
-        rank = ((window < hist[-1]).sum() + 0.5 * (window == hist[-1]).sum()) / len(window)
-        out["macd_pct"] = round(float(rank * 100), 1)
-    if len(close) >= FG_BB_LEN:
-        w = close[-FG_BB_LEN:]
-        mid, sd = float(w.mean()), float(w.std())
-        if sd > 0:
-            out["bb_pctb"] = round((close[-1] - (mid - 2 * sd)) / (4 * sd), 3)
-    parts = [v for v in (out["rsi"], out["macd_pct"],
-                         None if out["bb_pctb"] is None else min(max(out["bb_pctb"] * 100, 0.0), 100.0))
-             if v is not None]
-    if parts:
-        out["score"] = round(sum(parts) / len(parts), 1)
-    return out
-
-
 def row_features(hist: pd.DataFrame, s: scan.Signal, atr_last: float) -> Dict[str, Optional[float]]:
     """Features of one signal at its scan day, from the history the scan saw.
 
@@ -345,7 +277,7 @@ def row_features(hist: pd.DataFrame, s: scan.Signal, atr_last: float) -> Dict[st
       a line through the handle's volume as a fraction of its mean per bar
       (negative = drying up).
     * ``fg_score``, ``fg_rsi``, ``fg_macd_pct``, ``fg_bb_pctb``: the
-      :func:`fear_greed` reading and its components at the scan day;
+      ``scan.fear_greed`` reading and its components at the scan day;
       ``fg_base``: the composite at the pattern's last anchor bar (handle low,
       right shoulder, point 5), how fearful the stock was when the base formed.
 
@@ -374,7 +306,7 @@ def row_features(hist: pd.DataFrame, s: scan.Signal, atr_last: float) -> Dict[st
         "volume_z": None, "handle_volume_ratio": None, "handle_volume_slope": None,
         "fg_score": None, "fg_rsi": None, "fg_macd_pct": None, "fg_bb_pctb": None, "fg_base": None}
     notes = s.notes or ""
-    fg = fear_greed(close)
+    fg = scan.fear_greed(close)
     out.update({"fg_score": fg["score"], "fg_rsi": fg["rsi"], "fg_macd_pct": fg["macd_pct"],
                 "fg_bb_pctb": fg["bb_pctb"]})
 
@@ -387,7 +319,7 @@ def row_features(hist: pd.DataFrame, s: scan.Signal, atr_last: float) -> Dict[st
         anchor = loc(m[2])
         if anchor >= 0:
             out["wait_bars"] = b - anchor
-            out["fg_base"] = fear_greed(close[:anchor + 1])["score"]
+            out["fg_base"] = scan.fear_greed(close[:anchor + 1])["score"]
     # Pattern depth from the anchors in the notes.
     depth = None
     if s.pattern == "Cup & Handle":

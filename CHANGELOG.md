@@ -5,6 +5,15 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Added (report: the F&G column)
+- Every report row carries `F&G`, the stock's own fear-and-greed reading at
+  the last close, 0 to 100, one value per symbol; `fear_greed` in
+  `signals.json`. The composite (`scan.fear_greed`, RSI 14, MACD-histogram
+  percentile within the trailing year, Bollinger %B) moved from the backtest
+  into the scanner so the report and the replay share one implementation.
+  The footer explains the zones. Information only; the stretch gate it
+  suggests is #113.
+
 ### Added (per-ticker fear and greed, 2026-09-08)
 - Replay rows and the outcome-by-feature table gain a per-ticker fear-and-greed
   reading: the equal-weight 0-100 composite of RSI 14, the MACD (12, 26, 9)
