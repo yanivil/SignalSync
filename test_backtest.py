@@ -106,6 +106,26 @@ def test_walk_forward_rows_carry_replay_features(mini_universe):
         assert r["stop_atr"] > 0 and r["wait_bars"] >= 1 and r["close_vs_sma200"] is not None
 
 
+def test_walk_forward_rows_carry_market_context_and_breakdown_by_regime(mini_universe):
+    from conftest import make_flat
+    from test_scan import _ohlc_from_path
+    index = _ohlc_from_path(np.linspace(300, 400, 400), seed=11)              # up-trend: bull regime
+    series = scan.market_series(mini_universe, index, make_flat(400, 17.0))
+    rows = bt.walk_forward(mini_universe, days=5, horizon=10, market=series)
+    assert rows and set(bt.MARKET_KEYS) <= set(rows[0])
+    assert all(r["regime"] == "bull" and r["vix"] == 17.0 and 0 <= r["breadth"] <= 1 for r in rows)
+    assert all(r["index_vs_sma200_pct"] > 0 for r in rows)
+    stats = bt.breakdown(rows)
+    assert set(stats["by_regime"]) == {"bull"} and stats["by_regime"]["bull"]["signals"] == len(rows)
+    md = bt.render(rows, bt.report_sections(rows, 5, 10), 5, 10)
+    assert "| regime bull |" in md and "| VIX at the scan day | 15-20 |" in md
+    assert "| share of the universe above its SMA200 |" in md
+    plain = bt.walk_forward(mini_universe, days=5, horizon=10)                # no market series
+    assert all(r[k] is None for r in plain for k in bt.MARKET_KEYS)
+    assert bt.breakdown(plain)["by_regime"] == {}
+    assert "| regime " not in bt.render(plain, bt.report_sections(plain, 5, 10), 5, 10)
+
+
 def _bars(*rows):
     """rows: (open, high, low, close) per day."""
     idx = pd.bdate_range("2026-01-05", periods=len(rows))
