@@ -19,6 +19,7 @@ load_sp500_symbols ─► download_history ─► align_last_bar ─► scan_sym
 * **Pinned, not floating.** The dataset is fetched from a fixed commit (`CONSTITUENTS_COMMIT`, currently 2026-08-20) rather than `main`, so an upstream change or compromise cannot silently alter the scanned universe. To pick up index changes, review the upstream diff and bump the commit hash.
 * **Normalisation:** whitespace stripped, dots replaced by dashes (`BRK.B` → `BRK-B`, Yahoo's convention), de-duplicated and sorted. The symbol case is preserved as given.
 * **Failure mode:** if neither source is readable, `RuntimeError` is raised and the process exits non-zero. A CSV path that does not exist falls through to the network silently (with a warning only if the download also fails).
+* **Replays** can use the membership as of each past day instead of today's list, reconstructed from the same dataset's git history (`tools/universe_history.py`, `--constituents-asof`); see [Testing and Contributing](04-Testing-and-Contributing.md).
 
 ## 2. Ingestion
 

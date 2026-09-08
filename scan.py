@@ -373,6 +373,18 @@ def load_sp500_symbols(csv_path: Optional[str] = None) -> List[str]:
             text = raw.decode("utf-8")
     if not text:
         raise RuntimeError("No S&P 500 constituent source available")
+    return symbols_from_csv(text)
+
+
+def symbols_from_csv(text: str) -> List[str]:
+    """Symbols from constituent CSV text, in Yahoo format.
+
+    The ``Symbol`` column (else the first column), stripped, upper-cased, dots
+    replaced by dashes (``BRK.B`` -> ``BRK-B``), de-duplicated and sorted.
+    Shared by :func:`load_sp500_symbols` and the point-in-time universe of the
+    backtest (``tools/universe_history.py``), so every snapshot is normalised
+    the same way as today's list.
+    """
     df = pd.read_csv(io.StringIO(text))
     col = "Symbol" if "Symbol" in df.columns else df.columns[0]
     syms = sorted({str(s).strip().upper().replace(".", "-") for s in df[col].dropna()})

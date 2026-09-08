@@ -5,6 +5,21 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Added (point-in-time universe for multi-year replays, #95)
+- `tools/universe_history.py`: index membership as of any past date from the
+  git history of the pinned constituent dataset (a bare, blobless clone under
+  `.cache/`, refreshed by a fetch; the snapshot at the last commit on or
+  before the date; symbols normalised like today's list).
+- Backtest `--constituents-asof` (workflow input `asof`): the union of
+  members over the window is downloaded and a symbol is scanned only on the
+  days it was a member; the report opens with a per-year coverage table
+  (members, members with Yahoo history). `--end YYYY-MM-DD` (input `end`)
+  replays the sessions on or before a date, so a past year is one dispatch;
+  input `grid=false` skips the variants and the other profile's pass. Job
+  timeout 360 minutes.
+- `scan.symbols_from_csv` is the constituent parser shared by the scanner
+  and the replay.
+
 ### Changed (docs: out-of-sample protocol, #96)
 - Tuning page: the two-year out-of-sample table per profile and pattern
   (backtest run 34186512341), the rule a constant change must pass (chosen on

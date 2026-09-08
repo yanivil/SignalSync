@@ -106,6 +106,34 @@ def test_walk_forward_rows_carry_replay_features(mini_universe):
         assert r["stop_atr"] > 0 and r["wait_bars"] >= 1 and r["close_vs_sma200"] is not None
 
 
+def test_walk_forward_members_and_end(mini_universe):
+    sessions = sorted({d for df in mini_universe.values() for d in df.index})
+    assert bt.scan_sessions(mini_universe, 5) == sessions[-5:]
+    end = str(sessions[-3].date())
+    assert bt.scan_sessions(mini_universe, 5, end) == sessions[-7:-2]      # the five sessions on or before end
+    assert bt.scan_sessions(mini_universe, 10_000) == sessions             # more days than sessions: all of them
+    rows = bt.walk_forward(mini_universe, days=5, horizon=10, members=lambda d: {"CUP"})
+    assert rows and {r["ticker"] for r in rows} == {"CUP"}                 # non-members are never scanned
+    assert bt.walk_forward(mini_universe, days=5, horizon=10, members=lambda d: set()) == []
+    calls = []
+
+    def members(d):
+        calls.append(d)
+        return {"CUP", "IHS", "WW"}
+
+    full = bt.walk_forward(mini_universe, days=5, horizon=10, members=members)
+    assert len(calls) == 5 and calls == sessions[-5:]                      # one membership lookup per scan day
+    assert {r["ticker"] for r in full} == {r["ticker"] for r in bt.walk_forward(mini_universe, days=5, horizon=10)}
+    early = bt.walk_forward(mini_universe, days=5, horizon=10, end=end)
+    assert all(r["scan_day"] <= end for r in early)
+    md = bt.render(early, bt.report_sections(early, 5, 10), 5, 10, end=end)
+    assert f"last 5 sessions to {end}" in md
+    universe = {"symbols": 6, "with_data": 5,
+                "coverage": [{"year": 2025, "members": 6, "with_data": 5, "share": 0.833}]}
+    md = bt.render(early, bt.report_sections(early, 5, 10), 5, 10, universe=universe)
+    assert "## Universe" in md and "| 2025 | 6 | 5 | 83% |" in md
+
+
 def test_walk_forward_rows_carry_market_context_and_breakdown_by_regime(mini_universe):
     from conftest import make_flat
     from test_scan import _ohlc_from_path

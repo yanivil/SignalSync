@@ -65,6 +65,16 @@ Method:
   separate windows next to the pooled one, so a rule chosen on one window is
   judged on the other -- the out-of-sample check a calibration decision
   should pass (docs/wiki/03).
+* ``--end YYYY-MM-DD`` replays the last ``--days`` sessions on or before that
+  date instead of today, so one past year can be replayed on its own (the
+  outcomes still use the bars that followed it).
+* ``--constituents-asof`` replays the index as it was: the membership as of
+  each scan day comes from the git history of the constituent dataset
+  (``universe_history``), the union over the window is downloaded, and a
+  symbol is scanned only on the days it was a member.  A coverage table
+  states how many members each year had no Yahoo history (delisted or
+  renamed symbols), which is the survivorship bias that remains.  Needs a
+  ``--period`` long enough to reach the window (``10y`` for 2016 onwards).
 * ``--grid`` re-scores the same signals under stop / target variants: extra
   ATR below the reported stop (0 / 0.25 / 0.75, i.e. ~0.25 / 0.5 / 1.0 ATR
   under the structural low), intraday vs close-based stops, and three target
@@ -94,15 +104,17 @@ import os
 import re
 import sys
 import time
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Container, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+sys.path.insert(0, ROOT)
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import scan  # noqa: E402
 import evaluate_signals as ev  # noqa: E402
+import universe_history as uh  # noqa: E402
 
 log = logging.getLogger("backtest")
 
@@ -353,21 +365,22 @@ def grid(rows: Sequence[dict], data: Dict[str, pd.DataFrame], horizon: int) -> L
     return out
 
 
-def ablation(data: Dict[str, pd.DataFrame], days: int, horizon: int, bars: Optional[int] = None,
-             market: Optional[Mapping[str, pd.Series]] = None) -> List[dict]:
+def ablation(data: Dict[str, pd.DataFrame], days: int, horizon: int, **replay: Any) -> List[dict]:
     """Leave-one-rule-out over the spec profile.
 
     Replays the active (spec) profile, then once per key in
     ``RULE_PROFILES["legacy"]`` with only that key set to its legacy value.
+    ``replay`` holds the :func:`walk_forward` keyword options (bars, market,
+    members, end).
     :returns: one summary row per replay: ``{"rule", "value", "delta", **breakdown(...)["overall"]}``.
     """
-    base = breakdown(walk_forward(data, days, horizon, bars=bars, market=market))["overall"]
+    base = breakdown(walk_forward(data, days, horizon, **replay))["overall"]
     rows = [{"rule": "spec (all rules)", "value": "-", "delta": 0, **base}]
     for key, legacy_value in scan.RULE_PROFILES["legacy"].items():
         saved = getattr(scan, key)
         setattr(scan, key, legacy_value)
         try:
-            s = breakdown(walk_forward(data, days, horizon, bars=bars, market=market))["overall"]
+            s = breakdown(walk_forward(data, days, horizon, **replay))["overall"]
         finally:
             setattr(scan, key, saved)
         rows.append({"rule": key, "value": str(legacy_value), "delta": s["signals"] - base["signals"], **s})
@@ -405,20 +418,31 @@ def apply_override(item: str) -> Tuple[str, Any]:
     return key, value
 
 
-def profile_pass(data: Dict[str, pd.DataFrame], days: int, horizon: int, name: str,
-                 bars: Optional[int] = None, market: Optional[Mapping[str, pd.Series]] = None) -> dict:
+def profile_pass(data: Dict[str, pd.DataFrame], days: int, horizon: int, name: str, **replay: Any) -> dict:
     """Second full walk-forward under rule profile ``name`` (the active profile is restored).
 
+    ``replay`` holds the :func:`walk_forward` keyword options (bars, market, members, end).
     :returns: ``{"profile", "stats", "rows"}`` with the same ``breakdown`` slices as the main report.
     """
     with rule_profile(name):
-        rows = walk_forward(data, days, horizon, bars=bars, market=market)
+        rows = walk_forward(data, days, horizon, **replay)
     return {"profile": name, "stats": breakdown(rows), "rows": rows}
+
+
+def scan_sessions(data: Dict[str, pd.DataFrame], days: int, end: Optional[str] = None) -> List[pd.Timestamp]:
+    """The sessions a replay scans: the last ``days`` trading days across ``data`` on or before ``end``."""
+    sessions = sorted({d for df in data.values() for d in df.index})
+    if end is not None:
+        cutoff = pd.Timestamp(end)
+        sessions = [s for s in sessions if s <= cutoff]
+    return sessions[-days:] if days < len(sessions) else sessions
 
 
 def walk_forward(data: Dict[str, pd.DataFrame], days: int, horizon: int,
                  detectors: Optional[Sequence] = None, bars: Optional[int] = None,
-                 market: Optional[Mapping[str, pd.Series]] = None) -> List[dict]:
+                 market: Optional[Mapping[str, pd.Series]] = None,
+                 members: Optional[Callable[[Any], Container[str]]] = None,
+                 end: Optional[str] = None) -> List[dict]:
     """Replay the scanner over the last ``days`` sessions and score each first-seen signal.
 
     :param data: ``{symbol: OHLCV frame}`` as returned by ``download_history``.
@@ -429,6 +453,10 @@ def walk_forward(data: Dict[str, pd.DataFrame], days: int, horizon: int,
         day).  500 mimics the nightly job's 2y download in a longer replay.
     :param market: ``scan.market_series`` output; puts the ``MARKET_KEYS`` (regime,
         VIX, breadth, index vs SMA200) at the scan day on every row, ``None`` without it.
+    :param members: ``scan day -> symbols that were index members``; a symbol
+        is scanned only on days it is in that set (``universe_history.Membership.members``).
+    :param end: Last scan day (ISO); the window is the ``days`` sessions on or
+        before it, so a past year can be replayed on its own.
     :returns: One dict per first-seen CONFIRMED signal with the signal fields plus
         ``fill``, ``outcome``, ``bars``, ``exit``, ``r``, the :func:`row_features`,
         the market context (and for cups the parsed ``cup_bottom`` / ``cup_trigger``
@@ -439,13 +467,15 @@ def walk_forward(data: Dict[str, pd.DataFrame], days: int, horizon: int,
 
     Complexity: O(days * symbols * detector cost); ~2 ms per symbol-day.
     """
-    sessions = sorted({d for df in data.values() for d in df.index})
-    scan_days = sessions[-days:] if days < len(sessions) else sessions
+    scan_days = scan_sessions(data, days, end)
     seen: Dict[tuple, dict] = {}
     not_traded = dict(exit=None, r=None, mfe=None, mae=None, success5=None)
     for d in scan_days:
         ctx = _market_at(market, d)
+        today = members(d) if members is not None else None
         for sym, df in data.items():
+            if today is not None and sym not in today:
+                continue                      # not an index member on d (point-in-time universe)
             hist = df[df.index <= d]
             if bars is not None:
                 hist = hist.iloc[-bars:]
@@ -683,9 +713,10 @@ def _feature_lines(buckets: Sequence[dict], label: str) -> List[str]:
     return lines
 
 
-def render(rows: Sequence[dict], sections: Sequence[dict], days: int, horizon: int) -> str:
-    """Markdown report (readable as a GitHub step summary): one block per window, then every signal."""
-    lines = [f"# Walk-forward backtest: last {days} sessions, horizon {horizon} bars "
+def render(rows: Sequence[dict], sections: Sequence[dict], days: int, horizon: int,
+           universe: Optional[Mapping[str, Any]] = None, end: Optional[str] = None) -> str:
+    """Markdown report (readable as a GitHub step summary): the universe, one block per window, every signal."""
+    lines = [f"# Walk-forward backtest: last {days} sessions{f' to {end}' if end else ''}, horizon {horizon} bars "
              f"(rule profile: {scan.ACTIVE_PROFILE})", "",
              "Hit rate = target / (target + stop). Mean R over traded signals (open ones marked to the last close). "
              "Fill = next session's open; not traded = the open was above the row's Max buy (gap) or at or below "
@@ -695,6 +726,15 @@ def render(rows: Sequence[dict], sections: Sequence[dict], days: int, horizon: i
              "+5% first = share of signals whose high reached +5 % above the fill before any close below the stop "
              "(the chart-book success definition). MFE / MAE = mean best / worst excursion from the fill "
              "within the horizon."]
+    if universe:
+        lines += ["", "## Universe", "",
+                  f"Point-in-time membership from the constituent dataset's git history: {universe['symbols']} "
+                  f"symbols were members at some point in the window, {universe['with_data']} of them have Yahoo "
+                  f"history; a symbol is scanned only on the days it was a member. Members without history "
+                  f"(delisted or renamed since) are the survivorship bias that remains.", "",
+                  "| Year | Members | With price data | Share |", "|---|---|---|---|"]
+        lines += [f"| {c['year']} | {c['members']} | {c['with_data']} | {_pct(c['share'])} |"
+                  for c in universe["coverage"]]
     if len(sections) > 1:
         lines += ["", "The windows below report the sessions before and from the split date separately: a rule "
                   "chosen on one window is judged on the other."]
@@ -744,6 +784,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          "in a long replay")
     ap.add_argument("--split", metavar="YYYY-MM-DD",
                     help="also report the sessions before and from this date as separate windows (out-of-sample check)")
+    ap.add_argument("--end", metavar="YYYY-MM-DD",
+                    help="last scan day: replay the --days sessions on or before it (default: the newest bar)")
+    ap.add_argument("--constituents-asof", action="store_true",
+                    help="scan each day's index members from the constituent dataset's git history instead of "
+                         "today's list (needs a --period reaching the window, e.g. 10y)")
+    ap.add_argument("--cache-dir", default=os.path.join(ROOT, ".cache"),
+                    help="where the constituent history clone is kept (default: .cache in the repository)")
     ap.add_argument("--min-score", type=int, default=None, help="override MIN_SCORE for the replay")
     ap.add_argument("--json", help="also write rows and stats here")
     ap.add_argument("--grid", action="store_true",
@@ -763,15 +810,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         log.info("override %s = %r", key, value)
     if args.min_score is not None:
         scan.MIN_SCORE = args.min_score
-    symbols = ([s.strip().upper() for s in args.tickers.split(",") if s.strip()]
-               if args.tickers else scan.load_sp500_symbols(args.csv))
+    membership: Optional[uh.Membership] = None
+    if args.tickers:
+        symbols = [s.strip().upper() for s in args.tickers.split(",") if s.strip()]
+        if args.constituents_asof:
+            log.warning("--constituents-asof ignored: --tickers names the universe")
+    elif args.constituents_asof:
+        clone = uh.clone_history(args.cache_dir)
+        membership = uh.Membership(uh.history(clone), lambda sha: uh.file_at(clone, sha))
+        # The window's calendar span is not known before the download; take monthly snapshots over a
+        # generous span (sessions to calendar days x1.5 plus a margin) and download their union.
+        last = pd.Timestamp(args.end) if args.end else pd.Timestamp.today().normalize()
+        first = last - pd.Timedelta(days=int(args.days * 1.5) + 45)
+        symbols = sorted(membership.union(list(pd.date_range(first, last, freq="MS")) + [last]))
+        log.info("point-in-time universe: %d symbols were members between %s and %s (%d dataset snapshots)",
+                 len(symbols), first.date(), last.date(), len(membership.entries))
+    else:
+        symbols = scan.load_sp500_symbols(args.csv)
     t0 = time.time()
     data = scan.download_history(symbols, period=args.period)
     if not data:
         print("no price data")
         return 2
-    log.info("downloaded %d symbols in %.0fs; replaying %d sessions%s", len(data), time.time() - t0, args.days,
-             f", each scan sees {args.bars} bars" if args.bars else "")
+    log.info("downloaded %d symbols in %.0fs; replaying %d sessions%s%s", len(data), time.time() - t0, args.days,
+             f" to {args.end}" if args.end else "", f", each scan sees {args.bars} bars" if args.bars else "")
     market_frames: Dict[str, pd.DataFrame] = {}
     try:  # informational context: a failure leaves the market fields empty, never stops the replay
         market_frames = scan.download_history([scan.MARKET_INDEX, scan.MARKET_VOL], period=args.period)
@@ -779,33 +841,42 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         log.warning("market context unavailable: %s", exc)
     market = scan.market_series(data, market_frames.get(scan.MARKET_INDEX), market_frames.get(scan.MARKET_VOL))
     log.info("market context: %s", ", ".join(sorted(market_frames)) or "no index / volatility data (breadth only)")
+    replay = {"bars": args.bars, "market": market, "end": args.end,
+              "members": membership.members if membership is not None else None}
+    universe: Optional[Dict[str, Any]] = None
+    if membership is not None:
+        universe = {"mode": "point-in-time", "symbols": len(symbols), "with_data": len(data),
+                    "coverage": membership.coverage(scan_sessions(data, args.days, args.end), set(data)),
+                    "before_history": membership.before_history}
+        for c in universe["coverage"]:
+            log.info("members with price data in %d: %d of %d", c["year"], c["with_data"], c["members"])
     if args.ablate:
         scan.apply_profile("spec")
-        table = ablation(data, args.days, args.horizon, args.bars, market)
+        table = ablation(data, args.days, args.horizon, **replay)
         log.info("ablation done in %.0fs: %d replays", time.time() - t0, len(table))
         print(render_ablation(table, args.days, args.horizon))
         if args.json:
             with open(args.json, "w", encoding="utf-8") as fh:
-                json.dump({"days": args.days, "horizon": args.horizon, "bars": args.bars, "ablation": table},
-                          fh, indent=2)
+                json.dump({"days": args.days, "horizon": args.horizon, "bars": args.bars, "end": args.end,
+                           "universe": universe, "ablation": table}, fh, indent=2)
         return 0
-    rows = walk_forward(data, args.days, args.horizon, bars=args.bars, market=market)
+    rows = walk_forward(data, args.days, args.horizon, **replay)
     log.info("replay done in %.0fs: %d first-seen confirmed signals", time.time() - t0, len(rows))
     other_rows = other_name = None
     if args.grid:
         other_name = "legacy" if scan.ACTIVE_PROFILE == "spec" else "spec"
-        other_rows = profile_pass(data, args.days, args.horizon, other_name, args.bars, market)["rows"]
+        other_rows = profile_pass(data, args.days, args.horizon, other_name, **replay)["rows"]
         log.info("%s-profile pass done in %.0fs: %d first-seen confirmed signals",
                  other_name, time.time() - t0, len(other_rows))
     sections = report_sections(rows, args.days, args.horizon, args.split, data, args.grid, other_rows, other_name)
-    print(render(rows, sections, args.days, args.horizon))
+    print(render(rows, sections, args.days, args.horizon, universe, args.end))
     if args.json:
         pooled = sections[0]
         keep = ("label", "stats", "features", "horizons", "grid", "other")
         with open(args.json, "w", encoding="utf-8") as fh:
             json.dump({"days": args.days, "horizon": args.horizon, "profile": scan.ACTIVE_PROFILE,
-                       "min_score": scan.MIN_SCORE, "bars": args.bars, "split": args.split,
-                       "market_symbols": sorted(market_frames),
+                       "min_score": scan.MIN_SCORE, "bars": args.bars, "split": args.split, "end": args.end,
+                       "universe": universe, "market_symbols": sorted(market_frames),
                        "stats": pooled["stats"], "features": pooled["features"], "horizons": pooled["horizons"],
                        "grid": pooled["grid"],
                        "other_profile": ({"profile": other_name, "stats": pooled["other"]["stats"], "rows": other_rows}
