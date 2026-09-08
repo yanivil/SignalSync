@@ -5,6 +5,14 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Added (per-ticker fear and greed, 2026-09-08)
+- Replay rows and the outcome-by-feature table gain a per-ticker fear-and-greed
+  reading: the equal-weight 0-100 composite of RSI 14, the MACD (12, 26, 9)
+  histogram's mid-rank percentile within the trailing 250 bars and Bollinger
+  %B (20, 2) that the TradingView community indicators of that name share,
+  read at the scan day and at the pattern's last low, with the three
+  components alongside. Recorded to be tested against outcomes; no rule uses it.
+
 ### Added (backtest features from the second external review, 2026-09-08)
 - Replay rows and the outcome-by-feature table gain the pattern's depth in
   ATR, the breakout bar's close within its range and whether it cleared the
