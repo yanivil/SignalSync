@@ -1,7 +1,8 @@
-# S&P 500 pattern scan — 2026-09-07 06:07
+# S&P 500 pattern scan — 2026-09-08 05:59
 
 Scanned 502 of 503 symbols (daily bars, last bar 2026-09-04). Min quality score 60. Breakouts older than the per-pattern limit are dropped (bars: Cup & Handle 3, Inverse Head & Shoulders 8, Bullish Wolfe Wave 8; H&S and Wolfe get 5 extra bars because their last pivot is only visible 5 bars after it prints). Rows with reward:risk below 1.0 are dropped. Watchlist rows whose pattern completed more than 60 bars ago are dropped (a breakout is reported whenever it comes).
 Data errors: 1
+Market: SPY 8.5 % above its SMA200, SMA50 > SMA200 (bull); VIX 14.5; 67% of 501 symbols above their SMA200.
 
 ## Confirmed breakouts (actionable): 1
 
@@ -21,19 +22,8 @@ Data errors: 1
 | BKR | Cup & Handle | 65.27 | 67.67 | 60.48 | 7.34 | 78.63 | 2.79 | 74 | - | - | close above SMA200, SMA50 > SMA200, SMA200 rising/flat | left rim 2026-06-04 @66.00, bottom 2026-07-02 @52.08 (depth 21%), right rim 2026-08-17 @65.44, handle low 2026-08-27 @60.87 (depth 7.0%), trigger 65.27 |
 | VRT | Inverse Head & Shoulders | 289.34 | 303.81 | 246.55 | 14.79 | 378.9 | 2.09 | 62 | - | - | close above SMA200, SMA50 > SMA200, SMA200 rising/flat | LS 2026-07-17 @272.93, head 2026-07-29 @220.92, RS 2026-08-24 @249.97, neckline 313.61->300.30 (now 289.34) |
 
-## Closed since the last report (2026-09-06 05:58): 10
+## Closed since the last report (2026-09-07 06:07): 0
 
-| Ticker | Pattern | Was | Outcome | Entry | Stop | Target | Detail |
-|---|---|---|---|---|---|---|---|
-| AFL | Inverse Head & Shoulders | WATCHLIST | DROPPED | 122.03 | 107.49 | 128.94 | no bars since the last report |
-| FOX | Cup & Handle | WATCHLIST | DROPPED | 59.37 | 55.44 | 68.54 | no bars since the last report |
-| HBAN | Cup & Handle | WATCHLIST | DROPPED | 17.76 | 16.75 | 20.73 | no bars since the last report |
-| KMB | Inverse Head & Shoulders | WATCHLIST | DROPPED | 109.58 | 93.86 | 115.29 | no bars since the last report |
-| LLY | Cup & Handle | WATCHLIST | DROPPED | 1181.04 | 1042.6 | 1480.66 | no bars since the last report |
-| MNST | Cup & Handle | WATCHLIST | DROPPED | 44.02 | 42.4 | 52.92 | no bars since the last report |
-| MSI | Inverse Head & Shoulders | WATCHLIST | DROPPED | 468.12 | 399.25 | 504.38 | no bars since the last report |
-| STE | Inverse Head & Shoulders | WATCHLIST | DROPPED | 225.94 | 214.22 | 249.72 | no bars since the last report |
-| TYL | Inverse Head & Shoulders | WATCHLIST | DROPPED | 367.82 | 325.98 | 403.33 | no bars since the last report |
-| WM | Inverse Head & Shoulders | WATCHLIST | DROPPED | 219.55 | 205.19 | 244.35 | no bars since the last report |
+_none_
 
 _Max buy = the lower of trigger + 5% and the open at which the risk to the stop reaches 1.5x the planned entry-to-stop distance: if the open is above it the setup no longer qualifies. R:R = (target - entry) / (entry - stop) at the reported entry; it shrinks with every session the entry drifts above the trigger. Age = bars since the breakout close / the limit after which the row is dropped (0 = broke out on the last bar). Heuristic scan, not advice. Entry = trigger level, or the breakout close when it is above the trigger (closes more than 5% above the trigger are dropped as chasing). Stop = structural level minus 0.25 ATR, treated as an intraday touch in the backtest; exiting on a close at or below it scored higher in replay. Entry is the last close: a trade happens at the next open, so re-check that the open is still within 5% of the trigger and recompute risk from the fill. Verify on a chart before trading._

@@ -1,6 +1,6 @@
 {
   "meta": {
-    "run_date": "2026-09-07 06:07",
+    "run_date": "2026-09-08 05:59",
     "universe": 503,
     "scanned": 502,
     "errors": 1,
@@ -20,12 +20,23 @@
     "min_reward_risk": 1.0,
     "max_wait_bars": 60,
     "max_buy_risk_mult": 1.5,
+    "market": {
+      "index": "SPY",
+      "as_of": "2026-09-04",
+      "index_close": 770.19,
+      "index_vs_sma200_pct": 8.5,
+      "index_sma50_vs_sma200_pct": 6.62,
+      "regime": "bull",
+      "vix": 14.53,
+      "breadth": 0.6707,
+      "breadth_symbols": 501
+    },
     "max_breakout_age_by_pattern": {
       "Cup & Handle": 3,
       "Inverse Head & Shoulders": 8,
       "Bullish Wolfe Wave": 8
     },
-    "previous_run": "2026-09-06 05:58",
+    "previous_run": "2026-09-07 06:07",
     "previous_profile": "tuned"
   },
   "signals": [
@@ -174,116 +185,5 @@
       "reward_risk": 2.09
     }
   ],
-  "closed": [
-    {
-      "ticker": "TYL",
-      "pattern": "Inverse Head & Shoulders",
-      "was": "WATCHLIST",
-      "since": "2026-09-04",
-      "entry": 367.82,
-      "stop": 325.98,
-      "target": 403.33,
-      "outcome": "DROPPED",
-      "detail": "no bars since the last report"
-    },
-    {
-      "ticker": "STE",
-      "pattern": "Inverse Head & Shoulders",
-      "was": "WATCHLIST",
-      "since": "2026-09-04",
-      "entry": 225.94,
-      "stop": 214.22,
-      "target": 249.72,
-      "outcome": "DROPPED",
-      "detail": "no bars since the last report"
-    },
-    {
-      "ticker": "AFL",
-      "pattern": "Inverse Head & Shoulders",
-      "was": "WATCHLIST",
-      "since": "2026-09-04",
-      "entry": 122.03,
-      "stop": 107.49,
-      "target": 128.94,
-      "outcome": "DROPPED",
-      "detail": "no bars since the last report"
-    },
-    {
-      "ticker": "MSI",
-      "pattern": "Inverse Head & Shoulders",
-      "was": "WATCHLIST",
-      "since": "2026-09-04",
-      "entry": 468.12,
-      "stop": 399.25,
-      "target": 504.38,
-      "outcome": "DROPPED",
-      "detail": "no bars since the last report"
-    },
-    {
-      "ticker": "HBAN",
-      "pattern": "Cup & Handle",
-      "was": "WATCHLIST",
-      "since": "2026-09-04",
-      "entry": 17.76,
-      "stop": 16.75,
-      "target": 20.73,
-      "outcome": "DROPPED",
-      "detail": "no bars since the last report"
-    },
-    {
-      "ticker": "MNST",
-      "pattern": "Cup & Handle",
-      "was": "WATCHLIST",
-      "since": "2026-09-04",
-      "entry": 44.02,
-      "stop": 42.4,
-      "target": 52.92,
-      "outcome": "DROPPED",
-      "detail": "no bars since the last report"
-    },
-    {
-      "ticker": "FOX",
-      "pattern": "Cup & Handle",
-      "was": "WATCHLIST",
-      "since": "2026-09-04",
-      "entry": 59.37,
-      "stop": 55.44,
-      "target": 68.54,
-      "outcome": "DROPPED",
-      "detail": "no bars since the last report"
-    },
-    {
-      "ticker": "WM",
-      "pattern": "Inverse Head & Shoulders",
-      "was": "WATCHLIST",
-      "since": "2026-09-04",
-      "entry": 219.55,
-      "stop": 205.19,
-      "target": 244.35,
-      "outcome": "DROPPED",
-      "detail": "no bars since the last report"
-    },
-    {
-      "ticker": "KMB",
-      "pattern": "Inverse Head & Shoulders",
-      "was": "WATCHLIST",
-      "since": "2026-09-04",
-      "entry": 109.58,
-      "stop": 93.86,
-      "target": 115.29,
-      "outcome": "DROPPED",
-      "detail": "no bars since the last report"
-    },
-    {
-      "ticker": "LLY",
-      "pattern": "Cup & Handle",
-      "was": "WATCHLIST",
-      "since": "2026-09-04",
-      "entry": 1181.04,
-      "stop": 1042.6,
-      "target": 1480.66,
-      "outcome": "DROPPED",
-      "detail": "no bars since the last report"
-    }
-  ]
+  "closed": []
 }
