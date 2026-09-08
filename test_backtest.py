@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 
 import numpy as np
@@ -69,11 +70,80 @@ def test_walk_forward_bars_limits_what_each_scan_sees(mini_universe, monkeypatch
     assert bt.walk_forward(mini_universe, days=3, horizon=5, bars=50) == [] and seen == []   # < 60 bars: skipped
 
 
+def test_row_features_match_hand_computation(mini_universe):
+    cup = mini_universe["CUP"]
+    (s,) = scan.detect_cup_and_handle(cup, "CUP")
+    atr_last = float(scan.atr(cup).iloc[-1])
+    f = bt.row_features(cup, s, atr_last)
+    assert set(f) == set(bt.FEATURE_KEYS)
+    close = cup["Close"]
+    s200, s50 = close.rolling(200).mean(), close.rolling(50).mean()
+    assert f["close_vs_sma200"] == round(close.iloc[-1] / s200.iloc[-1] - 1, 4)
+    assert f["sma50_vs_sma200"] == round(s50.iloc[-1] / s200.iloc[-1] - 1, 4)
+    assert f["sma200_slope"] == round(s200.iloc[-1] / s200.iloc[-1 - bt.SLOPE_LOOKBACK] - 1, 4)
+    assert f["dist_sma200_atr"] == round((close.iloc[-1] - s200.iloc[-1]) / atr_last, 3)
+    assert f["stop_atr"] == round((s.entry - s.stop) / atr_last, 3) > 0
+    assert f["target_atr"] == round((s.target - s.entry) / atr_last, 3) > 0
+    anchor = cup.index.get_loc(pd.Timestamp(re.search(r"handle low (\S+)", s.notes)[1]))
+    assert f["wait_bars"] == len(cup) - 1 - s.bars_since_break - anchor >= 1   # the handle low precedes the break
+    # Too little history for the averages: those features are None, the ATR-based ones and the wait remain.
+    short = bt.row_features(cup.iloc[-150:], s, atr_last)
+    assert short["close_vs_sma200"] is None and short["sma200_slope"] is None and short["dist_sma200_atr"] is None
+    assert short["sma50_vs_sma200"] is None
+    assert short["stop_atr"] == f["stop_atr"] and short["wait_bars"] == f["wait_bars"]
+    # No target (a Wolfe whose lines do not converge) and a zero ATR: nothing raises, nothing is invented.
+    no_target = scan.Signal("T", "Bullish Wolfe Wave", "CONFIRMED", 100.0, 95.0, 5.0, None, 70, 100.0, "d", 0,
+                            None, "", "5 2020-01-01 @95.00")
+    g = bt.row_features(cup, no_target, 0.0)
+    assert g["target_atr"] is None and g["stop_atr"] is None and g["wait_bars"] is None   # anchor date not in hist
+
+
+def test_walk_forward_rows_carry_replay_features(mini_universe):
+    rows = bt.walk_forward(mini_universe, days=5, horizon=10)
+    assert rows
+    for r in rows:
+        assert set(bt.FEATURE_KEYS) <= set(r)
+        assert r["stop_atr"] > 0 and r["wait_bars"] >= 1 and r["close_vs_sma200"] is not None
+
+
 def _bars(*rows):
     """rows: (open, high, low, close) per day."""
     idx = pd.bdate_range("2026-01-05", periods=len(rows))
     return pd.DataFrame({"Open": [r[0] for r in rows], "High": [r[1] for r in rows],
                          "Low": [r[2] for r in rows], "Close": [r[3] for r in rows]}, index=idx)
+
+
+def test_horizon_table_medians_and_shares():
+    # One signal filled at 100 with stop 95 and target 110; the high rises one point a day (101, 102, ...),
+    # the low never reaches the stop: open at 5 bars (high 105), target at 10 bars (high 110).
+    bars = _bars(*[(100 + i, 101 + i, 99 + i, 100.5 + i) for i in range(12)])
+    row = {"ticker": "T", "pattern": "Cup & Handle", "scan_day": "2026-01-02", "fill": 100.0, "stop": 95.0,
+           "target": 110.0, "atr": 2.0, "outcome": "open", "r": 0.1}
+    t = {(x["slice"], x["horizon"]): x for x in bt.horizon_table([row], {"T": bars}, horizons=(5, 10))}
+    assert set(t) == {("all", 5), ("all", 10), ("Cup & Handle", 5), ("Cup & Handle", 10)}
+    h5, h10 = t[("all", 5)], t[("all", 10)]
+    assert (h5["n"], h5["median_mfe"], h5["median_mae"]) == (1, 0.05, -0.01)
+    assert (h5["median_mfe_atr"], h5["median_mae_atr"]) == (2.5, -0.5)
+    assert (h5["target"], h5["stop"], h5["open"]) == (0.0, 0.0, 1.0)
+    assert (h10["median_mfe"], h10["target"], h10["open"]) == (0.1, 1.0, 0.0)
+    assert bt.horizon_table([{**row, "outcome": "gap"}], {"T": bars}) == []       # rows not traded are skipped
+    assert bt.horizon_table([row], {"T": bars.iloc[:0]}) == []                    # no bars after the scan day
+
+
+def test_feature_buckets_use_fixed_right_inclusive_edges_and_count_missing():
+    def row(vr, r):
+        return {"ticker": "T", "pattern": "P", "scan_day": "2026-01-05", "outcome": "target" if r > 0 else "stop",
+                "r": r, "volume_ratio": vr, "score": 70, "mfe": 0.0, "mae": 0.0, "success5": None}
+    rows = [row(0.5, 1.0), row(0.8, -1.0), row(1.2, 2.0), row(None, 1.0), {**row(9.0, 1.0), "outcome": "gap"}]
+    fb = {(b["key"], b["bucket"]): b for b in bt.feature_buckets(rows)}
+    vol = {k[1]: v for k, v in fb.items() if k[0] == "volume_ratio"}
+    assert set(vol) == {"<= 0.8x", "1.0-1.3x"}                                  # empty buckets are omitted
+    assert vol["<= 0.8x"]["n"] == 2 and vol["<= 0.8x"]["mean_r"] == 0.0          # 0.8 falls in the closed upper edge
+    assert vol["1.0-1.3x"]["n"] == 1 and vol["1.0-1.3x"]["mean_r"] == 2.0 and vol["1.0-1.3x"]["hit_rate"] == 1.0
+    assert all(b["missing"] == 1 for b in vol.values())                          # the row without a ratio
+    assert all(b["feature"] == bt.FEATURE_BUCKETS["volume_ratio"][0] for b in vol.values())
+    assert not any(k[0] == "close_vs_sma200" for k in fb)                        # no row has that feature
+    assert not any(k[0] == "bars_since_break" for k in fb)                       # key absent entirely: no rows
 
 
 def test_excursions_and_chart_book_success():
@@ -144,9 +214,15 @@ def test_split_windows_and_report_sections(mini_universe):
     assert [s["label"] for s in sections] == [w[0] for w in wins]
     assert sections[0]["stats"]["overall"]["signals"] == len(rows) and len(sections[0]["grid"]) == len(bt.GRID)
     assert sections[2]["stats"]["overall"]["signals"] == len(wins[2][1])
+    traded = [r for r in rows if r["outcome"] in bt.TRADED]
+    assert sections[0]["horizons"] and sections[0]["horizons"][0]["slice"] == "all"
+    assert {b["key"] for b in sections[0]["features"]} <= set(bt.FEATURE_BUCKETS)
+    assert sum(b["n"] for b in sections[0]["features"] if b["key"] == "stop_atr") == len(traded)
     md = bt.render(rows, sections, 5, 10)
     assert "## All sessions" in md and f"## Before {split}" in md and f"## From {split}" in md
     assert md.count("### Stop / target variants") == 3 and "judged on the other" in md
+    assert "### Excursions by horizon (all sessions)" in md and "### Outcome by feature (all sessions)" in md
+    assert "| entry minus stop, in ATR |" in md
     assert "## Signals" in md
 
 
