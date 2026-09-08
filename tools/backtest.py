@@ -43,6 +43,10 @@ Method:
   (handle low, right shoulder, point 5) to the breakout.  Nothing is added to
   ``scan.Signal`` or the nightly report; the features exist to be tested
   against outcomes.
+* Per signal it also records the **market context at the scan day** from
+  ``scan.market_series``: the SPY regime (close and SMA50 against the SMA200),
+  the VIX and the breadth of the universe.  The summaries add a per-regime
+  slice; VIX and breadth join the feature buckets.  No rule reads any of it.
 * Every summary carries, next to hit rate and mean R: median R, standard
   deviation, total R, the deepest drawdown of the cumulative R curve (1 R per
   trade, in scan order), a 95 % bootstrap interval of the mean R and the
@@ -90,7 +94,7 @@ import os
 import re
 import sys
 import time
-from typing import Any, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -132,9 +136,14 @@ FEATURE_BUCKETS: Dict[str, Tuple[str, Sequence[float], Sequence[str]]] = {
                   ("<= 10", "11-20", "21-40", "41-60", "> 60")),
     "bars_since_break": ("breakout age when first reported", (-INF, 0, 1, 3, 8, INF),
                          ("0", "1", "2-3", "4-8", "> 8")),
+    "vix": ("VIX at the scan day", (-INF, 15.0, 20.0, 25.0, INF), ("<= 15", "15-20", "20-25", "> 25")),
+    "breadth": ("share of the universe above its SMA200", (-INF, 0.4, 0.55, 0.7, INF),
+                ("<= 40%", "40-55%", "55-70%", "> 70%")),
 }
 FEATURE_KEYS = ("close_vs_sma200", "sma50_vs_sma200", "sma200_slope", "dist_sma200_atr", "stop_atr",
                 "target_atr", "wait_bars")  # what row_features adds to a row
+MARKET_KEYS = ("regime", "vix", "breadth", "index_vs_sma200_pct")  # what the market context adds to a row
+REGIMES = ("bull", "neutral", "bear")
 
 
 def variant_target(row: dict, mode: str) -> Optional[float]:
@@ -249,6 +258,14 @@ def row_features(hist: pd.DataFrame, s: scan.Signal, atr_last: float) -> Dict[st
     return out
 
 
+def _market_at(market: Optional[Mapping[str, pd.Series]], day: Any) -> Dict[str, Any]:
+    """The ``MARKET_KEYS`` of a row at ``day`` from ``scan.market_series`` output; all ``None`` without it."""
+    if not market:
+        return {k: None for k in MARKET_KEYS}
+    ctx = scan.market_context(market, day)
+    return {k: ctx.get(k) for k in MARKET_KEYS}
+
+
 # --------------------------------------------------------------------------- #
 # Statistics: drawdown, month-block bootstrap, windows
 # --------------------------------------------------------------------------- #
@@ -336,20 +353,21 @@ def grid(rows: Sequence[dict], data: Dict[str, pd.DataFrame], horizon: int) -> L
     return out
 
 
-def ablation(data: Dict[str, pd.DataFrame], days: int, horizon: int, bars: Optional[int] = None) -> List[dict]:
+def ablation(data: Dict[str, pd.DataFrame], days: int, horizon: int, bars: Optional[int] = None,
+             market: Optional[Mapping[str, pd.Series]] = None) -> List[dict]:
     """Leave-one-rule-out over the spec profile.
 
     Replays the active (spec) profile, then once per key in
     ``RULE_PROFILES["legacy"]`` with only that key set to its legacy value.
     :returns: one summary row per replay: ``{"rule", "value", "delta", **breakdown(...)["overall"]}``.
     """
-    base = breakdown(walk_forward(data, days, horizon, bars=bars))["overall"]
+    base = breakdown(walk_forward(data, days, horizon, bars=bars, market=market))["overall"]
     rows = [{"rule": "spec (all rules)", "value": "-", "delta": 0, **base}]
     for key, legacy_value in scan.RULE_PROFILES["legacy"].items():
         saved = getattr(scan, key)
         setattr(scan, key, legacy_value)
         try:
-            s = breakdown(walk_forward(data, days, horizon, bars=bars))["overall"]
+            s = breakdown(walk_forward(data, days, horizon, bars=bars, market=market))["overall"]
         finally:
             setattr(scan, key, saved)
         rows.append({"rule": key, "value": str(legacy_value), "delta": s["signals"] - base["signals"], **s})
@@ -388,18 +406,19 @@ def apply_override(item: str) -> Tuple[str, Any]:
 
 
 def profile_pass(data: Dict[str, pd.DataFrame], days: int, horizon: int, name: str,
-                 bars: Optional[int] = None) -> dict:
+                 bars: Optional[int] = None, market: Optional[Mapping[str, pd.Series]] = None) -> dict:
     """Second full walk-forward under rule profile ``name`` (the active profile is restored).
 
     :returns: ``{"profile", "stats", "rows"}`` with the same ``breakdown`` slices as the main report.
     """
     with rule_profile(name):
-        rows = walk_forward(data, days, horizon, bars=bars)
+        rows = walk_forward(data, days, horizon, bars=bars, market=market)
     return {"profile": name, "stats": breakdown(rows), "rows": rows}
 
 
 def walk_forward(data: Dict[str, pd.DataFrame], days: int, horizon: int,
-                 detectors: Optional[Sequence] = None, bars: Optional[int] = None) -> List[dict]:
+                 detectors: Optional[Sequence] = None, bars: Optional[int] = None,
+                 market: Optional[Mapping[str, pd.Series]] = None) -> List[dict]:
     """Replay the scanner over the last ``days`` sessions and score each first-seen signal.
 
     :param data: ``{symbol: OHLCV frame}`` as returned by ``download_history``.
@@ -408,10 +427,12 @@ def walk_forward(data: Dict[str, pd.DataFrame], days: int, horizon: int,
     :param detectors: Subset of detectors to run (default: all).
     :param bars: Bars of history each scan sees (default: everything up to the
         day).  500 mimics the nightly job's 2y download in a longer replay.
+    :param market: ``scan.market_series`` output; puts the ``MARKET_KEYS`` (regime,
+        VIX, breadth, index vs SMA200) at the scan day on every row, ``None`` without it.
     :returns: One dict per first-seen CONFIRMED signal with the signal fields plus
-        ``fill``, ``outcome``, ``bars``, ``exit``, ``r``, the :func:`row_features`
-        (and for cups the parsed ``cup_bottom`` / ``cup_trigger`` for the
-        breakout-level target variant).  ``outcome`` is ``target`` / ``stop`` /
+        ``fill``, ``outcome``, ``bars``, ``exit``, ``r``, the :func:`row_features`,
+        the market context (and for cups the parsed ``cup_bottom`` / ``cup_trigger``
+        for the breakout-level target variant).  ``outcome`` is ``target`` / ``stop`` /
         ``open`` for traded rows, ``gap`` (open above Max buy) or ``below_stop``
         (open at or below the stop) for rows not traded, ``no_data`` without a
         bar after the scan day.
@@ -423,6 +444,7 @@ def walk_forward(data: Dict[str, pd.DataFrame], days: int, horizon: int,
     seen: Dict[tuple, dict] = {}
     not_traded = dict(exit=None, r=None, mfe=None, mae=None, success5=None)
     for d in scan_days:
+        ctx = _market_at(market, d)
         for sym, df in data.items():
             hist = df[df.index <= d]
             if bars is not None:
@@ -439,7 +461,7 @@ def walk_forward(data: Dict[str, pd.DataFrame], days: int, horizon: int,
                 after = df[df.index > d]
                 atr_last = round(float(scan.atr(hist).iloc[-1]), 4)
                 row = {**scan.asdict(s), "scan_day": str(d.date()), "atr": atr_last,
-                       "cup_bottom": None, "cup_trigger": None, **row_features(hist, s, atr_last)}
+                       "cup_bottom": None, "cup_trigger": None, **row_features(hist, s, atr_last), **ctx}
                 if s.pattern == "Cup & Handle":
                     m = re.search(r"bottom \S+ @([\d.]+).*trigger ([\d.]+)", s.notes)
                     if m:
@@ -489,14 +511,18 @@ def summarise_rows(sub: Sequence[dict]) -> dict:
 
 
 def breakdown(rows: Sequence[dict]) -> dict:
-    """:func:`summarise_rows` overall, per pattern and per score bucket."""
-    out = {"overall": summarise_rows(rows), "by_pattern": {}, "by_score": {}}
+    """:func:`summarise_rows` overall, per pattern, per score bucket and per market regime at the scan day."""
+    out = {"overall": summarise_rows(rows), "by_pattern": {}, "by_score": {}, "by_regime": {}}
     for p in sorted({r["pattern"] for r in rows}):
         out["by_pattern"][p] = summarise_rows([r for r in rows if r["pattern"] == p])
     for lo, hi in SCORE_BUCKETS:
         sub = [r for r in rows if lo <= r["score"] <= hi]
         if sub:
             out["by_score"][f"{lo}-{hi}"] = summarise_rows(sub)
+    for regime in REGIMES:
+        sub = [r for r in rows if r.get("regime") == regime]
+        if sub:
+            out["by_regime"][regime] = summarise_rows(sub)
     return out
 
 
@@ -626,6 +652,7 @@ def _summary_table(stats: dict, prefix: str = "") -> List[str]:
     lines = [SUMMARY_HEADER, _line(f"{prefix}all", stats["overall"])]
     lines += [_line(f"{prefix}{p}", s) for p, s in stats["by_pattern"].items()]
     lines += [_line(f"{prefix}score {b}", s) for b, s in stats["by_score"].items()]
+    lines += [_line(f"{prefix}regime {g}", s) for g, s in stats.get("by_regime", {}).items()]
     return lines
 
 
@@ -745,9 +772,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
     log.info("downloaded %d symbols in %.0fs; replaying %d sessions%s", len(data), time.time() - t0, args.days,
              f", each scan sees {args.bars} bars" if args.bars else "")
+    market_frames: Dict[str, pd.DataFrame] = {}
+    try:  # informational context: a failure leaves the market fields empty, never stops the replay
+        market_frames = scan.download_history([scan.MARKET_INDEX, scan.MARKET_VOL], period=args.period)
+    except Exception as exc:
+        log.warning("market context unavailable: %s", exc)
+    market = scan.market_series(data, market_frames.get(scan.MARKET_INDEX), market_frames.get(scan.MARKET_VOL))
+    log.info("market context: %s", ", ".join(sorted(market_frames)) or "no index / volatility data (breadth only)")
     if args.ablate:
         scan.apply_profile("spec")
-        table = ablation(data, args.days, args.horizon, args.bars)
+        table = ablation(data, args.days, args.horizon, args.bars, market)
         log.info("ablation done in %.0fs: %d replays", time.time() - t0, len(table))
         print(render_ablation(table, args.days, args.horizon))
         if args.json:
@@ -755,12 +789,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 json.dump({"days": args.days, "horizon": args.horizon, "bars": args.bars, "ablation": table},
                           fh, indent=2)
         return 0
-    rows = walk_forward(data, args.days, args.horizon, bars=args.bars)
+    rows = walk_forward(data, args.days, args.horizon, bars=args.bars, market=market)
     log.info("replay done in %.0fs: %d first-seen confirmed signals", time.time() - t0, len(rows))
     other_rows = other_name = None
     if args.grid:
         other_name = "legacy" if scan.ACTIVE_PROFILE == "spec" else "spec"
-        other_rows = profile_pass(data, args.days, args.horizon, other_name, args.bars)["rows"]
+        other_rows = profile_pass(data, args.days, args.horizon, other_name, args.bars, market)["rows"]
         log.info("%s-profile pass done in %.0fs: %d first-seen confirmed signals",
                  other_name, time.time() - t0, len(other_rows))
     sections = report_sections(rows, args.days, args.horizon, args.split, data, args.grid, other_rows, other_name)
@@ -771,6 +805,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         with open(args.json, "w", encoding="utf-8") as fh:
             json.dump({"days": args.days, "horizon": args.horizon, "profile": scan.ACTIVE_PROFILE,
                        "min_score": scan.MIN_SCORE, "bars": args.bars, "split": args.split,
+                       "market_symbols": sorted(market_frames),
                        "stats": pooled["stats"], "features": pooled["features"], "horizons": pooled["horizons"],
                        "grid": pooled["grid"],
                        "other_profile": ({"profile": other_name, "stats": pooled["other"]["stats"], "rows": other_rows}

@@ -42,6 +42,10 @@ An external review of the 2026-09-04 report (HAL entered late at R:R 1.16 on a 1
 
 Reading: a reward:risk minimum trades hit rate for payoff almost exactly (small targets are hit more often and pay less), so it is set at 1.0, where it removes only rows whose target is below one risk unit at no cost in mean R. A patience limit on *breakouts* is wrong in every variant: the longer a base waited, the better its eventual breakout did. The limit therefore applies to watchlist rows only, where it costs nothing (a breakout is reported whenever it comes) and where 97 % of the year's eventual breakouts would have survived a 60-bar limit anyway.
 
+### Market context (2026-09-08)
+
+The report header and every backtest row carry the SPY regime (close and SMA50 against the SMA200), the VIX and the breadth of the universe, and the backtest summaries add a per-regime slice with VIX and breadth among the feature buckets. In the two-year local replay, tuned signals scanned in a non-bull SPY regime ran +0.68 R on 75 rows against +0.17 on 237 bull-regime rows, and rows scanned at a VIX below 15 were negative in both years (−0.55 on 16, −0.19 on 19). The non-bull rows all came from March to June 2025, one episode, so nothing gates on the context; issues #93 and #101 track the evidence and a rule would need the multi-year replay of #95.
+
 **The nightly scan runs `--profile tuned`**, chosen on this evidence on 2026-09-05; the default in code stays `spec`. Change the flag in `.github/workflows/daily-scan.yml` to switch. The cup entry stays at the handle peak: a rim-B entry replayed at 19 cup signals and +0.17 R against 20 and +0.23 R. The grid also shows a close-based stop (exit on the first close at or below the stop) lifting tuned's mean R to +0.35 at a 52 % hit rate; the report's stop level is unchanged, that is an execution choice.
 
 ## CLI
@@ -71,6 +75,7 @@ Reading: a reward:risk minimum trades hit rate for payoff almost exactly (small 
 | `LAST_BAR_MIN_FRACTION` | 0.5 | share of symbols that must have a complete bar for it to be `meta.last_bar` | | |
 | `FILL_CLOSE_MIN_AGE` | 1 h | how old the last trade must be to count as the closing print | | |
 | `CONSTITUENTS_COMMIT` | 2026-08-20 hash | pinned upstream commit of the constituent CSV | | |
+| `MARKET_INDEX` / `MARKET_VOL` | `SPY` / `^VIX` | the symbols behind `meta.market` (regime, VIX); breadth comes from the universe itself | informational: no rule reads the context | |
 
 ## Volume and risk (all patterns)
 

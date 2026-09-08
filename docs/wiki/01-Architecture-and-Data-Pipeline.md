@@ -48,6 +48,10 @@ There is **no persistent price cache**. Every run downloads the full history for
 4. **NaN handling** — rows without a close are dropped. Trailing rows dropped this way (Yahoo's not-yet-published bar) are recorded in `df.attrs["partial_bars"]`; interior holes are dropped silently. Detectors are positional, so a missing bar shifts nothing except pivot windows.
 5. **Minimum history** — fewer than 60 remaining bars → symbol skipped (counted in `meta.errors`).
 
+### Market context
+
+After the universe, two more symbols go through the same download and cleaning: `MARKET_INDEX` (SPY) and `MARKET_VOL` (^VIX), cut to the scanned bar. Together with the breadth of the universe itself (the share of scanned symbols whose close is above their own 200-bar SMA, among those with 200 bars) they form `meta.market`, one line in the report header ("Market: SPY 4.2 % above its SMA200, SMA50 > SMA200 (bull); VIX 17.2; 64% of 502 symbols above their SMA200.") and the regime, VIX and breadth on every backtest row. The regime is `bull` when the close and the SMA50 are both above the SMA200, `bear` when both are below, `neutral` otherwise. Nothing else reads any of it: the context is recorded to be tested against outcomes (issues #93 and #101). A failed fetch leaves the fields `null` and the line names what is missing; it never fails the run.
+
 ## 3. Which bar is scanned
 
 `align_last_bar(data, min_fraction=0.5)`
@@ -72,7 +76,10 @@ Yahoo publishes the newest daily bar per symbol at different times (volume first
           "profile": "spec", "min_score": 60, "max_breakout_age": 3,
           "max_breakout_age_by_pattern": {"Cup & Handle": 3, "Inverse Head & Shoulders": 8, "Bullish Wolfe Wave": 8},
           "min_reward_risk": null, "max_wait_bars": null, "max_buy_risk_mult": 1.5,
-          "previous_run": "2026-09-03 08:25", "previous_profile": "spec"},
+          "previous_run": "2026-09-03 08:25", "previous_profile": "spec",
+          "market": {"index": "SPY", "as_of": "2026-09-03", "index_close": 645.12, "index_vs_sma200_pct": 4.2,
+                     "index_sma50_vs_sma200_pct": 2.1, "regime": "bull", "vix": 17.2,
+                     "breadth": 0.64, "breadth_symbols": 502}},
  "signals": [{"ticker": "CL", "pattern": "Bullish Wolfe Wave", "status": "CONFIRMED",
               "entry": 90.09, "stop": 88.67, "risk_pct": 1.58, "target": 107.98, "score": 84,
               "last_close": 90.09, "last_date": "2026-09-03", "bars_since_break": 8,
@@ -93,6 +100,8 @@ Yahoo publishes the newest daily bar per symbol at different times (volume first
 | `notes` | anchor dates and levels used by the detector (parseable, see tests); "breakout without volume (x.xx×)" when a breakout was watch-listed for lack of volume |
 | `max_buy` | the open above which the setup no longer qualifies: the lower of trigger × 1.05 (the runaway rule applied to the open) and `stop + MAX_BUY_RISK_MULT × (entry − stop)`, the fill at which the risk reaches 1.5× the planned risk. The second cap binds for tight structural stops (Wolfe point 5, shallow handles); the first for wide ones (H&S shoulders) |
 | `reward_risk` | `(target − entry) / (entry − stop)` at the reported entry, 2 decimals; `null` without a target. Rows below `MIN_REWARD_RISK` (when set) are not reported. It falls as the entry drifts above the trigger, so a late confirmed row can show a poor R:R on an otherwise clean pattern |
+
+`meta.market` is the market context at `last_bar`: the index ETF's close, its distance from its SMA200 and its SMA50's distance from the SMA200 in percent, the regime those name, the VIX close, and the breadth over `breadth_symbols`; each `null` where unavailable. It is informational and reproduced on every backtest row.
 
 Signals are sorted `CONFIRMED` first, then by score descending. `output/report.md` renders the same rows as two Markdown tables (Ticker, Pattern, Entry, Max buy, Stop, Risk %, Target, R:R, Score, Age, Vol×, Trend, Details) with a header stating the scanned bar, effective age limits, skipped/lagging counts and data errors. **Age** is `bars_since_break / limit`, e.g. `1/3` for a cup that broke out yesterday and will be dropped after two more sessions; `-` for watchlist rows.
 

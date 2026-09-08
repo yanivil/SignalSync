@@ -5,6 +5,19 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Added (market context, #93)
+- `meta.market` and one report header line: the SPY close against its
+  SMA200 and its SMA50 against the SMA200, the regime those name (bull, bear,
+  neutral), the VIX close, and the breadth of the universe (share of scanned
+  symbols above their own SMA200). SPY and ^VIX go through the same download
+  and cleaning as the universe, cut to the scanned bar; a failed fetch leaves
+  the fields null and the line says what is missing. Nothing gates on it.
+- Backtest rows carry the regime, VIX, breadth and SPY-vs-SMA200 at the scan
+  day (`scan.market_series`, shared with the scan so both define the context
+  the same way); the summaries add a per-regime slice, and VIX and breadth
+  join the feature buckets. Evidence so far: non-bull-regime signals ran
+  +0.68 R against +0.17 in the two-year replay, but from one episode.
+
 ### Added (backtest excursions by horizon and outcome by feature, #92)
 - Each backtest window gains an excursions table (median MFE and MAE within
   5 / 10 / 20 / 40 / 60 bars, in percent and in ATR, with the share of signals

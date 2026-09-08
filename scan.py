@@ -102,6 +102,13 @@ BREAKOUT_AGE_LAG = {
 # handful of symbols carry a complete newest bar while the rest do not.
 LAST_BAR_MIN_FRACTION = 0.5
 FILL_CLOSE_MIN_AGE = dt.timedelta(hours=1)   # last trade must be this old to count as the closing print
+# Market context, informational only (no rule reads it): the index ETF whose close and SMA50
+# against its SMA200 name the regime, the volatility index, and the breadth of the scanned
+# universe itself.  Added 2026-09-08 after an external review: the two-year replay found signals
+# scanned in non-bull regimes and at VIX >= 15 doing better, but on one episode, so the context
+# is recorded on every report and backtest row to be tested, not gated on (issues #93, #101).
+MARKET_INDEX = "SPY"
+MARKET_VOL = "^VIX"
 
 # --------------------------------------------------------------------------- #
 # Pattern rules.  The values below are the "spec" profile (docs/wiki/02 and the
@@ -675,6 +682,101 @@ def align_last_bar(data: Dict[str, pd.DataFrame], min_fraction: float = LAST_BAR
         "last_bar_histogram": hist,
     }
     return aligned, info
+
+
+# --------------------------------------------------------------------------- #
+# Market context (informational: recorded, never gated on)
+# --------------------------------------------------------------------------- #
+def market_series(data: Mapping[str, pd.DataFrame], index_df: Optional[pd.DataFrame] = None,
+                  vol_df: Optional[pd.DataFrame] = None) -> Dict[str, pd.Series]:
+    """Per-date market context: breadth of the universe, the index regime and the volatility level.
+
+    * ``breadth``: share of symbols whose close is above their own 200-bar SMA
+      on that date, among the symbols that have 200 bars by then
+      (``breadth_symbols``).  Each symbol's SMA is positional on its own bars,
+      like the detectors' averages.
+    * ``index_close``, ``index_vs_sma200_pct``, ``index_sma50_vs_sma200_pct``,
+      ``regime``: the index ETF's close against its SMA200 and its SMA50 against
+      the SMA200, in percent, and the state they name -- ``bull`` (both above),
+      ``bear`` (both below), ``neutral`` otherwise; undefined before 200 bars.
+    * ``vix``: the volatility index close.
+
+    Shared by the scan (values at the last bar) and the backtest (values at each
+    scan day), so both define the context the same way.  Series that cannot be
+    built (no frame) are simply absent.
+
+    Complexity: O(symbols * bars).
+    """
+    out: Dict[str, pd.Series] = {}
+    if data:
+        above, valid = {}, {}
+        for sym, df in data.items():
+            c = df["Close"]
+            sma = c.rolling(200, min_periods=200).mean()
+            valid[sym] = sma.notna()
+            above[sym] = (c > sma) & sma.notna()
+        v = pd.DataFrame(valid).fillna(False).sort_index()
+        a = pd.DataFrame(above).fillna(False).sort_index()
+        n = v.sum(axis=1)
+        out["breadth_symbols"] = n
+        out["breadth"] = (a.sum(axis=1) / n.where(n > 0)).round(4)
+    if index_df is not None and len(index_df):
+        c = index_df["Close"]
+        s200 = c.rolling(200, min_periods=200).mean()
+        s50 = c.rolling(50, min_periods=50).mean()
+        out["index_close"] = c.round(2)
+        out["index_vs_sma200_pct"] = ((c / s200 - 1) * 100).round(2)
+        out["index_sma50_vs_sma200_pct"] = ((s50 / s200 - 1) * 100).round(2)
+        state = np.where((c > s200) & (s50 > s200), "bull",
+                         np.where((c < s200) & (s50 < s200), "bear", "neutral"))
+        out["regime"] = pd.Series(state, index=c.index, dtype=object).where(s200.notna() & s50.notna())
+    if vol_df is not None and len(vol_df):
+        out["vix"] = vol_df["Close"].round(2)
+    return out
+
+
+def market_context(series: Mapping[str, pd.Series], as_of: Any) -> Dict[str, Any]:
+    """The :func:`market_series` values at the last date on or before ``as_of``, JSON-ready.
+
+    A missing series, a date before it starts, or an undefined value gives
+    ``None``; nothing raises.  ``index`` names the ETF and ``as_of`` the date asked for.
+    """
+    ts = pd.Timestamp(as_of)
+
+    def at(key: str) -> Any:
+        s = series.get(key)
+        if s is None or len(s) == 0:
+            return None
+        s = s[s.index <= ts]
+        if len(s) == 0:
+            return None
+        v = s.iloc[-1]
+        if not isinstance(v, str) and pd.isna(v):
+            return None
+        return v.item() if hasattr(v, "item") else v
+
+    return {"index": MARKET_INDEX, "as_of": str(ts.date()), "index_close": at("index_close"),
+            "index_vs_sma200_pct": at("index_vs_sma200_pct"),
+            "index_sma50_vs_sma200_pct": at("index_sma50_vs_sma200_pct"), "regime": at("regime"),
+            "vix": at("vix"), "breadth": at("breadth"), "breadth_symbols": at("breadth_symbols")}
+
+
+def market_line(m: Optional[Mapping[str, Any]]) -> str:
+    """One report line for ``meta.market``; whatever is missing is left out, nothing at all reads ``n/a``."""
+    if not m:
+        return "Market context: n/a."
+    parts = []
+    rel, s50 = m.get("index_vs_sma200_pct"), m.get("index_sma50_vs_sma200_pct")
+    if rel is not None and s50 is not None:
+        parts.append(f"{m.get('index', MARKET_INDEX)} {abs(rel):.1f} % {'above' if rel >= 0 else 'below'} its "
+                     f"SMA200, SMA50 {'>' if s50 >= 0 else '<'} SMA200 ({m.get('regime') or 'n/a'})")
+    elif m.get("index_close") is not None:
+        parts.append(f"{m.get('index', MARKET_INDEX)} {m['index_close']} (SMA200 n/a)")
+    if m.get("vix") is not None:
+        parts.append(f"VIX {m['vix']:.1f}")
+    if m.get("breadth") is not None:
+        parts.append(f"{m['breadth']:.0%} of {m.get('breadth_symbols')} symbols above their SMA200")
+    return "Market: " + "; ".join(parts) + "." if parts else "Market context: n/a."
 
 
 # --------------------------------------------------------------------------- #
@@ -1609,6 +1711,7 @@ def render_markdown(signals: List[Signal], meta: Mapping[str, Any],
                      f"{meta.get('last_bar')} and were scanned on their own last bar.")
     if meta.get("errors"):
         lines.append(f"Data errors: {meta['errors']}")
+    lines.append(market_line(meta.get("market")))
     lines.append("")
     for status, title in (("CONFIRMED", "Confirmed breakouts (actionable)"),
                           ("WATCHLIST", "Watchlist (pattern complete, waiting for a close above trigger)")):
@@ -1714,6 +1817,19 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                  bar_info["skipped_bar"], bar_info["skipped_bar_complete"],
                  bar_info["skipped_bar_partial"])
 
+    # Market context: two more symbols through the same pipeline, cut to the scanned bar.
+    # Informational, so a failure here logs and leaves the fields empty; it never stops the scan.
+    market_frames: Dict[str, pd.DataFrame] = {}
+    try:
+        market_frames = download_history([MARKET_INDEX, MARKET_VOL], period=args.period)
+    except Exception as exc:
+        log.warning("market context unavailable: %s", exc)
+    cutoff = pd.Timestamp(bar_info["last_bar"])
+    idx_df, vol_df = market_frames.get(MARKET_INDEX), market_frames.get(MARKET_VOL)
+    market = market_context(market_series(data, idx_df[idx_df.index <= cutoff] if idx_df is not None else None,
+                                          vol_df[vol_df.index <= cutoff] if vol_df is not None else None), cutoff)
+    log.info(market_line(market))
+
     signals: List[Signal] = []
     for sym, df in data.items():
         signals.extend(scan_symbol(sym, df))
@@ -1724,7 +1840,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             **bar_info,
             "profile": ACTIVE_PROFILE, "min_score": MIN_SCORE, "max_breakout_age": MAX_BREAKOUT_AGE,
             "min_reward_risk": MIN_REWARD_RISK, "max_wait_bars": MAX_WAIT_BARS,
-            "max_buy_risk_mult": MAX_BUY_RISK_MULT,
+            "max_buy_risk_mult": MAX_BUY_RISK_MULT, "market": market,
             "max_breakout_age_by_pattern": {p: max_breakout_age(p) for p in BREAKOUT_AGE_LAG}}
     os.makedirs(args.out_dir, exist_ok=True)
     out_path = os.path.join(args.out_dir, "signals.json")

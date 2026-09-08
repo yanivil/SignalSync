@@ -177,6 +177,11 @@ def test_end_to_end_mini_universe(tmp_path, universe_csv, fake_yfinance, mini_un
         if s["target"] is not None:                                            # R:R = (target-entry)/(entry-stop)
             assert s["reward_risk"] == pytest.approx((s["target"] - s["entry"]) / (s["entry"] - s["stop"]), abs=0.01)
     assert "## Closed since the last report" in report and data["closed"] == []   # first run: nothing to close
+    # No index or volatility frames in this fake: the context degrades to breadth alone, never to a failure.
+    m = meta["market"]
+    assert m["regime"] is None and m["vix"] is None and m["index_close"] is None
+    assert m["breadth_symbols"] == 5 and 0 <= m["breadth"] <= 1 and m["as_of"] == END
+    assert f"Market: {m['breadth']:.0%} of 5 symbols above their SMA200." in report
     for s in signals:
         assert f"| {s['ticker']} | {s['pattern']} | {s['entry']} | {s['max_buy']} | {s['stop']} |" in report
     assert f"{scan.MAX_RUNAWAY:.0%} above the trigger" in report   # footer states the real rule
@@ -270,6 +275,72 @@ def test_end_to_end_exit_code_2_when_nothing_downloads(tmp_path, universe_csv, f
     fake_yfinance({})                                           # every symbol "delisted"
     rc, data, report = _run(tmp_path, universe_csv)
     assert rc == 2 and data is None and not (tmp_path / "out").exists()
+
+
+# --------------------------------------------------------------------------- #
+# Market context
+# --------------------------------------------------------------------------- #
+def _market_frames():
+    """An index ETF in a clean up-trend (a bull regime) and a flat volatility index at 17."""
+    import numpy as np
+    from conftest import make_flat
+    from test_scan import _ohlc_from_path
+    return {scan.MARKET_INDEX: _ohlc_from_path(np.linspace(300, 400, 400), seed=11),
+            scan.MARKET_VOL: make_flat(400, 17.0)}
+
+
+def test_market_series_and_context(mini_universe):
+    frames = _market_frames()
+    series = scan.market_series(mini_universe, frames[scan.MARKET_INDEX], frames[scan.MARKET_VOL])
+    assert set(series) == {"breadth", "breadth_symbols", "index_close", "index_vs_sma200_pct",
+                           "index_sma50_vs_sma200_pct", "regime", "vix"}
+    m = scan.market_context(series, END)
+    # Breadth: every symbol against its own positional 200-bar SMA on the last bar.
+    above = [float(df["Close"].iloc[-1]) > float(df["Close"].iloc[-200:].mean()) for df in mini_universe.values()]
+    assert m["breadth_symbols"] == 5 and m["breadth"] == round(sum(above) / 5, 4)
+    idx = frames[scan.MARKET_INDEX]["Close"]
+    assert m["regime"] == "bull" and m["index_sma50_vs_sma200_pct"] > 0
+    assert m["index_close"] == round(float(idx.iloc[-1]), 2)
+    assert m["index_vs_sma200_pct"] == round((float(idx.iloc[-1]) / float(idx.iloc[-200:].mean()) - 1) * 100, 2)
+    assert m["vix"] == 17.0 and m["as_of"] == END and m["index"] == scan.MARKET_INDEX
+    json.dumps(m)                                                    # plain Python types only
+    # Before the index has 200 bars the regime is undefined; its close is not.
+    early = scan.market_context(series, idx.index[150])
+    assert early["regime"] is None and early["index_vs_sma200_pct"] is None and early["index_close"] is not None
+    # A date before every series, or no series at all: everything None, nothing raises.
+    for ctx in (scan.market_context(series, "2000-01-01"), scan.market_context({}, END)):
+        assert all(v is None for k, v in ctx.items() if k not in ("index", "as_of"))
+    assert scan.market_series({}, None, None) == {}
+    # A falling index below both averages is a bear regime.
+    from test_scan import _ohlc_from_path
+    import numpy as np
+    bear = scan.market_series({}, _ohlc_from_path(np.linspace(400, 300, 400), seed=12), None)
+    assert scan.market_context(bear, END)["regime"] == "bear"
+
+
+def test_market_line_formats_and_degrades():
+    m = {"index": "SPY", "index_vs_sma200_pct": 4.23, "index_sma50_vs_sma200_pct": 2.1, "regime": "bull",
+         "vix": 17.2, "breadth": 0.64, "breadth_symbols": 502}
+    assert scan.market_line(m) == ("Market: SPY 4.2 % above its SMA200, SMA50 > SMA200 (bull); VIX 17.2; "
+                                   "64% of 502 symbols above their SMA200.")
+    bear = {**m, "index_vs_sma200_pct": -6.0, "index_sma50_vs_sma200_pct": -1.5, "regime": "bear"}
+    assert scan.market_line(bear).startswith("Market: SPY 6.0 % below its SMA200, SMA50 < SMA200 (bear)")
+    assert scan.market_line({**m, "vix": None, "breadth": None}) == \
+        "Market: SPY 4.2 % above its SMA200, SMA50 > SMA200 (bull)."
+    assert scan.market_line({"index": "SPY", "index_close": 645.1}) == "Market: SPY 645.1 (SMA200 n/a)."
+    assert scan.market_line({}) == scan.market_line(None) == "Market context: n/a."
+
+
+def test_end_to_end_reports_market_context(tmp_path, universe_csv, fake_yfinance, mini_universe):
+    yf = fake_yfinance({**mini_universe, **_market_frames()})
+    rc, data, report = _run(tmp_path, universe_csv)
+    assert rc == 0
+    meta = data["meta"]
+    m = meta["market"]
+    assert m["regime"] == "bull" and m["vix"] == 17.0 and m["breadth_symbols"] == 5 and m["as_of"] == END
+    assert yf.history_calls(scan.MARKET_INDEX) == 1 and yf.history_calls(scan.MARKET_VOL) == 1
+    assert (meta["universe"], meta["scanned"], meta["errors"]) == (6, 5, 1)   # context symbols are not members
+    assert scan.market_line(m) in report and "(bull); VIX 17.0;" in report
 
 
 def test_close_out_explains_reward_and_patience_drops(monkeypatch):
