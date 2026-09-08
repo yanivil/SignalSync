@@ -11,12 +11,18 @@ All notable changes to this project are documented here. Format follows
   prior bar's high, the breakout volume z-score against the prior 20 bars,
   and for cups the handle's volume against the cup's and the handle's volume
   slope. The stop / target grid gains a 1.25-ATR stop variant. Recorded to be
-  tested; no rule uses them. The review's other proposals were already in
-  place (converging Wolfe lines and the intersection ETA, a convex quadratic
-  cup fit with the U-versus-V test, close-based confirmation, ATR-buffered
-  stops), already tested and rejected (a volume gate, a reward:risk floor of
-  2.0), or contradicted by the ten-year replay (inhibiting alerts below the
-  SPY 200-day average or above VIX 25, where the system's best trades were).
+  tested; no rule uses them. Tested over the same eleven years (tuning page):
+  the volume z-score rises monotonically with mean R but a gate at 1.5 would
+  keep 19 % of the signals; a close above the prior bar's high ran +0.19 R
+  against +0.42 without it; the close's position within the bar and the
+  handle's volume decay had no effect; a cup R² of 0.80 made cups worse; the
+  1.25-ATR stop ran +0.20 R against +0.29. The review's other proposals were
+  already in place (converging Wolfe lines and the intersection ETA, a convex
+  quadratic cup fit with the U-versus-V test, close-based confirmation,
+  ATR-buffered stops), already tested and rejected (a volume gate, a
+  reward:risk floor of 2.0), or contradicted by the ten-year replay
+  (inhibiting alerts below the SPY 200-day average or above VIX 25, where the
+  system's best trades were).
 
 ### Changed (docs: ten years on the index as it was)
 - Tuning page: the tuned profile replayed one calendar year at a time from
