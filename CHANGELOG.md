@@ -5,6 +5,17 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed (docs: ten years on the index as it was)
+- Tuning page: the tuned profile replayed one calendar year at a time from
+  2016 to 2026 with point-in-time membership (runs 34246882614 to
+  34247722648): +0.23 R on 1629 traded signals, positive in 10 of 11 years,
+  drawdowns of 36 to 41 R inside four years (#108); Wolfe +0.45 R and the
+  best detector in the bad years, cups +0.03 R (#109); bear-regime and
+  high-VIX signals the robust context (#101, #99). The two-year hypotheses
+  on breakout age, reward:risk above 4, low VIX and the SMA band did not
+  survive (#98, #100 closed; #99, #101 rewritten; #102 closed as held). The
+  ledger and the README limitations state the ten-year numbers.
+
 ### Added (point-in-time universe for multi-year replays, #95)
 - `tools/universe_history.py`: index membership as of any past date from the
   git history of the pinned constituent dataset (a bare, blobless clone under

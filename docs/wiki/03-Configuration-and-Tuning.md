@@ -24,7 +24,7 @@ A third profile, **tuned**, is the spec with the four rules changed that the 202
 | spec | the engine specification as written | 22 | 53 % | +0.14 | 76 % | 10 at 0.00 R | 8 at +0.37 R | 4 at +0.03 R |
 | **tuned** | spec with the four relaxations above (Wolfe rhythm ±45 %) | **177** | **50 %** | **+0.34** | 72 % | 129 at +0.40 R | 28 at +0.13 R | 20 at +0.23 R |
 
-Year-long walk-forward replay, 250 sessions to 2026-09-04, horizon 60 bars, next-open fills, intraday stops (`backtest` workflow runs 33968691768, 33973275310 and 33985398488). Read with the usual caveats: today's constituents only, one year, one regime.
+Year-long walk-forward replay, 250 sessions to 2026-09-04, horizon 60 bars, next-open fills, intraday stops (`backtest` workflow runs 33968691768, 33973275310 and 33985398488). Read with the usual caveats: today's constituents only, one year, one regime. The ten-year replay of the tuned profile on the index as it was each year, +0.23 R per trade with drawdowns of up to 41 R inside a year, is in the out-of-sample section below.
 
 ### Calibrating the review rules (2026-09-06)
 
@@ -63,17 +63,39 @@ Read all of it with four caveats. Both years were mostly bull markets (70 % and 
 
 | Adopted value | Chosen on | Confirmed on | Unseen window |
 |---|---|---|---|
-| tuned profile, four relaxations | 63 sessions to 2026-09-04, run 33968787516 | 250 sessions to 2026-09-04, run 33973275310 | held: +0.30 R, run 34186512341 |
-| `WW_TIME_SYM_TOL` 0.45 | 250 sessions to 2026-09-04, run 33985398488 | none | failed: Wolfe −0.16 R on 12 traded rows (#102) |
+| tuned profile, four relaxations | 63 sessions to 2026-09-04, run 33968787516 | 250 sessions to 2026-09-04, run 33973275310 | held: +0.30 R on the unseen year (run 34186512341); +0.23 R over 2016-2026 on the point-in-time index, positive in 10 of 11 years (the eleven runs below) |
+| `WW_TIME_SYM_TOL` 0.45 | 250 sessions to 2026-09-04, run 33985398488 | none | failed on 12 unseen-year rows, then held over ten years: Wolfe +0.45 R on 228 signals, positive in 8 of 11 (#102); the 0.30 alternative has not been replayed over the same years |
 | `MIN_REWARD_RISK` 1.0, `MAX_WAIT_BARS` 60 | 250 sessions to 2026-09-04, runs 34023518929 to 34023527178 | none on their own | untested alone; the profile that includes them held |
 | `CUP_TRIGGER` handle_high, kept | 250 sessions, run 33985391832 against 33973275310 | none | untested |
 | `WATCH_PROXIMITY` 5 % | the 2026-09-04 report, 10 of 17 rows lost in a day | none | a reporting choice, not a replay question |
 
-**Hypotheses under test**, each needing the rule above and most the multi-year replay of #95: #98 breakout age at first report, #99 the SMA50-to-SMA200 band, #100 reward:risk of 4 or more, #101 VIX below 15, #102 Wolfe out of sample. Deferred: #97, a per-signal probability model, premature at about 120 resolved trades a year.
+### Ten years on the index as it was (2026-09-08)
+
+Eleven runs, one calendar year each from 2016 to 2026 (to 2026-09-04), tuned profile, point-in-time membership (`asof=true`, see [Testing and Contributing](04-Testing-and-Contributing.md)), `bars=500`, `horizon=60`, `grid=false`: runs 34246882614, 34246967266, 34247049007, 34247134013, 34247217621, 34247300839, 34247387000, 34247471926, 34247553575, 34247636362 and 34247722648 in that order. Coverage is the share of that year's members with Yahoo history; the rest, delisted or renamed since, is the survivorship bias that remains.
+
+| Year | Coverage | Signals | Hit rate | Mean R | 95 % CI, month blocks | Max drawdown |
+|---|---|---|---|---|---|---|
+| 2016 | 77 % | 111 | 45 % | +0.39 | [−0.11, +0.76] | −17 R |
+| 2017 | 80 % | 136 | 40 % | +0.60 | [+0.16, +1.07] | −15 R |
+| 2018 | 80 % | 153 | 26 % | −0.14 | [−0.52, +0.15] | −41 R |
+| 2019 | 84 % | 240 | 32 % | +0.26 | [−0.22, +0.73] | −37 R |
+| 2020 | 84 % | 124 | 32 % | +0.15 | [−0.17, +0.56] | −17 R |
+| 2021 | 88 % | 157 | 35 % | +0.16 | [−0.09, +0.45] | −19 R |
+| 2022 | 91 % | 176 | 29 % | +0.03 | [−0.50, +0.43] | −38 R |
+| 2023 | 94 % | 169 | 43 % | +0.40 | [−0.24, +0.92] | −36 R |
+| 2024 | 95 % | 133 | 35 % | +0.16 | [−0.25, +0.58] | −19 R |
+| 2025 | 97 % | 173 | 38 % | +0.27 | [−0.14, +0.60] | −15 R |
+| 2026 to 09-04 | 97 % | 118 | 44 % | +0.24 | [+0.01, +0.45] | −10 R |
+
+Pooled, weighting each year by its traded signals: 1629 traded signals, +0.23 R, 36 % hit rate, positive in 10 of 11 years. Per pattern: inverse H&S +0.23 R on 1096 signals, positive in 9 years and negative in the two bear years 2018 and 2022; Bullish Wolfe Wave +0.45 R on 228, positive in 8 years and the best detector in 2018, 2019 and 2022; Cup & Handle +0.03 R on 305 with an 18 % hit rate, positive in 5 years, 2017 alone supplying the profit (#109). By SPY regime at the scan day: bull +0.16 R on 1190, neutral +0.21 on 213, bear +0.59 on 226 (positive in 5 of the 6 years with bear sessions). VIX above 25 ran +0.50 on 142 in 8 of 8 years; a stock whose SMA50 sat more than 5 % under its SMA200 ran +0.35 on 499 against +0.15 to +0.20 elsewhere (#99, #101). Score buckets from 60-69 to 90-100 ran +0.27, +0.22, +0.22 and +0.19: the hit rate rises with the score and the mean R does not, so the score gates and does not rank (#82). Drawdowns inside the year reached 36 to 41 R in 2018, 2019, 2022 and 2023 against an expected yearly gain near 35 R (#108).
+
+What the ten years overturned from the two-year window, each a lesson in what one exploratory pass over two bull years produces: fresh breakouts are not better (age 0 at first report +0.10 R against +0.42 for age 4 to 8; #98 closed), reward:risk above 4 is not bad (+0.45 R with a 16 % hit rate; #100 closed), a VIX below 15 is not bad (+0.21 R pooled, and 2017 at a VIX near 10 was the best year; #101 rewritten), the SMA band U-shape is one-sided (#99 rewritten), and the Wolfe verdict on 12 out-of-sample trades was noise (#102 closed as held). What survived: the tuned profile's expectancy, the score's role as a gate, and the reversal-after-washout context.
+
+**Open questions:** #99 and #101 (the deep-down-trend and bear-regime contexts, information first, no rule), #108 (the drawdowns), #109 (cups), and #97 (a per-signal probability model, whose first revisit condition the ten years now meet).
 
 ### Market context (2026-09-08)
 
-The report header and every backtest row carry the SPY regime (close and SMA50 against the SMA200), the VIX and the breadth of the universe, and the backtest summaries add a per-regime slice with VIX and breadth among the feature buckets. In the two-year local replay, tuned signals scanned in a non-bull SPY regime ran +0.68 R on 75 rows against +0.17 on 237 bull-regime rows, and rows scanned at a VIX below 15 were negative in both years (−0.55 on 16, −0.19 on 19). The non-bull rows all came from March to June 2025, one episode, so nothing gates on the context; issues #93 and #101 track the evidence and a rule would need the multi-year replay of #95.
+The report header and every backtest row carry the SPY regime (close and SMA50 against the SMA200), the VIX and the breadth of the universe, and the backtest summaries add a per-regime slice with VIX and breadth among the feature buckets. Over the ten years on the point-in-time index (the section above), signals scanned in a SPY bear regime ran +0.59 R on 226 against +0.16 on 1190 in bull regimes, positive in five of the six years with bear sessions, and signals scanned at a VIX above 25 ran +0.50 R in eight of eight years; a VIX below 15, negative in the two-year window, ran +0.21 R pooled. Nothing gates on the context; #101 tracks how the report should present it.
 
 **The nightly scan runs `--profile tuned`**, chosen on this evidence on 2026-09-05; the default in code stays `spec`. Change the flag in `.github/workflows/daily-scan.yml` to switch. The cup entry stays at the handle peak: a rim-B entry replayed at 19 cup signals and +0.17 R against 20 and +0.23 R. The grid also shows a close-based stop (exit on the first close at or below the stop) lifting tuned's mean R to +0.35 at a 52 % hit rate; the report's stop level is unchanged, that is an execution choice.
 
