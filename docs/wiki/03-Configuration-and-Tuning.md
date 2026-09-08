@@ -91,7 +91,7 @@ Pooled, weighting each year by its traded signals: 1629 traded signals, +0.23 R,
 
 What the ten years overturned from the two-year window, each a lesson in what one exploratory pass over two bull years produces: fresh breakouts are not better (age 0 at first report +0.10 R against +0.42 for age 4 to 8; #98 closed), reward:risk above 4 is not bad (+0.45 R with a 16 % hit rate; #100 closed), a VIX below 15 is not bad (+0.21 R pooled, and 2017 at a VIX near 10 was the best year; #101 rewritten), the SMA band U-shape is one-sided (#99 rewritten), and the Wolfe verdict on 12 out-of-sample trades was noise (#102 closed as held). What survived: the tuned profile's expectancy, the score's role as a gate, and the reversal-after-washout context.
 
-**Open questions:** #99 and #101 (the deep-down-trend and bear-regime contexts, information first, no rule), #108 (the drawdowns), #109 (cups), and #97 (a per-signal probability model, whose first revisit condition the ten years now meet).
+**Open questions:** #99 and #101 (the deep-down-trend and bear-regime contexts, information first, no rule), #108 (the drawdowns), #109 (cups), #113 (the Bollinger stretch gate), and #97 (a per-signal probability model, whose first revisit condition the ten years now meet).
 
 ### A second review, tested (2026-09-08)
 
@@ -126,7 +126,7 @@ A trader's suggestion: read a per-ticker fear-and-greed indicator, as the Tradin
 
 A confirmed breakout is almost never fearful by construction (one row below 20 in ten years), so at the scan day the scale runs from fear to extreme greed, and the greedier the stock at its breakout, the lower the mean R; the higher hit rate of the greediest bucket does not compensate, because its wins are smaller. Bases that formed in fear paid about twice what bases formed in greed did. Of the components, the stretch measures carry the effect and momentum does not: RSI 30-50 at the breakout ran +0.55 R on 230 signals against +0.18 for 50-70 and +0.12 above 70, the lower bucket ahead in 8 of 11 years; Bollinger %B in the lower half ran +0.53 on 185, the upper half +0.26 on 991 and a close above the upper band +0.04 on 453, the upper half ahead of the above-band bucket in 10 of 11 years (the exception, 2017, a tie at +0.44 against +0.45); the MACD percentile ran +0.18 to +0.26 across its buckets with the strongest momentum slightly best.
 
-The one candidate rule this produces is the Bollinger stretch: a breakout bar that closes above its upper band. Leaving those 453 signals out would keep 1179 signals at +0.30 R against 1632 at +0.22, at a cost of 16 R of the ten-year total of 367. Under the protocol it remains a hypothesis: the gate has to be replayed as a rule on its own, so that its effect on the drawdown and per pattern is measured, and the reading belongs in the report as information first.
+The one candidate rule this produces is the Bollinger stretch: a breakout bar that closes above its upper band. Leaving those 453 signals out would keep 1179 signals at +0.30 R against 1632 at +0.22, at a cost of 16 R of the ten-year total of 367. Under the protocol it remains a hypothesis: the gate has to be replayed as a rule on its own, so that its effect on the drawdown and per pattern is measured (#113). The reading itself is on every report row as the `F&G` column, one value per symbol at the last close, information only.
 
 ### Market context (2026-09-08)
 

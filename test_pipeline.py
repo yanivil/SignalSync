@@ -170,12 +170,14 @@ def test_end_to_end_mini_universe(tmp_path, universe_csv, fake_yfinance, mini_un
     rows = [ln for ln in report.splitlines() if ln.startswith("| ") and not ln.startswith("| Ticker")]
     assert len(rows) == len(signals)
     for ln in rows:
-        assert ln.count("|") == 14, ln                       # 13 columns
+        assert ln.count("|") == 15, ln                       # 14 columns
     by_row = {ln.split(" | ")[0].lstrip("| "): ln for ln in rows}
     for s in signals:                                        # Age column: bars/limit for confirmed, '-' otherwise
         cells = by_row[s["ticker"]].split(" | ")
         assert cells[9] == (f"{s['bars_since_break']}/{scan.max_breakout_age(s['pattern'])}"
                             if s["status"] == "CONFIRMED" else "-"), by_row[s["ticker"]]
+        assert 0 <= s["fear_greed"] <= 100 and cells[11] == str(s["fear_greed"])   # F&G column, one reading per symbol
+        assert s["fear_greed"] == scan.fear_greed(mini_universe[s["ticker"]]["Close"].to_numpy())["score"]
         assert float(cells[3]) == s["max_buy"] and s["entry"] < s["max_buy"] <= round(s["entry"] * 1.06, 2)
         assert s["max_buy"] == scan.max_buy_level(s["entry"], s["entry"], s["stop"]) or \
             s["max_buy"] <= round(s["entry"] * (1 + scan.MAX_RUNAWAY), 2)      # never above the runaway cap
@@ -191,6 +193,7 @@ def test_end_to_end_mini_universe(tmp_path, universe_csv, fake_yfinance, mini_un
     for s in signals:
         assert f"| {s['ticker']} | {s['pattern']} | {s['entry']} | {s['max_buy']} | {s['stop']} |" in report
     assert f"{scan.MAX_RUNAWAY:.0%} above the trigger" in report   # footer states the real rule
+    assert "F&G = the stock's own fear-and-greed reading" in report and "| F&G |" in report
 
 
 def _frame(*rows, start="2026-03-02"):

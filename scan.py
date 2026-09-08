@@ -109,6 +109,14 @@ FILL_CLOSE_MIN_AGE = dt.timedelta(hours=1)   # last trade must be this old to co
 # is recorded on every report and backtest row to be tested, not gated on (issues #93, #101).
 MARKET_INDEX = "SPY"
 MARKET_VOL = "^VIX"
+# Per-ticker fear and greed, informational (no rule reads it): the equal-weight 0-100 composite of
+# RSI 14, the MACD histogram's percentile within the trailing year and Bollinger %B that the
+# TradingView community indicators of that name share, at the last close (``fear_greed``).  Ten years
+# of replay (docs/wiki/03, issue #113): the greedier the stock at its breakout the lower the mean R,
+# +0.45 in the neutral zone against +0.12 above 80, and a close above the upper Bollinger band ran
+# +0.04 R on 453 signals.  Shown on every report row so the reader sees the stretch; not gated on.
+FG_RSI_LEN, FG_BB_LEN, FG_MACD = 14, 20, (12, 26, 9)
+FG_LOOKBACK = 250                            # bars for the MACD histogram's percentile rank
 
 # --------------------------------------------------------------------------- #
 # Pattern rules.  The values below are the "spec" profile (docs/wiki/02 and the
@@ -317,6 +325,8 @@ class Signal:
     :param notes: Free-text details (pattern anchor dates and levels).
     :param max_buy: Highest open worth filling (see :func:`max_buy_level`).
     :param reward_risk: ``(target - entry) / (entry - stop)`` or None (see :func:`reward_risk`).
+    :param fear_greed: The stock's fear-and-greed composite at the last close, 0-100
+        (see :func:`fear_greed`); informational.
     """
 
     ticker: str
@@ -335,6 +345,7 @@ class Signal:
     notes: str = ""
     max_buy: Optional[float] = None      # above this at the open, do not chase (max_buy_level)
     reward_risk: Optional[float] = None  # reward per unit of planned risk, None without a target
+    fear_greed: Optional[float] = None   # the stock's fear-and-greed reading at the last close, 0-100 (fear_greed)
 
 
 # --------------------------------------------------------------------------- #
@@ -811,6 +822,73 @@ def atr(df: pd.DataFrame, n: int = ATR_LEN) -> pd.Series:
         (df["Low"] - prev_close).abs(),
     ], axis=1).max(axis=1)
     return tr.rolling(n, min_periods=1).mean()
+
+
+def _rsi(close: np.ndarray, n: int = FG_RSI_LEN) -> Optional[float]:
+    """Wilder's RSI of the last bar (an ``n``-bar simple seed, then ``(n - 1) / n`` smoothing).
+
+    :returns: 0-100, rounded to 2 dp; 50 on a series that never moved; ``None`` with fewer than ``n + 1`` bars.
+    """
+    if len(close) < n + 1:
+        return None
+    delta = np.diff(np.asarray(close, dtype=float))
+    gains, losses = np.clip(delta, 0.0, None), np.clip(-delta, 0.0, None)
+    avg_gain, avg_loss = float(gains[:n].mean()), float(losses[:n].mean())
+    for gain, loss in zip(gains[n:], losses[n:]):
+        avg_gain = (avg_gain * (n - 1) + gain) / n
+        avg_loss = (avg_loss * (n - 1) + loss) / n
+    if avg_gain == 0 and avg_loss == 0:
+        return 50.0
+    if avg_loss == 0:
+        return 100.0
+    return round(100 - 100 / (1 + avg_gain / avg_loss), 2)
+
+
+def fear_greed(close: np.ndarray) -> Dict[str, Optional[float]]:
+    """A per-ticker fear-and-greed reading of the last bar: 0 = extreme fear, 100 = extreme greed.
+
+    The TradingView community indicators of that name are composites of
+    standard oscillators computed on the symbol itself.  This is a documented,
+    equal-weight version of the three price-based components they share:
+
+    * ``rsi``: RSI 14 (:func:`_rsi`);
+    * ``macd_pct``: the MACD (12, 26, 9) histogram as its mid-rank percentile
+      within the trailing ``FG_LOOKBACK`` bars, so 50 means an average reading
+      for this stock and 99 its most bullish momentum of the year;
+    * ``bb_pctb``: Bollinger %B over 20 bars and 2 standard deviations, i.e. the
+      close's position between the bands (below 0 or above 1 = outside them),
+      unclipped and rounded to 3 dp;
+    * ``score``: the mean of RSI, the MACD percentile and %B clipped to 0-100,
+      over the components the history allows.
+
+    Above 80 the TradingView scripts call it extreme greed, below 20 extreme
+    fear.  Reported per row; no rule reads it (docs/wiki/03).
+
+    :returns: The four keys, ``None`` where the history is too short.
+
+    Complexity: O(bars).
+    """
+    close = np.asarray(close, dtype=float)
+    out: Dict[str, Optional[float]] = {"rsi": _rsi(close), "macd_pct": None, "bb_pctb": None, "score": None}
+    fast, slow, signal = FG_MACD
+    if len(close) >= slow + signal:
+        s = pd.Series(close)
+        macd = s.ewm(span=fast, adjust=False).mean() - s.ewm(span=slow, adjust=False).mean()
+        hist = (macd - macd.ewm(span=signal, adjust=False).mean()).to_numpy()
+        window = hist[-FG_LOOKBACK:]
+        rank = ((window < hist[-1]).sum() + 0.5 * (window == hist[-1]).sum()) / len(window)
+        out["macd_pct"] = round(float(rank * 100), 1)
+    if len(close) >= FG_BB_LEN:
+        w = close[-FG_BB_LEN:]
+        mid, sd = float(w.mean()), float(w.std())
+        if sd > 0:
+            out["bb_pctb"] = round((close[-1] - (mid - 2 * sd)) / (4 * sd), 3)
+    parts = [v for v in (out["rsi"], out["macd_pct"],
+                         None if out["bb_pctb"] is None else min(max(out["bb_pctb"] * 100, 0.0), 100.0))
+             if v is not None]
+    if parts:
+        out["score"] = round(sum(parts) / len(parts), 1)
+    return out
 
 
 def find_pivots(high: np.ndarray, low: np.ndarray, order: int = PIVOT_ORDER
@@ -1606,6 +1684,11 @@ def scan_symbol(sym: str, df: pd.DataFrame, detectors: Optional[Sequence[Callabl
             out.extend(fn(df, sym))
         except Exception as exc:  # one bad ticker must not abort the scan
             log.exception("%s failed on %s: %s", fn.__name__, sym, exc)
+    if out:
+        # One reading per symbol at the last close, shared by all of its rows; informational (FG_* constants).
+        fg = fear_greed(df["Close"].to_numpy(dtype=float))["score"]
+        for s in out:
+            s.fear_greed = fg
     return out
 
 
@@ -1735,8 +1818,8 @@ def render_markdown(signals: List[Signal], meta: Mapping[str, Any],
             lines.append("")
             continue
         lines.append("| Ticker | Pattern | Entry | Max buy | Stop | Risk % | Target | R:R | Score | Age | Vol× | "
-                     "Trend | Details |")
-        lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+                     "F&G | Trend | Details |")
+        lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
         for s in rows:
             # Age = bars since the breakout close / the pattern's limit, so a reader
             # can see whether a confirmed row is fresh (0/3) or about to expire (3/3).
@@ -1745,7 +1828,8 @@ def render_markdown(signals: List[Signal], meta: Mapping[str, Any],
             lines.append(f"| {s.ticker} | {s.pattern} | {s.entry} | {s.max_buy if s.max_buy else '-'} | {s.stop} | "
                          f"{s.risk_pct} | {s.target if s.target else '-'} | "
                          f"{s.reward_risk if s.reward_risk is not None else '-'} | {s.score} | {age} | "
-                         f"{s.volume_ratio if s.volume_ratio else '-'} | {s.trend} | {s.notes} |")
+                         f"{s.volume_ratio if s.volume_ratio else '-'} | "
+                         f"{s.fear_greed if s.fear_greed is not None else '-'} | {s.trend} | {s.notes} |")
         lines.append("")
     if closed is not None:
         since = meta.get("previous_run") or "the last report"
@@ -1773,6 +1857,9 @@ def render_markdown(signals: List[Signal], meta: Mapping[str, Any],
     lines.append(f"_Max buy = {max_buy_rule}: if the open is above it the setup no longer qualifies. "
                  f"R:R = (target - entry) / (entry - stop) at the reported entry; it shrinks with every "
                  f"session the entry drifts above the trigger. "
+                 f"F&G = the stock's own fear-and-greed reading at the last close, 0 to 100 (RSI {FG_RSI_LEN}, "
+                 f"MACD-histogram percentile and Bollinger %B averaged): above 80 the stock is stretched and such "
+                 f"breakouts replayed worst, below 20 it is washed out; information only, no rule uses it. "
                  f"Age = bars since the breakout close / the limit after which the row is dropped "
                  f"(0 = broke out on the last bar). Heuristic scan, not advice. "
                  f"Entry = trigger level, or the breakout close when it "
