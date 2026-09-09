@@ -537,21 +537,18 @@ def scan_sessions(data: Dict[str, pd.DataFrame], days: int, end: Optional[str] =
 def _fill_outcome(s: scan.Signal, after: pd.DataFrame, horizon: int) -> dict:
     """Fill a signal at the next open and score it: ``fill``, ``outcome``, ``bars``, ``exit``, ``r``, excursions.
 
-    An open above the row's Max buy is a ``gap``, one at or below the stop is
-    ``below_stop``; neither is traded.  Shared by the first report of a signal
-    and its later listings so both are judged by the same rules.
+    ``evaluate_signals.fill_and_classify`` does the accounting (an open above
+    the row's Max buy is a ``gap``, one at or below the stop ``below_stop``;
+    neither is traded), so the live track record, the first report of a
+    replayed signal and its later listings are all judged by the same rules.
+    Unresolved positions past the horizon stay ``open`` here, marked to the
+    horizon close.
     """
-    not_traded = dict(exit=None, r=None, mfe=None, mae=None, success5=None)
-    if after.empty:
-        return dict(fill=None, outcome="no_data", bars=0, **not_traded)
-    fill = float(after["Open"].iloc[0])
     max_buy = s.max_buy if s.max_buy is not None else s.entry * (1 + scan.MAX_RUNAWAY)
-    if fill > max_buy:
-        return dict(fill=round(fill, 2), outcome="gap", bars=0, **not_traded)
-    if fill <= s.stop:
-        # The open is already through the stop: no trade, and R would be undefined.
-        return dict(fill=round(fill, 2), outcome="below_stop", bars=0, **not_traded)
-    res = ev.classify(fill, s.stop, s.target, after, horizon)
+    res = ev.fill_and_classify(s.stop, s.target, max_buy, after, horizon, expire=False)
+    fill = res.pop("fill")
+    if res["outcome"] not in TRADED:
+        return dict(fill=None if fill is None else round(fill, 2), **res, mfe=None, mae=None, success5=None)
     return dict(fill=round(fill, 2), **res, **excursions(fill, s.stop, after, horizon))
 
 

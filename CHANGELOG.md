@@ -5,6 +5,18 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed (live track record: the backtest's accounting)
+- `tools/evaluate_signals.py` scores the committed signals the way the
+  backtest scores replayed ones: the fill is the next session's open, an open
+  above the row's Max buy (`gap`) or at or below the stop (`below_stop`) is
+  not traded, an unresolved position past the horizon is `expired` at that
+  bar's close and `open` means still running; R is measured from the fill.
+  Rows carry the fill and exit dates, the profit in percent and the sessions
+  on which the signal was listed (`listings`, `listed_days`); the summary adds
+  the not-traded counts and the total R. `fill_and_classify` is shared: the
+  backtest's `_fill_outcome` calls it (results unchanged). Groundwork for the
+  website's track record.
+
 ### Added (late-entry replay, #115)
 - The backtest records every later listing of an already-seen signal (the
   same structure still `CONFIRMED` on a following scan day, which the report
