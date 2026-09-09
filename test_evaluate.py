@@ -42,13 +42,33 @@ def test_classify_outcomes_and_r_multiples():
     assert ev.classify(100.0, 100.0, target, _bars((121, 99, 120)))["r"] is None    # zero risk
 
 
+def test_fill_and_classify_fills_at_the_next_open_and_times_out():
+    stop, target = 90.0, 120.0
+    bars = _bars((105, 99, 104), (121, 110, 118))                      # _bars opens each day at its close
+    res = ev.fill_and_classify(stop, target, None, bars)
+    assert (res["fill"], res["outcome"], res["bars"], res["exit"]) == (104.0, "target", 2, 120.0)
+    assert res["r"] == pytest.approx((120 - 104) / (104 - 90))          # R from the fill, not the reported entry
+    assert ev.fill_and_classify(stop, target, 103.0, bars) == \
+        {"fill": 104.0, "outcome": "gap", "bars": 0, "exit": None, "r": None}       # above Max buy: no trade
+    through = _bars((95, 85, 89), (121, 110, 118))                       # opens at 89, through the 90 stop
+    assert ev.fill_and_classify(stop, target, None, through)["outcome"] == "below_stop"
+    quiet = _bars((105, 99, 104), (106, 100, 105), (107, 101, 106))
+    timed = ev.fill_and_classify(stop, target, None, quiet, horizon=2)
+    assert (timed["outcome"], timed["bars"], timed["exit"]) == ("expired", 2, 105.0)  # closed at the horizon close
+    assert ev.fill_and_classify(stop, target, None, quiet, horizon=4)["outcome"] == "open"   # still running
+    assert ev.fill_and_classify(stop, target, None, quiet, horizon=2, expire=False)["outcome"] == "open"
+    assert ev.fill_and_classify(stop, target, None, _bars()) == \
+        {"fill": None, "outcome": "no_data", "bars": 0, "exit": None, "r": None}
+
+
 def test_summarise():
-    rows = [{"outcome": "target", "r": 2.0}, {"outcome": "stop", "r": -1.0},
-            {"outcome": "stop", "r": -1.0}, {"outcome": "open", "r": 0.5}, {"outcome": "no_data", "r": None}]
-    assert ev.summarise(rows) == {"n": 5, "target": 1, "stop": 2, "open": 1, "no_data": 1,
-                                  "hit_rate": 0.333, "mean_r": 0.125}
-    assert ev.summarise([]) == {"n": 0, "target": 0, "stop": 0, "open": 0, "no_data": 0,
-                                "hit_rate": None, "mean_r": None}
+    rows = [{"outcome": "target", "r": 2.0}, {"outcome": "stop", "r": -1.0}, {"outcome": "stop", "r": -1.0},
+            {"outcome": "open", "r": 0.5}, {"outcome": "expired", "r": 0.25}, {"outcome": "gap", "r": None},
+            {"outcome": "below_stop", "r": None}, {"outcome": "no_data", "r": None}]
+    assert ev.summarise(rows) == {"n": 8, "target": 1, "stop": 2, "open": 1, "expired": 1, "gap": 1, "below_stop": 1,
+                                  "no_data": 1, "hit_rate": 0.333, "mean_r": 0.15, "total_r": 0.75}
+    assert ev.summarise([]) == {"n": 0, "target": 0, "stop": 0, "open": 0, "expired": 0, "gap": 0, "below_stop": 0,
+                                "no_data": 0, "hit_rate": None, "mean_r": None, "total_r": None}
 
 
 def _commit(repo, doc, day):
@@ -87,6 +107,7 @@ def test_signal_history_dedupes_on_first_confirmed_appearance(signal_repo):
     assert [(s["ticker"], s["last_date"], s["entry"], s["first_seen"]) for s in hist] == [
         ("AAA", "2026-03-02", 100.0, "2026-03-03"),        # first appearance kept, later ones ignored
         ("BBB", "2026-03-03", 100.0, "2026-03-04")]        # watchlist rows never count
+    assert [s["listings"] for s in hist] == [["2026-03-02", "2026-03-03"], ["2026-03-03"]]   # sessions listed
 
 
 def test_evaluate_uses_bars_after_the_signal_date_and_survives_fetch_errors(signal_repo):
@@ -105,7 +126,11 @@ def test_evaluate_uses_bars_after_the_signal_date_and_survives_fetch_errors(sign
     assert calls == [("AAA", "2026-03-02"), ("BBB", "2026-03-03")]
     aaa, bbb = rows
     assert aaa["outcome"] == "target" and aaa["bars"] == 2           # the signal-day bar (Low 50) is excluded
-    assert bbb["outcome"] == "no_data"
+    assert (aaa["fill"], aaa["fill_date"], aaa["exit"], aaa["exit_date"]) == (100.0, "2026-03-03", 120.0, "2026-03-04")
+    assert aaa["r"] == 2.0 and aaa["pnl_pct"] == 20.0
+    assert (aaa["listed_days"], aaa["last_listed"]) == (2, "2026-03-03")   # AAA was on the list on two sessions
+    assert bbb["outcome"] == "no_data" and bbb["fill"] is None and bbb["listed_days"] == 1
     md = ev.render(rows, ev.summarise(rows), 60)
-    assert "| AAA | Cup & Handle | 2026-03-02 | 100.0 | 90.0 | 120.0 | target | 2 | 2.0 |" in md
-    assert "hit rate 1.0" in md
+    assert ("| AAA | Cup & Handle | 2026-03-02 | 2 | 100.0 | 100.0 | 90.0 | 120.0 | target | 2 | 120.0 | 20.0 | 2.0 |"
+            in md)
+    assert "hit rate 1.0" in md and "not traded 0" in md
