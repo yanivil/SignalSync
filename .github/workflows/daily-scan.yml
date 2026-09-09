@@ -7,6 +7,8 @@
 # from Claude.  So the runner does the data pull + scan and commits the report;
 # a scheduled task in the Claude desktop app (08:45 Israel time) reads
 # output/signals.json + report.md from the repo and e-mails the tables.
+# The pages workflow runs when this one succeeds and publishes the web page
+# from the same commit (https://yanivil.github.io/SignalSync/).
 #
 # Schedule: 01:17 UTC daily = ~4.5 hours before the 08:45 Israel e-mail, and
 # ~5 hours after the US close.  Off the top of the hour on purpose: GitHub

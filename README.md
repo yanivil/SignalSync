@@ -10,6 +10,8 @@
 
 It is a heuristic screener, not trading advice. Every hit should be checked on a chart before acting.
 
+**The page:** [yanivil.github.io/SignalSync](https://yanivil.github.io/SignalSync/), rebuilt after every scan: today's setups with the buy zone, stop and target and a plan graded by the row's day on the list, the watchlist, and the live track record of every signal the scan has committed, scored with the backtest's accounting.
+
 | Pattern | Type | Confirmation trigger | Stop-loss | Reference target |
 |---|---|---|---|---|
 | Cup & Handle | continuation | daily close above the handle high on ≥ 1.4× average volume | handle low − 0.25 ATR | entry + (right rim − cup bottom) |
@@ -141,6 +143,7 @@ tools/universe_history.py            index membership as of any past date, from 
 tools/build_site.py                  builds the web page from signals.json and the live track record
 site/                                stylesheet and script that tools/build_site.py inlines into the page
 .github/workflows/daily-scan.yml     01:17 UTC daily: tests, scan, commit output/
+.github/workflows/pages.yml          after each successful scan: score the signal log, build the page, deploy to GitHub Pages
 .github/workflows/tests.yml          lint + tests + coverage on pull requests and pushes to main
 .github/workflows/sync-wiki.yml      mirrors docs/wiki/ into the GitHub wiki
 run_daily.sh                         local wrapper (venv, dependency checksum, dated logs)

@@ -122,11 +122,17 @@ Signals are sorted `CONFIRMED` first, then by score descending. `output/report.m
 ## 5. Scheduling
 
 ```
-GitHub Actions (01:17 UTC daily, main only)      Claude desktop scheduled task (08:45 Israel time, daily)
-  checkout → pip install → pytest -q              fetch raw output/signals.json + report.md from GitHub
-  python scan.py -v (open internet)               fresh? run_date is today and last_bar is the last US session
-  commit output/report.md + signals.json          e-mail the Confirmed / Watchlist tables via Gmail
+GitHub Actions: daily-scan (01:17 UTC, main only)    GitHub Actions: pages (after each successful daily-scan)
+  checkout → pip install → pytest -q                  checkout with history → evaluate_signals --json
+  python scan.py -v (open internet)                   build_site → _site/ → deploy to GitHub Pages
+  commit output/report.md + signals.json              https://yanivil.github.io/SignalSync/
+
+Claude desktop scheduled task (08:45 Israel time, daily)
+  fetch raw output/signals.json + report.md from GitHub; fresh? run_date is today and last_bar is the last US session
+  e-mail the Confirmed / Watchlist tables via Gmail
 ```
+
+* The page is published by the `pages` workflow: it runs when `daily-scan` completes successfully (a push made with the workflow token, like the scan's commit, never triggers other workflows, so the scan's completion is the trigger), on pushes to `main` that touch the page's files, and on demand. It scores the signal log with `tools/evaluate_signals.py`, builds `_site/` with `tools/build_site.py` and deploys it as a Pages artifact; nothing is committed back. A failed scan leaves the previous build in place, and the page shows the date of the bar it was built from.
 
 * The scan runs on GitHub because the Claude environments sit behind a network policy that blocks market-data hosts; GitHub and PyPI are reachable from both. The repo must stay public (or the task needs a token) for `raw.githubusercontent.com` to serve the report.
 * Exit code 2 (no data) is captured, still committed if the files changed, and then fails the job so the failure is visible.

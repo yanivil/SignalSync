@@ -77,6 +77,7 @@ Work on a feature branch and open a PR to `main`; the `tests` workflow must pass
 | `evaluate-signals` | manual | replay every committed `CONFIRMED` signal against later prices; Markdown table in the job summary |
 | `backtest` | manual, pushes touching its files | walk-forward replay of the scanner over the last N sessions; overall / per-pattern / per-score-bucket hit rates and R multiples in the job summary; the run's `backtest.json` is kept as a workflow artifact (`backtest-<run id>`) |
 | `sync-wiki` | pushes to `main` touching `docs/wiki/`, manual | mirror `docs/wiki/` into the GitHub wiki |
+| `pages` | after each successful `daily-scan` (`workflow_run`), pushes to `main` touching the page's files, manual | score the signal log, build the page, deploy to GitHub Pages at https://yanivil.github.io/SignalSync/ (a dispatch from a branch builds without deploying) |
 
 ## Measuring signal outcomes
 

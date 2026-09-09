@@ -5,6 +5,15 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Added (GitHub Pages)
+- The `pages` workflow publishes the web page at
+  https://yanivil.github.io/SignalSync/ after every successful `daily-scan`
+  (and on demand, or when the page's files change on `main`): it scores the
+  signal log with `tools/evaluate_signals.py`, builds `_site/` with
+  `tools/build_site.py` and deploys it as a Pages artifact; nothing is
+  committed back. A failed scan leaves the previous build in place. Pages is
+  enabled with the GitHub Actions source.
+
 ### Added (the web page)
 - `tools/build_site.py` builds a self-contained `index.html` (plus
   `data.json`, the view model) from `output/signals.json` and the live track

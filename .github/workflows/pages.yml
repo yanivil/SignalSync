@@ -1,0 +1,76 @@
+# ---------------------------------------------------------------------------
+# Publish the web page: https://yanivil.github.io/SignalSync/
+#
+# Runs after every successful daily-scan (workflow_run: a push made with
+# GITHUB_TOKEN, like the scan's commit of output/, never triggers other
+# workflows, so the completion of the scan is the trigger), on pushes that
+# touch the page's own files (a branch push builds without deploying: the
+# smoke test that also registers the workflow), and on demand.  The page is a pure function
+# of output/signals.json, the git log of that file (the track record, scored
+# on the runner's open internet) and the page's code, so nothing is committed
+# back: the built site goes up as a Pages artifact.  A failed scan does not
+# rebuild the page, which then keeps the previous build and shows its bar
+# date.  Pages is enabled with the "GitHub Actions" source (repository
+# settings); only main deploys.
+# ---------------------------------------------------------------------------
+name: pages
+
+on:
+  workflow_run:
+    workflows: [daily-scan]
+    types: [completed]
+  push:                         # any branch: a push touching the page's files builds it (deploy: main only)
+    paths:
+      - "site/**"
+      - "tools/build_site.py"
+      - "tools/evaluate_signals.py"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true      # a newer build of the same ref supersedes one still running
+
+jobs:
+  build:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0        # the whole history of output/signals.json is the signal log
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies (hash-checked)
+        run: pip install --require-hashes -r requirements.txt
+      - name: Score the signal log (prices need the runner's open internet)
+        run: python tools/evaluate_signals.py --horizon 60 --json evaluation.json | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Build the page
+        run: |
+          EVAL=()
+          if [ -f evaluation.json ]; then EVAL=(--evaluation evaluation.json); fi
+          python tools/build_site.py --signals output/signals.json "${EVAL[@]}" --out-dir _site
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main'   # a dispatch from a branch builds only
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
