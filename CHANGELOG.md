@@ -5,6 +5,18 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Added (late-entry replay, #115)
+- The backtest records every later listing of an already-seen signal (the
+  same structure still `CONFIRMED` on a following scan day, which the report
+  shows again), filled at the next open under the same rules, and reports a
+  **Late entry** table per window: per day on the list (1 = the first
+  report), listings, traded, hit rate, mean and median R with the month-block
+  interval, and the paired comparison with the same signals bought on day 1
+  (pairs, both means, the mean difference and its interval). `walk_forward`
+  takes `repeats=`; first-seen rows carry `first_day` and `listed_day`; the
+  JSON gains `late` and `repeats`; each `backtest` run keeps its JSON as a
+  workflow artifact (`backtest-<run id>`) so several runs pool exactly.
+
 ### Added (report: the F&G column)
 - Every report row carries `F&G`, the stock's own fear-and-greed reading at
   the last close, 0 to 100, one value per symbol; `fear_greed` in
