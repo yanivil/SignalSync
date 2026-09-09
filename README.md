@@ -36,7 +36,7 @@ flowchart LR
     H & I & J --> K[score ≥ 60<br/>CONFIRMED / WATCHLIST<br/>de-duplicate]
     K --> L[output/signals.json]
     K --> M[output/report.md]
-    L & M --> N[GitHub Actions commit<br/>→ 08:45 Israel e-mail<br/>Claude desktop task]
+    L & M --> N[GitHub Actions commit<br/>→ pages workflow<br/>yanivil.github.io/SignalSync]
 ```
 
 The whole scanner is one module, [`scan.py`](scan.py): constants at the top, then data loading, indicators, the three detectors, and reporting. See the wiki for the full walk-through.
@@ -134,6 +134,7 @@ test_pipeline.py                     retry policy, universe loading, end-to-end 
 test_evaluate.py                     outcome classification and the git signal log
 test_backtest.py                     walk-forward replay: no look-ahead, first-seen signals, fills, breakdowns
 test_build_site.py                   the web page: grades by day on the list, levels, track record, HTML
+test_site_charts.py                  the bars behind the page's charts, cut at the scan's bar
 test_universe_history.py             point-in-time membership from a git history
 conftest.py                          shared fixtures and the offline yfinance stand-in
 tools/debug_last_bar.py              per-symbol last-bar diagnostics (also a manual GitHub workflow)
@@ -141,9 +142,10 @@ tools/evaluate_signals.py            replay past CONFIRMED signals against later
 tools/backtest.py                    walk-forward replay of the scanner over the last N sessions (manual workflow)
 tools/universe_history.py            index membership as of any past date, from the constituent dataset's git history
 tools/build_site.py                  builds the web page from signals.json and the live track record
+tools/site_charts.py                 fetches the recent bars behind the page's charts (pages workflow)
 site/                                stylesheet and script that tools/build_site.py inlines into the page
 .github/workflows/daily-scan.yml     01:17 UTC daily: tests, scan, commit output/
-.github/workflows/pages.yml          after each successful scan: score the signal log, build the page, deploy to GitHub Pages
+.github/workflows/pages.yml          after each successful scan: score the signal log, fetch chart bars, build the page, deploy to GitHub Pages
 .github/workflows/tests.yml          lint + tests + coverage on pull requests and pushes to main
 .github/workflows/sync-wiki.yml      mirrors docs/wiki/ into the GitHub wiki
 run_daily.sh                         local wrapper (venv, dependency checksum, dated logs)

@@ -8,11 +8,16 @@ for free.
 
 Usage:
 
-    python tools/build_site.py --signals output/signals.json [--evaluation evaluation.json] --out-dir _site
+    python tools/build_site.py --signals output/signals.json [--evaluation evaluation.json] [--charts charts.json]
+                               --out-dir _site
 
 ``--evaluation`` is the JSON written by ``tools/evaluate_signals.py --json``
 (the live track record, scored with the backtest's accounting); without it
-the page says the track record is not available yet.  ``--fragment`` writes
+the page says the track record is not available yet.  ``--charts`` is the
+JSON written by ``tools/site_charts.py`` (the recent bars of every ticker on
+the page); with it every setup card and watchlist entry carries a candlestick
+chart with the buy zone, stop, target and the pattern's pivots drawn on it,
+without it the page simply has no charts.  ``--fragment`` writes
 the page without the document wrapper, for a preview host that supplies its
 own.  The stylesheet and the script in ``site/`` are inlined, so the output
 is one self-contained ``index.html`` plus ``data.json`` (the view model).
@@ -38,6 +43,7 @@ import datetime as dt
 import html
 import json
 import os
+import re
 import sys
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
@@ -157,9 +163,16 @@ def _pct(a: float, b: float) -> float:
     return round((a / b - 1) * 100, 1)
 
 
+def _pivots(notes: str) -> List[Tuple[str, str, float]]:
+    """``(label, date, price)`` of every anchor a signal's notes name, e.g. ``RS 2026-08-26 @32.88``."""
+    return [(m.group(1).strip(" ,"), m.group(2), float(m.group(3)))
+            for m in re.finditer(r"([A-Za-z0-9 ]+?) (\d{4}-\d{2}-\d{2}) @([\d.]+)", notes or "")]
+
+
 def setup_view(signal: Mapping[str, Any], meta: Mapping[str, Any],
-               evaluation_rows: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
-    """One confirmed row as the card shows it."""
+               evaluation_rows: Sequence[Mapping[str, Any]],
+               charts: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
+    """One confirmed row as the card shows it (``charts``: ``symbols`` of the charts JSON)."""
     day = day_on_list(signal, evaluation_rows)
     g, badge = grade(signal["pattern"], day)
     entry, stop, target = float(signal["entry"]), float(signal["stop"]), signal.get("target")
@@ -187,10 +200,11 @@ def setup_view(signal: Mapping[str, Any], meta: Mapping[str, Any],
             "last_close": signal.get("last_close"), "age": signal.get("bars_since_break"),
             "age_limit": limits.get(signal["pattern"]), "volume_ratio": vr, "fear_greed": fg, "fg_zone": zone,
             "trend": signal.get("trend"), "notes": signal.get("notes"), "chips": chips,
-            "action": action_text(signal, g, day), "reference": ref}
+            "action": action_text(signal, g, day), "reference": ref,
+            "pivots": _pivots(signal.get("notes") or ""), "chart": (charts or {}).get(signal["ticker"])}
 
 
-def watch_view(signal: Mapping[str, Any]) -> Dict[str, Any]:
+def watch_view(signal: Mapping[str, Any], charts: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
     """One watchlist row as the table shows it."""
     entry, last = float(signal["entry"]), signal.get("last_close")
     return {"ticker": signal["ticker"], "pattern": signal["pattern"], "score": signal["score"], "trigger": entry,
@@ -198,7 +212,8 @@ def watch_view(signal: Mapping[str, Any]) -> Dict[str, Any]:
             "to_trigger_pct": _pct(entry, float(last)) if last else None, "stop": float(signal["stop"]),
             "target": signal.get("target"), "reward_risk": signal.get("reward_risk"),
             "fear_greed": signal.get("fear_greed"), "fg_zone": fg_zone(signal.get("fear_greed")),
-            "trend": signal.get("trend"), "notes": signal.get("notes")}
+            "trend": signal.get("trend"), "notes": signal.get("notes"),
+            "pivots": _pivots(signal.get("notes") or ""), "chart": (charts or {}).get(signal["ticker"])}
 
 
 def track_view(evaluation: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
@@ -219,22 +234,25 @@ def track_view(evaluation: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
 
 
 def view_model(doc: Mapping[str, Any], evaluation: Optional[Mapping[str, Any]],
-               today: Optional[dt.date] = None) -> Dict[str, Any]:
+               today: Optional[dt.date] = None, charts: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
     """Everything the page shows, as plain data (also written as ``data.json``)."""
     today = today or dt.datetime.now(dt.timezone.utc).date()
     meta = doc.get("meta", {})
     ev_rows = (evaluation or {}).get("rows", [])
+    symbols = (charts or {}).get("symbols") or {}
     signals = doc.get("signals", [])
     last_bar = meta.get("last_bar")
     stale_days = (today - dt.date.fromisoformat(last_bar)).days if last_bar else None
-    setups = sorted((setup_view(s, meta, ev_rows) for s in signals if s.get("status") == "CONFIRMED"),
+    setups = sorted((setup_view(s, meta, ev_rows, symbols) for s in signals if s.get("status") == "CONFIRMED"),
                     key=lambda v: (-v["score"]))
-    watch = sorted((watch_view(s) for s in signals if s.get("status") == "WATCHLIST"), key=lambda v: -v["score"])
+    watch = sorted((watch_view(s, symbols) for s in signals if s.get("status") == "WATCHLIST"),
+                   key=lambda v: -v["score"])
     return {"generated": today.isoformat(),
             "scan": {k: meta.get(k) for k in ("run_date", "last_bar", "scanned", "universe", "errors", "profile",
                                                "previous_run", "skipped_bar", "lagging_symbols", "min_score")}
             | {"stale_days": stale_days},
             "market": meta.get("market"), "setups": setups, "watchlist": watch,
+            "charts_as_of": (charts or {}).get("as_of"),
             "closed": [{**c, "label": CLOSED_LABELS.get(c.get("outcome"), c.get("outcome"))}
                        for c in doc.get("closed") or []],
             "track": track_view(evaluation), "reference": REPLAY_REFERENCE}
@@ -280,6 +298,84 @@ def sparkline(curve: Sequence[float], width: int = 600, height: int = 120) -> st
             f'<polyline class="line" points="{line}"/>{dots}'
             f'<text class="spark-label" x="{width - pad}" y="{ys[-1] - 6:.1f}" text-anchor="end">'
             f'{pts[-1]:+.2f} R</text></svg>')
+
+
+def chart_svg(series: Mapping[str, Sequence[Any]], levels: Mapping[str, Optional[float]],
+              pivots: Sequence[Tuple[str, str, float]], ticker: str, width: int = 640, height: int = 260) -> str:
+    """Inline SVG candlestick chart of ``series`` (dates, open, high, low, close) with the levels drawn on it.
+
+    The buy zone (entry to Max buy) is a band, the stop and the target dashed
+    lines with labels; a target more than 20 % above the highest bar is not
+    drawn but named at the top, so the bars keep their scale.  Pivots whose
+    date falls inside the window are marked and labelled.  Empty below two bars.
+    """
+    dates = list(series.get("dates") or [])
+    opens, highs, lows, closes = (list(map(float, series.get(k) or [])) for k in ("open", "high", "low", "close"))
+    n = len(closes)
+    if n < 2 or not (len(dates) == len(opens) == len(highs) == len(lows) == n):
+        return ""
+    left, right, top, bottom = 8, 64, 14, 24
+    pw, ph = width - left - right, height - top - bottom
+    entry, max_buy, stop, target = (levels.get(k) for k in ("entry", "max_buy", "stop", "target"))
+    lo = min(lows + ([float(stop)] if stop is not None else []))
+    hi = max(highs + ([float(max_buy or entry)] if (max_buy or entry) is not None else []))
+    clipped = target is not None and float(target) > hi * 1.2
+    if target is not None and not clipped:
+        hi = max(hi, float(target))
+    pad = (hi - lo) * 0.04 or 1.0
+    lo, hi = lo - pad, hi + pad
+
+    def y(v: float) -> float:
+        return top + (hi - v) / (hi - lo) * ph
+
+    step = pw / n
+
+    def x(i: int) -> float:
+        return left + (i + 0.5) * step
+
+    bw = max(1.5, step * 0.6)
+    parts = [f'<svg class="chart" viewBox="0 0 {width} {height}" role="img" aria-label="{_e(ticker)}, daily bars '
+             f'{_e(dates[0])} to {_e(dates[-1])} with the buy zone, stop and target">']
+    for k in range(5):
+        v = lo + (hi - lo) * k / 4
+        parts.append(f'<line class="grid" x1="{left}" y1="{y(v):.1f}" x2="{left + pw}" y2="{y(v):.1f}"/>'
+                     f'<text class="axis" x="{left + pw + 6}" y="{y(v) + 4:.1f}">{v:.2f}</text>')
+    if entry is not None:
+        z_top, z_bot = y(max(float(max_buy or entry), float(entry))), y(float(entry))
+        parts.append(f'<rect class="zone" x="{left}" y="{z_top:.1f}" width="{pw}" '
+                     f'height="{max(z_bot - z_top, 1):.1f}"/>')
+    for i in range(n):
+        o, h, low_, c = opens[i], highs[i], lows[i], closes[i]
+        cx, body_top, body_bot = x(i), y(max(o, c)), y(min(o, c))
+        parts.append(f'<line class="wick" x1="{cx:.1f}" y1="{y(h):.1f}" x2="{cx:.1f}" y2="{y(low_):.1f}"/>'
+                     f'<rect class="{"up" if c >= o else "down"}" x="{cx - bw / 2:.1f}" y="{body_top:.1f}" '
+                     f'width="{bw:.1f}" height="{max(body_bot - body_top, 1):.1f}"/>')
+    if stop is not None:
+        parts.append(f'<line class="stop" x1="{left}" y1="{y(float(stop)):.1f}" x2="{left + pw}" '
+                     f'y2="{y(float(stop)):.1f}"/><text class="lvl stop-l" x="{left + 4}" '
+                     f'y="{y(float(stop)) - 4:.1f}">stop {float(stop):.2f}</text>')
+    if target is not None:
+        if clipped:
+            parts.append(f'<text class="lvl target-l" x="{left + 4}" y="{top + 10}">target {float(target):.2f}, '
+                         f'above this chart</text>')
+        else:
+            parts.append(f'<line class="target" x1="{left}" y1="{y(float(target)):.1f}" x2="{left + pw}" '
+                         f'y2="{y(float(target)):.1f}"/><text class="lvl target-l" x="{left + 4}" '
+                         f'y="{y(float(target)) - 4:.1f}">target {float(target):.2f}</text>')
+    index = {d: i for i, d in enumerate(dates)}
+    for label, day, price in pivots:
+        if day in index:
+            px, py = x(index[day]), y(float(price))
+            parts.append(f'<circle class="pivot" cx="{px:.1f}" cy="{py:.1f}" r="4"/>'
+                         f'<text class="pivot-l" x="{px + 6:.1f}" y="{py + 4:.1f}">{_e(label)}</text>')
+    for i, anchor in ((0, "start"), (n // 2, "middle"), (n - 1, "end")):
+        parts.append(f'<text class="axis" x="{x(i):.1f}" y="{height - 6}" text-anchor="{anchor}">{_e(dates[i])}</text>')
+    parts.append("</svg>")
+    return "".join(parts)
+
+
+def _levels(v: Mapping[str, Any], entry: Optional[float]) -> Dict[str, Optional[float]]:
+    return {"entry": entry, "max_buy": v.get("max_buy"), "stop": v.get("stop"), "target": v.get("target")}
 
 
 def _header(vm: Mapping[str, Any]) -> str:
@@ -348,7 +444,8 @@ def _setup_card(v: Mapping[str, Any]) -> str:
             f'<div class="value">{zone}</div><div class="sub">last close {_num(v["last_close"])}</div></div>'
             f'<div class="level stop"><div class="label">Stop loss</div><div class="value">{_num(v["stop"])}</div>'
             f'<div class="sub">{_num(v["risk_pct"], 1)} % below entry</div></div>{target}</div>'
-            f'<p class="action {v["grade"]}">{_e(v["action"])}</p>'
+            + (chart_svg(v["chart"], _levels(v, v["entry"]), v["pivots"], v["ticker"]) if v.get("chart") else "")
+            + f'<p class="action {v["grade"]}">{_e(v["action"])}</p>'
             f'<div class="chips">{"".join(_chip(t, k) for t, k in v["chips"])}</div>'
             f'<p class="details">{_e(age)}{" · " if age and v.get("notes") else ""}{_e(v.get("notes"))}</p>'
             + (f'<p class="reference">{_e(ref_line)}</p>' if ref_line else "") + "</article>")
@@ -370,13 +467,15 @@ def _watchlist(vm: Mapping[str, Any]) -> str:
         f'<td class="num">{_e(w["score"])}</td>'
         f'<td>{_num(w["fear_greed"], 0)}{" " + _e(w["fg_zone"]) if w.get("fg_zone") else ""}</td></tr>'
         for w in vm["watchlist"])
-    anchors = "".join(f'<li><strong>{_e(w["ticker"])}</strong> {_e(w.get("notes"))}</li>'
-                      for w in vm["watchlist"] if w.get("notes"))
+    anchors = "".join(
+        f'<li><strong>{_e(w["ticker"])}</strong> {_e(w.get("notes"))}'
+        + (chart_svg(w["chart"], _levels(w, w["trigger"]), w["pivots"], w["ticker"]) if w.get("chart") else "")
+        + "</li>" for w in vm["watchlist"] if w.get("notes") or w.get("chart"))
     table = ('<div class="table-wrap"><table><thead><tr><th>Ticker</th><th>Pattern</th><th class="num">Trigger</th>'
              '<th class="num">Last close</th><th class="num">To trigger</th><th class="num">Stop</th>'
              '<th class="num">Target</th><th class="num">R:R</th><th class="num">Score</th><th>F&amp;G</th>'
              f'</tr></thead><tbody>{rows}</tbody></table></div>'
-             + (f'<details class="anchors"><summary>Pattern anchors, for checking on a chart</summary><ul>{anchors}'
+             + (f'<details class="anchors"><summary>Pattern anchors and charts</summary><ul>{anchors}'
                 '</ul></details>' if anchors else "")
              if rows else '<p class="note">Nothing on the watchlist.</p>')
     return (f'<h2 id="watchlist">Watchlist<span class="count">{len(vm["watchlist"])}</span></h2>'
@@ -495,15 +594,18 @@ def render_page(vm: Mapping[str, Any], fragment: bool = False) -> str:
 
 
 def build(signals_path: str, evaluation_path: Optional[str], out_dir: str, fragment: bool = False,
-          today: Optional[dt.date] = None) -> Dict[str, Any]:
+          today: Optional[dt.date] = None, charts_path: Optional[str] = None) -> Dict[str, Any]:
     """Read the inputs, write ``index.html`` and ``data.json`` into ``out_dir``; returns the view model."""
     with open(signals_path, encoding="utf-8") as fh:
         doc = json.load(fh)
-    evaluation = None
+    evaluation = charts = None
     if evaluation_path:
         with open(evaluation_path, encoding="utf-8") as fh:
             evaluation = json.load(fh)
-    vm = view_model(doc, evaluation, today)
+    if charts_path:
+        with open(charts_path, encoding="utf-8") as fh:
+            charts = json.load(fh)
+    vm = view_model(doc, evaluation, today, charts)
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, "index.html"), "w", encoding="utf-8") as fh:
         fh.write(render_page(vm, fragment))
@@ -516,15 +618,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--signals", default=os.path.join(ROOT, "output", "signals.json"))
     ap.add_argument("--evaluation", help="JSON from tools/evaluate_signals.py --json (the live track record)")
+    ap.add_argument("--charts", help="JSON from tools/site_charts.py (the bars behind the charts)")
     ap.add_argument("--out-dir", default=os.path.join(ROOT, "_site"))
     ap.add_argument("--fragment", action="store_true", help="write the page without the document wrapper")
     ap.add_argument("--today", help="YYYY-MM-DD, the build date (default: today, UTC)")
     args = ap.parse_args(argv)
     today = dt.date.fromisoformat(args.today) if args.today else None
-    vm = build(args.signals, args.evaluation, args.out_dir, args.fragment, today)
+    vm = build(args.signals, args.evaluation, args.out_dir, args.fragment, today, args.charts)
     track = f"with {len(vm['track']['rows'])} signals" if vm["track"]["available"] else "absent"
+    charted = sum(1 for v in vm["setups"] + vm["watchlist"] if v.get("chart"))
     print(f"{args.out_dir}/index.html: {len(vm['setups'])} setups, {len(vm['watchlist'])} on the watchlist, "
-          f"track record {track}")
+          f"track record {track}, charts for {charted} rows")
     return 0
 
 

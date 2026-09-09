@@ -5,6 +5,19 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Added (charts on the page)
+- Every setup card and every watchlist entry carries a candlestick chart of
+  the last 120 sessions with the buy zone, the stop, the target (named at
+  the top when it is more than 20 % above the bars) and the pattern's
+  pivots parsed from the notes. `tools/site_charts.py` fetches the bars in
+  the `pages` workflow and writes `charts.json`; `tools/build_site.py
+  --charts` draws them as inline SVG. A failed fetch leaves the page
+  without charts, never without a deploy.
+
+### Removed (the e-mail)
+- The 08:45 Israel scheduled e-mail task was retired on 2026-09-09; the page
+  is the delivery channel. Docs and the `daily-scan` header updated.
+
 ### Added (GitHub Pages)
 - The `pages` workflow publishes the web page at
   https://yanivil.github.io/SignalSync/ after every successful `daily-scan`
