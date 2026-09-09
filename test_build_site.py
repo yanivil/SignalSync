@@ -8,6 +8,8 @@ import json
 import os
 import sys
 
+import pandas as pd
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "tools"))
 import build_site as bs  # noqa: E402
 import evaluate_signals as ev  # noqa: E402
@@ -20,7 +22,8 @@ def _signal(ticker, pattern, status, entry, stop, target, score=80, **kw):
             "risk_pct": round((entry - stop) / entry * 100, 2), "target": target, "score": score,
             "last_close": entry, "last_date": LAST_BAR, "bars_since_break": 0 if status == "CONFIRMED" else None,
             "volume_ratio": 1.8 if status == "CONFIRMED" else None,
-            "trend": "close above SMA200, SMA50 > SMA200, SMA200 rising/flat", "notes": "LS 2026-07-02 @32.44",
+            "trend": "close above SMA200, SMA50 > SMA200, SMA200 rising/flat",
+            "notes": "LS 2026-07-02 @32.44, head 2026-07-30 @30.84, RS 2026-08-26 @32.88",
             "max_buy": round(entry * 1.05, 2),
             "reward_risk": round((target - entry) / (entry - stop), 2) if target else None, "fear_greed": 55.0}
     base.update(kw)
@@ -160,3 +163,65 @@ def test_build_writes_files_and_handles_an_empty_scan(tmp_path):
     assert "No confirmed breakout in the last scan" in page and "Nothing on the watchlist" in page
     assert "The track record is not available in this build" in page
     assert bs.main(["--signals", str(sig), "--out-dir", str(out), "--today", "2026-09-09"]) == 0
+
+
+# --------------------------------------------------------------------------- #
+# Charts
+# --------------------------------------------------------------------------- #
+def _series(n=30, base=36.0, end=LAST_BAR):
+    dates = [str(d.date()) for d in pd.bdate_range(end=end, periods=n)]
+    closes = [round(base + (i % 5) * 0.3 - 0.6, 2) for i in range(n)]
+    opens = [round(c - 0.2, 2) for c in closes]
+    return {"dates": dates, "open": opens, "high": [round(c + 0.5, 2) for c in closes],
+            "low": [round(c - 0.7, 2) for c in closes], "close": closes}
+
+
+def test_pivots_parse_every_pattern_note():
+    cup = ("left rim 2026-05-07 @97.30, bottom 2026-07-08 @74.63 (depth 23%), right rim 2026-08-14 @97.34, "
+           "handle low 2026-08-20 @92.01 (depth 5.5%), trigger 95.99")
+    assert bs._pivots(cup) == [("left rim", "2026-05-07", 97.3), ("bottom", "2026-07-08", 74.63),
+                               ("right rim", "2026-08-14", 97.34), ("handle low", "2026-08-20", 92.01)]
+    ihs = "LS 2026-07-02 @32.44, head 2026-07-30 @30.84, RS 2026-08-26 @32.88, neckline 36.03->35.91 (now 35.86)"
+    assert bs._pivots(ihs) == [("LS", "2026-07-02", 32.44), ("head", "2026-07-30", 30.84), ("RS", "2026-08-26", 32.88)]
+    wolfe = "1 2026-06-02 @100.00, 2 2026-06-16 @108.00, 5 2026-07-28 @91.50, line 1-3 at the ETA 2026-09-01"
+    assert bs._pivots(wolfe) == [("1", "2026-06-02", 100.0), ("2", "2026-06-16", 108.0), ("5", "2026-07-28", 91.5)]
+    assert bs._pivots("") == [] and bs._pivots(None) == []
+
+
+def test_chart_svg_draws_candles_levels_and_pivots():
+    series = _series(30)
+    levels = {"entry": 36.8, "max_buy": 37.68, "stop": 32.64, "target": 41.94}
+    svg = bs.chart_svg(series, levels, [("RS", series["dates"][-9], 35.9), ("LS", "2020-01-01", 1.0)], "HAL")
+    assert svg.startswith('<svg class="chart"') and 'aria-label="HAL, daily bars' in svg
+    assert svg.count('class="wick"') == 30 and svg.count('class="up"') + svg.count('class="down"') == 30
+    assert 'class="zone"' in svg and 'class="stop"' in svg and "stop 32.64" in svg
+    assert 'class="target"' in svg and ">target 41.94<" in svg
+    assert svg.count('class="pivot"') == 1 and ">RS<" in svg and ">LS<" not in svg     # outside the window: skipped
+    assert series["dates"][0] in svg and series["dates"][-1] in svg                    # the date axis
+    far = bs.chart_svg(series, {**levels, "target": 90.0}, [], "HAL")
+    assert "target 90.00, above this chart" in far and 'class="target"' not in far     # scale kept for the bars
+    bare = bs.chart_svg(series, {}, [], "X")
+    assert 'class="zone"' not in bare and 'class="stop"' not in bare and bare.count('class="wick"') == 30
+    one = {"dates": ["2026-09-08"], "open": [1.0], "high": [1.0], "low": [1.0], "close": [1.0]}
+    assert bs.chart_svg(one, levels, [], "X") == ""
+    assert bs.chart_svg({**series, "close": series["close"][:-1]}, levels, [], "X") == ""   # ragged input
+
+
+def test_page_carries_charts_when_the_bars_are_there(tmp_path):
+    charts = {"bars": 30, "as_of": LAST_BAR, "symbols": {"HAL": _series(30), "PH": _series(30, base=950.0)}}
+    vm = bs.view_model(_doc(), _evaluation(), dt.date(2026, 9, 9), charts)
+    hal = next(v for v in vm["setups"] if v["ticker"] == "HAL")
+    assert hal["chart"]["dates"][-1] == LAST_BAR and hal["pivots"][2] == ("RS", "2026-08-26", 32.88)
+    assert vm["charts_as_of"] == LAST_BAR and next(v for v in vm["setups"] if v["ticker"] == "NEW")["chart"] is None
+    page = bs.render_page(vm)
+    assert page.count('<svg class="chart"') == 2                     # HAL's card and PH's watchlist entry
+    assert 'aria-label="HAL, daily bars' in page and 'aria-label="PH, daily bars' in page
+    assert "Pattern anchors and charts" in page
+    without = bs.render_page(bs.view_model(_doc(), _evaluation(), dt.date(2026, 9, 9)))
+    assert '<svg class="chart"' not in without
+    sig, ch = tmp_path / "signals.json", tmp_path / "charts.json"
+    sig.write_text(json.dumps(_doc()))
+    ch.write_text(json.dumps(charts))
+    assert bs.main(["--signals", str(sig), "--charts", str(ch), "--out-dir", str(tmp_path / "s"),
+                    "--today", "2026-09-09"]) == 0
+    assert (tmp_path / "s" / "index.html").read_text().count('<svg class="chart"') == 2

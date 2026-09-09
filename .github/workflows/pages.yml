@@ -23,6 +23,7 @@ on:
     paths:
       - "site/**"
       - "tools/build_site.py"
+      - "tools/site_charts.py"
       - "tools/evaluate_signals.py"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
@@ -53,11 +54,14 @@ jobs:
         run: pip install --require-hashes -r requirements.txt
       - name: Score the signal log (prices need the runner's open internet)
         run: python tools/evaluate_signals.py --horizon 60 --json evaluation.json | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Fetch the bars behind the charts (a failure leaves the page without them)
+        run: python tools/site_charts.py --signals output/signals.json --bars 120 --json charts.json
       - name: Build the page
         run: |
-          EVAL=()
-          if [ -f evaluation.json ]; then EVAL=(--evaluation evaluation.json); fi
-          python tools/build_site.py --signals output/signals.json "${EVAL[@]}" --out-dir _site
+          OPTS=()
+          if [ -f evaluation.json ]; then OPTS+=(--evaluation evaluation.json); fi
+          if [ -f charts.json ]; then OPTS+=(--charts charts.json); fi
+          python tools/build_site.py --signals output/signals.json "${OPTS[@]}" --out-dir _site
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:

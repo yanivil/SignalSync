@@ -117,3 +117,19 @@ footer { margin-top: 36px; padding-top: 16px; border-top: 1px solid var(--border
   dl.glossary { grid-template-columns: 1fr; }
   nav.sections a { margin: 0 14px 0 0; }
 }
+.chart { width: 100%; height: auto; display: block; margin: 6px 0 12px; }
+.chart .grid { stroke: var(--border); stroke-width: 1; }
+.chart .axis { fill: var(--muted); font-size: 11px; }
+.chart .wick { stroke: var(--muted); stroke-width: 1; }
+.chart .up { fill: var(--green); }
+.chart .down { fill: var(--red); }
+.chart .zone { fill: var(--accent); opacity: .14; }
+.chart .stop { stroke: var(--red); stroke-dasharray: 5 3; stroke-width: 1.2; }
+.chart .target { stroke: var(--green); stroke-dasharray: 5 3; stroke-width: 1.2; }
+.chart .lvl { font-size: 11px; font-weight: 600; }
+.chart .stop-l { fill: var(--red); }
+.chart .target-l { fill: var(--green); }
+.chart .pivot { fill: var(--surface); stroke: var(--accent); stroke-width: 1.5; }
+.chart .pivot-l { fill: var(--accent); font-size: 11px; font-weight: 600; }
+details.anchors li { margin: 6px 0 10px; }
+details.anchors li .chart { max-width: 640px; margin-top: 4px; }

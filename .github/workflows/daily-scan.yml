@@ -4,16 +4,16 @@
 # Why GitHub Actions: the Claude cloud sandbox and the Claude shell on the
 # user's Mac are both behind a network policy that blocks every market-data
 # host, but GitHub runners have open internet and GitHub itself is reachable
-# from Claude.  So the runner does the data pull + scan and commits the report;
-# a scheduled task in the Claude desktop app (08:45 Israel time) reads
-# output/signals.json + report.md from the repo and e-mails the tables.
-# The pages workflow runs when this one succeeds and publishes the web page
-# from the same commit (https://yanivil.github.io/SignalSync/).
+# from Claude.  So the runner does the data pull + scan and commits the report,
+# and the pages workflow runs when this one succeeds and publishes the web
+# page from the same commit (https://yanivil.github.io/SignalSync/).  Until
+# 2026-09-09 a scheduled task in the Claude desktop app e-mailed the tables
+# every morning; the page replaced it.
 #
-# Schedule: 01:17 UTC daily = ~4.5 hours before the 08:45 Israel e-mail, and
-# ~5 hours after the US close.  Off the top of the hour on purpose: GitHub
+# Schedule: 01:17 UTC daily = ~5 hours after the US close, so the page is up
+# well before the next US open.  Off the top of the hour on purpose: GitHub
 # delays scheduled workflows most at :00 (observed 2026-09-05: the 02:00 run
-# started at 06:36, after the e-mail had gone out with a STALE flag).  Note: Yahoo's chart row for that session
+# started at 06:36).  Note: Yahoo's chart row for that session
 # has no close until ~08:00 UTC (US pre-market open) -- observed 2026-09-04:
 # 500/502 symbols incomplete at 08:05 UTC, complete at 08:10 UTC -- so scan.py
 # fills the close from the chart's last-trade quote (fill_missing_close) and
