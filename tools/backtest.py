@@ -56,6 +56,12 @@ Method:
   ``scan.market_series``: the SPY regime (close and SMA50 against the SMA200),
   the VIX and the breadth of the universe.  The summaries add a per-regime
   slice; VIX and breadth join the feature buckets.  No rule reads any of it.
+* Every **later listing** of an already-seen signal (the same structure still
+  CONFIRMED on a following scan day, which the nightly report shows again) is
+  recorded too, with ``listed_day`` = sessions since the first report (1 = the
+  first report) and filled at the next open under the same rules, so the
+  late-entry table can say what a reader gets who buys a row on its Nth day
+  on the list against the same signals bought on day 1.
 * Every summary carries, next to hit rate and mean R: median R, standard
   deviation, total R, the deepest drawdown of the cumulative R curve (1 R per
   trade, in scan order), a 95 % bootstrap interval of the mean R and the
@@ -528,11 +534,32 @@ def scan_sessions(data: Dict[str, pd.DataFrame], days: int, end: Optional[str] =
     return sessions[-days:] if days < len(sessions) else sessions
 
 
+def _fill_outcome(s: scan.Signal, after: pd.DataFrame, horizon: int) -> dict:
+    """Fill a signal at the next open and score it: ``fill``, ``outcome``, ``bars``, ``exit``, ``r``, excursions.
+
+    An open above the row's Max buy is a ``gap``, one at or below the stop is
+    ``below_stop``; neither is traded.  Shared by the first report of a signal
+    and its later listings so both are judged by the same rules.
+    """
+    not_traded = dict(exit=None, r=None, mfe=None, mae=None, success5=None)
+    if after.empty:
+        return dict(fill=None, outcome="no_data", bars=0, **not_traded)
+    fill = float(after["Open"].iloc[0])
+    max_buy = s.max_buy if s.max_buy is not None else s.entry * (1 + scan.MAX_RUNAWAY)
+    if fill > max_buy:
+        return dict(fill=round(fill, 2), outcome="gap", bars=0, **not_traded)
+    if fill <= s.stop:
+        # The open is already through the stop: no trade, and R would be undefined.
+        return dict(fill=round(fill, 2), outcome="below_stop", bars=0, **not_traded)
+    res = ev.classify(fill, s.stop, s.target, after, horizon)
+    return dict(fill=round(fill, 2), **res, **excursions(fill, s.stop, after, horizon))
+
+
 def walk_forward(data: Dict[str, pd.DataFrame], days: int, horizon: int,
                  detectors: Optional[Sequence] = None, bars: Optional[int] = None,
                  market: Optional[Mapping[str, pd.Series]] = None,
                  members: Optional[Callable[[Any], Container[str]]] = None,
-                 end: Optional[str] = None) -> List[dict]:
+                 end: Optional[str] = None, repeats: Optional[List[dict]] = None) -> List[dict]:
     """Replay the scanner over the last ``days`` sessions and score each first-seen signal.
 
     :param data: ``{symbol: OHLCV frame}`` as returned by ``download_history``.
@@ -547,6 +574,11 @@ def walk_forward(data: Dict[str, pd.DataFrame], days: int, horizon: int,
         is scanned only on days it is in that set (``universe_history.Membership.members``).
     :param end: Last scan day (ISO); the window is the ``days`` sessions on or
         before it, so a past year can be replayed on its own.
+    :param repeats: When given, every later CONFIRMED listing of an already-seen
+        signal is appended to it: the day's signal fields plus ``first_day``,
+        ``listed_day`` (sessions since the first report, 1 = that report) and the
+        fill / outcome of buying it at the next open (:func:`_fill_outcome`).
+        First-seen rows carry ``first_day`` = ``scan_day`` and ``listed_day`` 1.
     :returns: One dict per first-seen CONFIRMED signal with the signal fields plus
         ``fill``, ``outcome``, ``bars``, ``exit``, ``r``, the :func:`row_features`,
         the market context (and for cups the parsed ``cup_bottom`` / ``cup_trigger``
@@ -559,8 +591,8 @@ def walk_forward(data: Dict[str, pd.DataFrame], days: int, horizon: int,
     """
     scan_days = scan_sessions(data, days, end)
     seen: Dict[tuple, dict] = {}
-    not_traded = dict(exit=None, r=None, mfe=None, mae=None, success5=None)
-    for d in scan_days:
+    first_no: Dict[tuple, int] = {}               # key -> position of its first report among the scan days
+    for no, d in enumerate(scan_days):
         ctx = _market_at(market, d)
         today = members(d) if members is not None else None
         for sym, df in data.items():
@@ -576,29 +608,23 @@ def walk_forward(data: Dict[str, pd.DataFrame], days: int, horizon: int,
                     continue
                 assert s.last_date == str(d.date()), "look-ahead: signal dated after the scan day"
                 key = (sym, s.pattern, round(s.stop, 2))
-                if key in seen:
-                    continue
                 after = df[df.index > d]
+                if key in seen:
+                    if repeats is not None:       # the report shows the row again: a late entry
+                        repeats.append({**scan.asdict(s), "scan_day": str(d.date()),
+                                        "first_day": seen[key]["scan_day"], "listed_day": no - first_no[key] + 1,
+                                        **_fill_outcome(s, after, horizon)})
+                    continue
+                first_no[key] = no
                 atr_last = round(float(scan.atr(hist).iloc[-1]), 4)
-                row = {**scan.asdict(s), "scan_day": str(d.date()), "atr": atr_last,
-                       "cup_bottom": None, "cup_trigger": None, **row_features(hist, s, atr_last), **ctx}
+                row = {**scan.asdict(s), "scan_day": str(d.date()), "first_day": str(d.date()), "listed_day": 1,
+                       "atr": atr_last, "cup_bottom": None, "cup_trigger": None,
+                       **row_features(hist, s, atr_last), **ctx}
                 if s.pattern == "Cup & Handle":
                     m = re.search(r"bottom \S+ @([\d.]+).*trigger ([\d.]+)", s.notes)
                     if m:
                         row["cup_bottom"], row["cup_trigger"] = float(m[1]), float(m[2])
-                if after.empty:
-                    row.update(fill=None, outcome="no_data", bars=0, **not_traded)
-                else:
-                    fill = float(after["Open"].iloc[0])
-                    max_buy = s.max_buy if s.max_buy is not None else s.entry * (1 + scan.MAX_RUNAWAY)
-                    if fill > max_buy:
-                        row.update(fill=round(fill, 2), outcome="gap", bars=0, **not_traded)
-                    elif fill <= s.stop:
-                        # The open is already through the stop: no trade, and R would be undefined.
-                        row.update(fill=round(fill, 2), outcome="below_stop", bars=0, **not_traded)
-                    else:
-                        res = ev.classify(fill, s.stop, s.target, after, horizon)
-                        row.update(fill=round(fill, 2), **res, **excursions(fill, s.stop, after, horizon))
+                row.update(_fill_outcome(s, after, horizon))
                 seen[key] = row
     return list(seen.values())
 
@@ -718,19 +744,67 @@ def feature_buckets(rows: Sequence[dict]) -> List[dict]:
     return out
 
 
+def _mean(xs: Sequence[float]) -> Optional[float]:
+    return round(sum(xs) / len(xs), 3) if xs else None
+
+
+def late_entry_table(rows: Sequence[dict], repeats: Sequence[dict]) -> List[dict]:
+    """Outcome of buying a signal on its Nth day on the list, against the same signals bought on day 1.
+
+    Day 1 is the first report (``rows``); a later listing (``repeats``, see
+    :func:`walk_forward`) belongs to the table when its first report is in
+    ``rows``, so a split window keeps a signal and its repeats together.  Each
+    day's row summarises the listings filled that day and pairs every traded
+    one with its own first report: ``pairs``, ``pair_day1_mean_r``,
+    ``pair_mean_r``, ``diff_mean_r`` (day N minus day 1 over the pairs) and the
+    month-block interval of that difference (``diff_ci_low`` / ``diff_ci_high``,
+    months of the first report).
+
+    :returns: One dict per day on the list with listings, in day order.
+    """
+    def key(r: dict) -> tuple:
+        return (r["ticker"], r["pattern"], round(float(r["stop"]), 2), r["first_day"])
+
+    first = {key(r): r for r in rows}
+    later = [r for r in repeats if key(r) in first]
+    out = []
+    for day in sorted({1} | {int(r["listed_day"]) for r in later}):
+        sub = list(rows) if day == 1 else [r for r in later if int(r["listed_day"]) == day]
+        s = summarise_rows(sub)
+        entry: Dict[str, Any] = {"listed_day": day, "listed": len(sub), "pairs": None, "pair_day1_mean_r": None,
+                                 "pair_mean_r": None, "diff_mean_r": None, "diff_ci_low": None, "diff_ci_high": None,
+                                 **{k: s[k] for k in ("n", "gap", "below_stop", "target", "stop", "open", "hit_rate",
+                                                       "mean_r", "median_r", "ci_low", "ci_high")}}
+        if day > 1:
+            pairs = [(first[key(r)], r) for r in sub
+                     if r["outcome"] in TRADED and r["r"] is not None
+                     and first[key(r)]["outcome"] in TRADED and first[key(r)]["r"] is not None]
+            diffs = [{"scan_day": a["scan_day"], "r": float(b["r"]) - float(a["r"])} for a, b in pairs]
+            boot = block_bootstrap(diffs)
+            entry.update(pairs=len(pairs), pair_day1_mean_r=_mean([float(a["r"]) for a, _ in pairs]),
+                         pair_mean_r=_mean([float(b["r"]) for _, b in pairs]),
+                         diff_mean_r=_mean([x["r"] for x in diffs]),
+                         diff_ci_low=boot["ci_low"], diff_ci_high=boot["ci_high"])
+        out.append(entry)
+    return out
+
+
 def report_sections(rows: Sequence[dict], days: int, horizon: int, split: Optional[str] = None,
                     data: Optional[Dict[str, pd.DataFrame]] = None, do_grid: bool = False,
-                    other_rows: Optional[Sequence[dict]] = None, other_name: Optional[str] = None) -> List[dict]:
+                    other_rows: Optional[Sequence[dict]] = None, other_name: Optional[str] = None,
+                    repeats: Optional[Sequence[dict]] = None) -> List[dict]:
     """One section per window (see :func:`split_windows`): its rows, ``breakdown``
     stats, the ``feature_buckets``, the ``horizon_table`` (with ``data``), the stop /
-    target ``grid`` (with ``do_grid`` and ``data``) and the other profile's stats
-    over the same window (with ``other_rows``)."""
+    target ``grid`` (with ``do_grid`` and ``data``), the other profile's stats
+    over the same window (with ``other_rows``) and the ``late_entry_table`` (with
+    ``repeats``)."""
     windows = split_windows(rows, split)
     others = split_windows(other_rows, split) if other_rows is not None else [(None, None)] * len(windows)
     sections = []
     for (label, rws), (_, o_rws) in zip(windows, others):
         sec: Dict[str, Any] = {"label": label, "rows": rws, "stats": breakdown(rws),
-                               "features": feature_buckets(rws), "horizons": None, "grid": None, "other": None}
+                               "features": feature_buckets(rws), "horizons": None, "grid": None, "other": None,
+                               "late": late_entry_table(rws, repeats) if repeats is not None else None}
         if data is not None:
             sec["horizons"] = horizon_table(rws, data)
             if do_grid:
@@ -803,6 +877,23 @@ def _feature_lines(buckets: Sequence[dict], label: str) -> List[str]:
     return lines
 
 
+def _late_lines(table: Sequence[dict], label: str) -> List[str]:
+    lines = ["", f"### Late entry: buying a signal on its Nth day on the list ({label})", "",
+             "Day 1 = the first report (the rows above). A signal stays listed while it is still CONFIRMED on later "
+             "scan days, and the report shows it again; each later listing is filled at the next open under the "
+             "same rules. Pairs = listings traded on both that day and day 1; the difference is day N minus day 1 "
+             "over those pairs, with its month-block interval.", "",
+             "| Day on the list | Listed | Traded | Hit rate | Mean R | Median R | 95% CI | Pairs | Day 1 mean R | "
+             "Day N mean R | Difference | 95% CI |",
+             "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+    for t in table:
+        diff_ci = "-" if t["diff_ci_low"] is None else f"[{t['diff_ci_low']:+.2f}, {t['diff_ci_high']:+.2f}]"
+        lines.append(f"| {t['listed_day']} | {t['listed']} | {t['n']} | {_pct(t['hit_rate'])} | {_r(t['mean_r'])} | "
+                     f"{_r(t['median_r'])} | {_ci(t)} | {t['pairs'] if t['pairs'] is not None else '-'} | "
+                     f"{_r(t['pair_day1_mean_r'])} | {_r(t['pair_mean_r'])} | {_r(t['diff_mean_r'])} | {diff_ci} |")
+    return lines
+
+
 def render(rows: Sequence[dict], sections: Sequence[dict], days: int, horizon: int,
            universe: Optional[Mapping[str, Any]] = None, end: Optional[str] = None) -> str:
     """Markdown report (readable as a GitHub step summary): the universe, one block per window, every signal."""
@@ -834,6 +925,8 @@ def render(rows: Sequence[dict], sections: Sequence[dict], days: int, horizon: i
             lines += _horizon_lines(sec["horizons"], sec["label"])
         if sec.get("features"):
             lines += _feature_lines(sec["features"], sec["label"])
+        if sec.get("late"):
+            lines += _late_lines(sec["late"], sec["label"])
         if sec["grid"]:
             lines += ["", f"### Stop / target variants (same signals, {sec['label']})", "",
                       "Extra ATR = distance added below the reported stop (which already sits 0.25 ATR under the "
@@ -951,29 +1044,32 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 json.dump({"days": args.days, "horizon": args.horizon, "bars": args.bars, "end": args.end,
                            "universe": universe, "ablation": table}, fh, indent=2)
         return 0
-    rows = walk_forward(data, args.days, args.horizon, **replay)
-    log.info("replay done in %.0fs: %d first-seen confirmed signals", time.time() - t0, len(rows))
+    repeats: List[dict] = []
+    rows = walk_forward(data, args.days, args.horizon, repeats=repeats, **replay)
+    log.info("replay done in %.0fs: %d first-seen confirmed signals, %d later listings",
+             time.time() - t0, len(rows), len(repeats))
     other_rows = other_name = None
     if args.grid:
         other_name = "legacy" if scan.ACTIVE_PROFILE == "spec" else "spec"
         other_rows = profile_pass(data, args.days, args.horizon, other_name, **replay)["rows"]
         log.info("%s-profile pass done in %.0fs: %d first-seen confirmed signals",
                  other_name, time.time() - t0, len(other_rows))
-    sections = report_sections(rows, args.days, args.horizon, args.split, data, args.grid, other_rows, other_name)
+    sections = report_sections(rows, args.days, args.horizon, args.split, data, args.grid, other_rows, other_name,
+                               repeats)
     print(render(rows, sections, args.days, args.horizon, universe, args.end))
     if args.json:
         pooled = sections[0]
-        keep = ("label", "stats", "features", "horizons", "grid", "other")
+        keep = ("label", "stats", "features", "horizons", "grid", "other", "late")
         with open(args.json, "w", encoding="utf-8") as fh:
             json.dump({"days": args.days, "horizon": args.horizon, "profile": scan.ACTIVE_PROFILE,
                        "min_score": scan.MIN_SCORE, "bars": args.bars, "split": args.split, "end": args.end,
                        "universe": universe, "market_symbols": sorted(market_frames),
                        "stats": pooled["stats"], "features": pooled["features"], "horizons": pooled["horizons"],
-                       "grid": pooled["grid"],
+                       "grid": pooled["grid"], "late": pooled["late"],
                        "other_profile": ({"profile": other_name, "stats": pooled["other"]["stats"], "rows": other_rows}
                                          if other_rows is not None else None),
                        "windows": [{k: s[k] for k in keep} for s in sections[1:]],
-                       "rows": rows}, fh, indent=2)
+                       "rows": rows, "repeats": repeats}, fh, indent=2)
     return 0
 
 

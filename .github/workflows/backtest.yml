@@ -107,3 +107,9 @@ jobs:
           if [ "$ASOF" = "true" ]; then cmd+=(--constituents-asof); fi
           for kv in $OVERRIDES; do cmd+=(--set "$kv"); done
           "${cmd[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Keep the JSON (rows, later listings, tables) so several runs can be pooled exactly
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: backtest-${{ github.run_id }}
+          path: backtest.json
+          if-no-files-found: ignore

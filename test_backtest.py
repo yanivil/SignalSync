@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import sys
@@ -435,3 +436,76 @@ def test_breakdown_and_render():
     assert "| all | 4 | 1 | 1 | 1 | 1 | 50% | +0.47 | +0.40 | +1.40 | - | -1.00 | - | 50% | +8.0% | -2.0% |" in md
     assert "| 2026-01-05 | T | Cup & Handle | 91 | 100.0 | 100.5 | 95.0 | 110.0 | gap | 0 | - |" in md
     assert isinstance(pd.DataFrame(rows), pd.DataFrame)
+
+
+# --------------------------------------------------------------------------- #
+# Late entry: later listings of an already-seen signal
+# --------------------------------------------------------------------------- #
+def _extend(df: pd.DataFrame, closes) -> pd.DataFrame:
+    """Append sessions closing at ``closes``: each opens at the prior close, with a small range and average volume."""
+    idx = pd.bdate_range(df.index[-1] + pd.Timedelta(days=1), periods=len(closes))
+    prev, rows = float(df["Close"].iloc[-1]), []
+    for c in closes:
+        rows.append({"Open": prev, "High": max(prev, c) * 1.005, "Low": min(prev, c) * 0.995, "Close": c,
+                     "Volume": float(df["Volume"].iloc[-30:].mean())})
+        prev = c
+    return pd.concat([df, pd.DataFrame(rows, index=idx)])
+
+
+def test_walk_forward_records_later_listings_as_late_entries(mini_universe):
+    cup = _extend(mini_universe["CUP"], [102.5, 103.0, 103.5])   # breakout at bar -5, listed for three more days
+    repeats = []
+    rows = bt.walk_forward({"CUP": cup}, days=6, horizon=10, repeats=repeats)
+    (first,) = rows
+    assert first["listed_day"] == 1 and first["first_day"] == first["scan_day"] == str(cup.index[-5].date())
+    assert [r["listed_day"] for r in repeats] == [2, 3, 4]         # a cup is dropped after age 3
+    for k, r in enumerate(repeats, start=2):
+        assert r["scan_day"] == str(cup.index[-6 + k].date()) and r["first_day"] == first["scan_day"]
+        assert r["stop"] == first["stop"] and r["bars_since_break"] == k - 1
+        assert r["fill"] == round(float(cup["Open"].iloc[-5 + k]), 2)  # the next session's open
+        assert r["outcome"] == "open" and r["bars"] == 5 - k
+    assert bt.walk_forward({"CUP": cup}, days=6, horizon=10) == rows   # opt-in: the first-seen rows do not change
+    table = bt.late_entry_table(rows, repeats)
+    assert [t["listed_day"] for t in table] == [1, 2, 3, 4] and [t["listed"] for t in table] == [1, 1, 1, 1]
+    assert table[0]["pairs"] is None and table[1]["pairs"] == 1
+    assert table[1]["pair_day1_mean_r"] == round(first["r"], 3) and table[1]["pair_mean_r"] == round(repeats[0]["r"], 3)
+    assert table[1]["diff_mean_r"] == round(repeats[0]["r"] - first["r"], 3)
+
+
+def test_late_entry_table_pairs_each_later_listing_with_its_first_report():
+    def sig(ticker, day, r, outcome="open", first_day=None, listed_day=1):
+        return {"ticker": ticker, "pattern": "Cup & Handle", "stop": 90.0, "scan_day": day,
+                "first_day": first_day or day, "listed_day": listed_day, "outcome": outcome, "r": r,
+                "success5": None, "mfe": 0.01 if outcome != "gap" else None, "mae": -0.01 if outcome != "gap" else None}
+    rows = [sig("A", "2026-01-05", 1.0), sig("B", "2026-02-03", -1.0), sig("C", "2026-03-02", 0.5)]
+    repeats = [sig("A", "2026-01-06", 0.5, first_day="2026-01-05", listed_day=2),
+               sig("B", "2026-02-04", None, outcome="gap", first_day="2026-02-03", listed_day=2),
+               sig("C", "2026-03-03", -1.0, first_day="2026-03-02", listed_day=2),
+               sig("A", "2026-01-07", 2.0, first_day="2026-01-05", listed_day=3),
+               sig("Z", "2026-01-07", 9.0, first_day="2026-01-05", listed_day=3)]   # no first report in rows: ignored
+    d1, d2, d3 = bt.late_entry_table(rows, repeats)
+    assert (d1["listed_day"], d1["listed"], d1["n"], d1["mean_r"], d1["pairs"]) == (1, 3, 3, 0.167, None)
+    assert (d2["listed_day"], d2["listed"], d2["n"], d2["gap"]) == (2, 3, 2, 1)     # the gap is listed, not traded
+    assert (d2["pairs"], d2["pair_day1_mean_r"], d2["pair_mean_r"], d2["diff_mean_r"]) == (2, 0.75, -0.25, -1.0)
+    assert d2["diff_ci_low"] is None                                            # two pairs: no interval
+    assert (d3["listed_day"], d3["listed"], d3["pairs"], d3["diff_mean_r"]) == (3, 1, 1, 1.0)
+
+
+def test_render_late_entry_section_and_json(mini_universe, monkeypatch, tmp_path, capsys):
+    cup = _extend(mini_universe["CUP"], [102.5, 103.0, 103.5])
+    repeats = []
+    rows = bt.walk_forward({"CUP": cup}, days=6, horizon=10, repeats=repeats)
+    sections = bt.report_sections(rows, 6, 10, repeats=repeats)
+    md = bt.render(rows, sections, 6, 10)
+    assert "### Late entry: buying a signal on its Nth day on the list (all sessions)" in md
+    assert f"| 2 | 1 | 1 | - | {bt._r(repeats[0]['r'])} |" in md                 # nothing resolved: no hit rate
+    assert bt.report_sections(rows, 6, 10)[0]["late"] is None                    # without repeats: no table
+    # End to end: main collects the later listings and writes the table and the rows to the JSON.
+    monkeypatch.setattr(scan, "load_sp500_symbols", lambda csv=None: ["CUP"])
+    monkeypatch.setattr(scan, "download_history",
+                        lambda symbols, period="2y": {"CUP": cup} if "CUP" in symbols else {})
+    out = tmp_path / "bt.json"
+    assert bt.main(["--days", "6", "--horizon", "10", "--json", str(out)]) == 0
+    doc = json.loads(out.read_text())
+    assert [t["listed_day"] for t in doc["late"]] == [1, 2, 3, 4] and len(doc["repeats"]) == 3
+    assert "Late entry" in capsys.readouterr().out
