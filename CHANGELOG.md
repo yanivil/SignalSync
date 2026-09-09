@@ -16,6 +16,10 @@ All notable changes to this project are documented here. Format follows
   takes `repeats=`; first-seen rows carry `first_day` and `listed_day`; the
   JSON gains `late` and `repeats`; each `backtest` run keeps its JSON as a
   workflow artifact (`backtest-<run id>`) so several runs pool exactly.
+  Replayed over the eleven yearly point-in-time runs (tuning page): a row on
+  its second day is as good as new; from the third day the same signal pays
+  about 0.1 R less than on day 1, in ten of eleven years; from day 7 no edge
+  remains, for a Wolfe from day 6. No rule changed.
 
 ### Added (report: the F&G column)
 - Every report row carries `F&G`, the stock's own fear-and-greed reading at
