@@ -117,6 +117,8 @@ Signals are sorted `CONFIRMED` first, then by score descending. `output/report.m
 | `FADED` | the close fell more than `WATCH_PROXIMITY` (5 %) below the entry |
 | `DROPPED` | none of the above: the pattern itself no longer qualifies, or no price data. When one of today's reward or patience rules would reject the old row on its own levels and anchors, the detail says so ("reward:risk 0.36 below the minimum 1.5", "no breakout within 60 bars of the right shoulder on 2026-01-29 (156 bars)") |
 
+**Web page.** `tools/build_site.py` renders `output/signals.json` and the live track record (`tools/evaluate_signals.py --json`) into one self-contained `index.html` (the stylesheet and script in `site/` are inlined) plus `data.json`, the view model: the market strip; one card per confirmed row with the buy zone (entry to Max buy), stop, target and reward:risk, an action line that restates the report's rule graded by the row's day on the list (#115: days 1-2 enter, days 3-6 late, from day 7 no entry, a Wolfe from day 6), chips for the regime, trend, volume and fear-and-greed, the pattern anchors and the tuning page's figure for that pattern; the watchlist with the distance to each trigger; the rows closed since the previous report; the track record with its cumulative-R curve; and a glossary with the eleven-year reference tables. Nothing on it is computed anew: every number is the scanner's or the evaluator's, and the day on the list comes from the evaluator's `listed_days` when its `last_listed` is the row's own session.
+
 ## 5. Scheduling
 
 ```

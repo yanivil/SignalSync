@@ -131,12 +131,15 @@ test_patterns.py                     primitive precision, formula verification, 
 test_pipeline.py                     retry policy, universe loading, end-to-end mini universe
 test_evaluate.py                     outcome classification and the git signal log
 test_backtest.py                     walk-forward replay: no look-ahead, first-seen signals, fills, breakdowns
+test_build_site.py                   the web page: grades by day on the list, levels, track record, HTML
 test_universe_history.py             point-in-time membership from a git history
 conftest.py                          shared fixtures and the offline yfinance stand-in
 tools/debug_last_bar.py              per-symbol last-bar diagnostics (also a manual GitHub workflow)
 tools/evaluate_signals.py            replay past CONFIRMED signals against later prices (manual workflow)
 tools/backtest.py                    walk-forward replay of the scanner over the last N sessions (manual workflow)
 tools/universe_history.py            index membership as of any past date, from the constituent dataset's git history
+tools/build_site.py                  builds the web page from signals.json and the live track record
+site/                                stylesheet and script that tools/build_site.py inlines into the page
 .github/workflows/daily-scan.yml     01:17 UTC daily: tests, scan, commit output/
 .github/workflows/tests.yml          lint + tests + coverage on pull requests and pushes to main
 .github/workflows/sync-wiki.yml      mirrors docs/wiki/ into the GitHub wiki

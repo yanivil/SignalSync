@@ -5,6 +5,17 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Added (the web page)
+- `tools/build_site.py` builds a self-contained `index.html` (plus
+  `data.json`, the view model) from `output/signals.json` and the live track
+  record: the market strip, one card per confirmed row with the buy zone,
+  stop, target and an action line graded by the row's day on the list
+  (#115), the watchlist with the distance to each trigger, the rows closed
+  since the previous report, the track record with its cumulative-R curve,
+  a glossary and the eleven-year reference tables. `site/style.css` and
+  `site/app.js` are inlined; light and dark themes; no external assets.
+  Deployment to GitHub Pages follows in its own change.
+
 ### Changed (live track record: the backtest's accounting)
 - `tools/evaluate_signals.py` scores the committed signals the way the
   backtest scores replayed ones: the fill is the next session's open, an open
