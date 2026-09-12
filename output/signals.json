@@ -1,17 +1,17 @@
 {
   "meta": {
-    "run_date": "2026-09-11 06:00",
+    "run_date": "2026-09-12 05:48",
     "universe": 503,
     "scanned": 503,
     "errors": 0,
-    "last_bar": "2026-09-10",
+    "last_bar": "2026-09-11",
     "last_bar_symbols": 503,
     "lagging_symbols": 0,
     "skipped_bar": null,
     "skipped_bar_complete": 0,
     "skipped_bar_partial": 0,
     "last_bar_histogram": {
-      "2026-09-10": 503
+      "2026-09-11": 503
     },
     "filled_close_symbols": 0,
     "profile": "tuned",
@@ -22,13 +22,13 @@
     "max_buy_risk_mult": 1.5,
     "market": {
       "index": "SPY",
-      "as_of": "2026-09-10",
-      "index_close": 757.83,
-      "index_vs_sma200_pct": 6.51,
-      "index_sma50_vs_sma200_pct": 6.57,
+      "as_of": "2026-09-11",
+      "index_close": 764.29,
+      "index_vs_sma200_pct": 7.34,
+      "index_sma50_vs_sma200_pct": 6.54,
       "regime": "bull",
-      "vix": 17.84,
-      "breadth": 0.5768,
+      "vix": 15.84,
+      "breadth": 0.5948,
       "breadth_symbols": 501
     },
     "max_breakout_age_by_pattern": {
@@ -36,47 +36,47 @@
       "Inverse Head & Shoulders": 8,
       "Bullish Wolfe Wave": 8
     },
-    "previous_run": "2026-09-10 05:59",
+    "previous_run": "2026-09-11 06:00",
     "previous_profile": "tuned"
   },
   "signals": [
     {
       "ticker": "HAL",
       "pattern": "Inverse Head & Shoulders",
-      "status": "CONFIRMED",
-      "entry": 36.07,
+      "status": "WATCHLIST",
+      "entry": 35.85,
       "stop": 32.64,
-      "risk_pct": 9.51,
-      "target": 41.21,
+      "risk_pct": 8.94,
+      "target": 40.99,
       "score": 87,
-      "last_close": 36.07,
-      "last_date": "2026-09-10",
-      "bars_since_break": 8,
-      "volume_ratio": 0.9,
+      "last_close": 35.84,
+      "last_date": "2026-09-11",
+      "bars_since_break": null,
+      "volume_ratio": null,
       "trend": "close above SMA200, SMA50 < SMA200, SMA200 rising/flat",
       "notes": "LS 2026-07-02 @32.44, head 2026-07-30 @30.84, RS 2026-08-26 @32.88, neckline 36.03->35.91 (now 35.85)",
-      "max_buy": 37.68,
-      "reward_risk": 1.5,
-      "fear_greed": 59.7
+      "max_buy": 37.45,
+      "reward_risk": 1.6,
+      "fear_greed": 53.3
     },
     {
-      "ticker": "GILD",
+      "ticker": "HAS",
       "pattern": "Cup & Handle",
       "status": "WATCHLIST",
-      "entry": 151.48,
-      "stop": 142.83,
-      "risk_pct": 5.71,
-      "target": 183.43,
+      "entry": 95.99,
+      "stop": 91.41,
+      "risk_pct": 4.77,
+      "target": 118.7,
       "score": 75,
-      "last_close": 144.81,
-      "last_date": "2026-09-10",
+      "last_close": 91.54,
+      "last_date": "2026-09-11",
       "bars_since_break": null,
       "volume_ratio": null,
       "trend": "close above SMA200, SMA50 > SMA200, SMA200 rising/flat",
-      "notes": "left rim 2026-02-11 @155.38, bottom 2026-06-10 @120.60 (depth 22%), right rim 2026-09-02 @152.55, handle low 2026-09-10 @143.67 (depth 5.8%), trigger 151.48",
-      "max_buy": 155.81,
-      "reward_risk": 3.69,
-      "fear_greed": 36.4
+      "notes": "left rim 2026-05-07 @97.30, bottom 2026-07-08 @74.63 (depth 23%), right rim 2026-08-14 @97.34, handle low 2026-08-20 @92.01 (depth 5.5%), trigger 95.99",
+      "max_buy": 98.28,
+      "reward_risk": 4.96,
+      "fear_greed": 28.6
     },
     {
       "ticker": "PH",
@@ -87,15 +87,15 @@
       "risk_pct": 6.03,
       "target": 1168.83,
       "score": 75,
-      "last_close": 934.34,
-      "last_date": "2026-09-10",
+      "last_close": 950.23,
+      "last_date": "2026-09-11",
       "bars_since_break": null,
       "volume_ratio": null,
-      "trend": "close below SMA200, SMA50 > SMA200, SMA200 rising/flat",
+      "trend": "close above SMA200, SMA50 > SMA200, SMA200 rising/flat",
       "notes": "left rim 2026-04-17 @1024.62, bottom 2026-06-01 @813.37 (depth 21%), right rim 2026-06-25 @1001.77, handle low 2026-07-07 @927.47 (depth 7.4%), trigger 980.43",
       "max_buy": 1009.98,
       "reward_risk": 3.19,
-      "fear_greed": 17.3
+      "fear_greed": 24.3
     },
     {
       "ticker": "RTX",
@@ -106,58 +106,28 @@
       "risk_pct": 5.75,
       "target": 233.5,
       "score": 71,
-      "last_close": 198.12,
-      "last_date": "2026-09-10",
+      "last_close": 197.68,
+      "last_date": "2026-09-11",
       "bars_since_break": null,
       "volume_ratio": null,
       "trend": "close above SMA200, SMA50 > SMA200, SMA200 rising/flat",
       "notes": "left rim 2026-04-09 @203.83, bottom 2026-05-15 @169.51 (depth 17%), right rim 2026-07-07 @203.26, handle low 2026-07-21 @189.39 (depth 6.8%), trigger 199.75",
       "max_buy": 205.49,
       "reward_risk": 2.94,
-      "fear_greed": 18.2
-    },
-    {
-      "ticker": "HAS",
-      "pattern": "Cup & Handle",
-      "status": "WATCHLIST",
-      "entry": 94.64,
-      "stop": 87.66,
-      "risk_pct": 7.37,
-      "target": 116.29,
-      "score": 68,
-      "last_close": 90.16,
-      "last_date": "2026-09-10",
-      "bars_since_break": null,
-      "volume_ratio": null,
-      "trend": "close above SMA200, SMA50 > SMA200, SMA200 rising/flat",
-      "notes": "left rim 2026-05-07 @97.30, bottom 2026-07-08 @74.63 (depth 23%), right rim 2026-07-29 @96.28, handle low 2026-08-04 @88.44 (depth 8.1%), trigger 94.64",
-      "max_buy": 98.13,
-      "reward_risk": 3.1,
-      "fear_greed": 18.9
+      "fear_greed": 19.7
     }
   ],
   "closed": [
     {
-      "ticker": "BKR",
+      "ticker": "GILD",
       "pattern": "Cup & Handle",
       "was": "WATCHLIST",
-      "since": "2026-09-09",
-      "entry": 66.09,
-      "stop": 60.48,
-      "target": 79.45,
-      "outcome": "FAILED",
-      "detail": "close 59.40 on 2026-09-10 at or below stop 60.48"
-    },
-    {
-      "ticker": "EXPE",
-      "pattern": "Cup & Handle",
-      "was": "WATCHLIST",
-      "since": "2026-09-09",
-      "entry": 274.29,
-      "stop": 248.41,
-      "target": 344.09,
-      "outcome": "DROPPED",
-      "detail": "pattern no longer qualifies"
+      "since": "2026-09-10",
+      "entry": 151.48,
+      "stop": 142.83,
+      "target": 183.43,
+      "outcome": "FADED",
+      "detail": "close 143.72 more than 5% below entry 151.48"
     }
   ]
 }
