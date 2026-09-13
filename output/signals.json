@@ -1,6 +1,6 @@
 {
   "meta": {
-    "run_date": "2026-09-12 05:48",
+    "run_date": "2026-09-13 06:11",
     "universe": 503,
     "scanned": 503,
     "errors": 0,
@@ -36,7 +36,7 @@
       "Inverse Head & Shoulders": 8,
       "Bullish Wolfe Wave": 8
     },
-    "previous_run": "2026-09-11 06:00",
+    "previous_run": "2026-09-12 05:48",
     "previous_profile": "tuned"
   },
   "signals": [
@@ -117,17 +117,5 @@
       "fear_greed": 19.7
     }
   ],
-  "closed": [
-    {
-      "ticker": "GILD",
-      "pattern": "Cup & Handle",
-      "was": "WATCHLIST",
-      "since": "2026-09-10",
-      "entry": 151.48,
-      "stop": 142.83,
-      "target": 183.43,
-      "outcome": "FADED",
-      "detail": "close 143.72 more than 5% below entry 151.48"
-    }
-  ]
+  "closed": []
 }
