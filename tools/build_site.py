@@ -89,7 +89,8 @@ GLOSSARY = (
             "inverse H&S or a Wolfe, whose last pivot is only visible five bars after it prints)."),
     ("Day on the list", "Sessions since the row was first reported. In the eleven-year replay a row on its second "
                         "day was as good as new; from the third day the same signals paid about 0.1 R less than on "
-                        "day 1; from day 7 (a Wolfe from day 6) no edge was left for late buyers."),
+                        "day 1; from day 7 (a Wolfe from day 6) no edge was left for late buyers, so the scanner "
+                        "retires a confirmed row after its sixth session, a Wolfe after its fifth."),
     ("Vol×", "Breakout-day volume against the 20-day average."),
     ("F&G", "The stock's own fear-and-greed reading at the last close, 0 to 100 (RSI 14, MACD-histogram percentile "
             "and Bollinger %B averaged). Above 80 the stock is stretched and such breakouts replayed worst; below "
@@ -116,11 +117,16 @@ def _key(row: Mapping[str, Any]) -> tuple:
 
 
 def day_on_list(signal: Mapping[str, Any], evaluation_rows: Sequence[Mapping[str, Any]]) -> Optional[int]:
-    """Sessions since the signal was first reported, from the track record's ``listed_days``.
+    """Sessions since the signal was first reported.
 
-    ``None`` when the track record does not know the row, or was built before
-    the signal's own session (its ``last_listed`` is older than ``last_date``).
+    The scanner's own ``listed_day`` when the file carries it (the count the
+    listing rule retires rows by, from 2026-09-15); before that, the track
+    record's ``listed_days``.  ``None`` when neither knows the row, or the
+    track record was built before the signal's own session (its
+    ``last_listed`` is older than ``last_date``).
     """
+    if signal.get("listed_day") is not None:
+        return int(signal["listed_day"])
     for r in evaluation_rows:
         if _key(r) == _key(signal):
             return int(r["listed_days"]) if r.get("last_listed") == signal["last_date"] else None

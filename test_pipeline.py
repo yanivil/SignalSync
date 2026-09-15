@@ -170,13 +170,17 @@ def test_end_to_end_mini_universe(tmp_path, universe_csv, fake_yfinance, mini_un
     rows = [ln for ln in report.splitlines() if ln.startswith("| ") and not ln.startswith("| Ticker")]
     assert len(rows) == len(signals)
     for ln in rows:
-        assert ln.count("|") == 15, ln                       # 14 columns
+        assert ln.count("|") == 16, ln                       # 15 columns
     by_row = {ln.split(" | ")[0].lstrip("| "): ln for ln in rows}
     for s in signals:                                        # Age column: bars/limit for confirmed, '-' otherwise
         cells = by_row[s["ticker"]].split(" | ")
         assert cells[9] == (f"{s['bars_since_break']}/{scan.max_breakout_age(s['pattern'])}"
                             if s["status"] == "CONFIRMED" else "-"), by_row[s["ticker"]]
-        assert 0 <= s["fear_greed"] <= 100 and cells[11] == str(s["fear_greed"])   # F&G column, one reading per symbol
+        assert 0 <= s["fear_greed"] <= 100 and cells[12] == str(s["fear_greed"])   # F&G column, one reading per symbol
+        # Day column: sessions on the list / the limit; a first run lists every confirmed row on its day 1.
+        limit = scan.max_listed_days(s["pattern"])
+        assert cells[10] == (f"1/{limit}" if s["status"] == "CONFIRMED" else "-"), by_row[s["ticker"]]
+        assert (s["first_listed"], s["listed_day"]) == ((END, 1) if s["status"] == "CONFIRMED" else (None, None))
         assert s["fear_greed"] == scan.fear_greed(mini_universe[s["ticker"]]["Close"].to_numpy())["score"]
         assert float(cells[3]) == s["max_buy"] and s["entry"] < s["max_buy"] <= round(s["entry"] * 1.06, 2)
         assert s["max_buy"] == scan.max_buy_level(s["entry"], s["entry"], s["stop"]) or \
@@ -185,6 +189,8 @@ def test_end_to_end_mini_universe(tmp_path, universe_csv, fake_yfinance, mini_un
         if s["target"] is not None:                                            # R:R = (target-entry)/(entry-stop)
             assert s["reward_risk"] == pytest.approx((s["target"] - s["entry"]) / (s["entry"] - s["stop"]), abs=0.01)
     assert "## Closed since the last report" in report and data["closed"] == []   # first run: nothing to close
+    assert data["retired"] == [] and meta["max_listed_days"] == scan.MAX_LISTED_DAYS
+    assert "A confirmed row is retired after its" in report and "| Day |" in report
     # No index or volatility frames in this fake: the context degrades to breadth alone, never to a failure.
     m = meta["market"]
     assert m["regime"] is None and m["vix"] is None and m["index_close"] is None
@@ -223,6 +229,7 @@ def test_close_out_classifies_every_vanished_setup():
                            2, None, "", "")]
     closed = {c["ticker"]: c for c in scan.close_out(previous, current, data)}
     assert "STILL" not in closed
+    assert "HIT" not in {c["ticker"] for c in scan.close_out(previous, current, data, skip={("HIT", "Cup & Handle")})}
     assert closed["HIT"]["outcome"] == "TARGET_REACHED" and "2026-03-03" in closed["HIT"]["detail"]
     assert closed["STOP"]["outcome"] == "FAILED" and "94.50" in closed["STOP"]["detail"]
     assert closed["BOTH"]["outcome"] == "FAILED"                              # same bar: conservative
@@ -257,6 +264,85 @@ def test_second_run_reports_what_happened_to_yesterdays_rows(tmp_path, universe_
     assert "CUP" in closed and closed["CUP"]["outcome"] == "TARGET_REACHED" and closed["CUP"]["was"] == "CONFIRMED"
     assert "## Closed since the last report" in report
     assert "| CUP | Cup & Handle | CONFIRMED | TARGET_REACHED | " in report
+    # The rows confirmed on both nights carry their first listing forward: three sessions later is day 4.
+    first_conf = {s["ticker"]: s["stop"] for s in first["signals"] if s["status"] == "CONFIRMED"}
+    carried = [s for s in second["signals"] if s["status"] == "CONFIRMED" and first_conf.get(s["ticker"]) == s["stop"]]
+    assert carried and all((s["first_listed"], s["listed_day"]) == (END, 4) for s in carried)
+    assert any(f"| 4/{scan.max_listed_days(s['pattern'])} |" in report for s in carried) and second["retired"] == []
+
+
+def test_third_run_retires_a_row_listed_past_its_limit(tmp_path, universe_csv, fake_yfinance, mini_universe):
+    fake_yfinance(mini_universe)
+    rc, first, _ = _run(tmp_path, universe_csv)
+    row = next(s for s in first["signals"] if s["status"] == "CONFIRMED")
+    limit = scan.max_listed_days(row["pattern"])
+    # Pretend the structure was first reported so that today is one session past the limit: edit yesterday's file.
+    out = tmp_path / "out" / "signals.json"
+    doc = json.loads(out.read_text())
+    early = str(pd.bdate_range(end=END, periods=limit + 1)[0].date())
+    for s in doc["signals"]:
+        if s["ticker"] == row["ticker"]:
+            s["first_listed"] = early
+    out.write_text(json.dumps(doc))
+    rc, second, report = _run(tmp_path, universe_csv)
+    assert rc == 0 and row["ticker"] not in {s["ticker"] for s in second["signals"]}
+    (closed,) = [c for c in second["closed"] if c["ticker"] == row["ticker"]]
+    detail = f"listed {limit + 1} sessions since {early}, limit {limit}"
+    assert (closed["outcome"], closed["was"], closed["since"]) == ("RETIRED", "CONFIRMED", early)
+    assert closed["detail"] == detail
+    assert second["retired"] == [{"ticker": row["ticker"], "pattern": row["pattern"], "stop": row["stop"],
+                                  "first_listed": early, "retired_on": END, "detail": detail}]
+    assert f"| {row['ticker']} | {row['pattern']} | CONFIRMED | RETIRED | " in report
+    # The next night the detector still produces the structure: it stays silent and remembered, never "new" again.
+    rc, third, report = _run(tmp_path, universe_csv)
+    assert rc == 0 and row["ticker"] not in {s["ticker"] for s in third["signals"]}
+    assert not [c for c in third["closed"] if c["ticker"] == row["ticker"]] and third["retired"] == second["retired"]
+    assert f"| {row['ticker']} |" not in report.split("## Closed since")[1]
+
+
+def test_carry_listing_counts_sessions_and_retires_late_rows():
+    idx = pd.bdate_range("2026-08-24", periods=10)                  # 2026-08-24 .. 2026-09-04
+    frame = pd.DataFrame({"Open": 100.0, "High": 101.0, "Low": 99.0, "Close": 100.0}, index=idx)
+    data = {t: frame for t in ("NEW", "OLD", "IHS", "WW", "CUP", "BACK", "GONE")}
+    today = str(idx[-1].date())
+    ihs, ww, cup = "Inverse Head & Shoulders", "Bullish Wolfe Wave", "Cup & Handle"
+
+    def sig(t, pattern, status="CONFIRMED", stop=95.0):
+        return scan.Signal(t, pattern, status, 100.0, stop, 5.0, 110.0, 70, 100.0, today,
+                           0 if status == "CONFIRMED" else None, None, "", "")
+
+    def prev(t, pattern, status="CONFIRMED", stop=95.0, last_date="2026-09-03", first=None):
+        return {"ticker": t, "pattern": pattern, "status": status, "stop": stop, "last_date": last_date,
+                **({"first_listed": first} if first else {})}
+
+    signals = [sig("NEW", ihs), sig("OLD", ihs), sig("IHS", ihs), sig("WW", ww), sig("CUP", cup),
+               sig("BACK", ihs, status="WATCHLIST"), sig("GONE", ihs)]
+    previous = [prev("OLD", ihs),                                          # yesterday's file predates the field
+                prev("IHS", ihs, first="2026-08-28"),                      # day 6 today: the last allowed
+                prev("WW", ww, first="2026-08-28"),                        # day 6 for a Wolfe: past its limit of 5
+                prev("CUP", cup, first="2026-08-24"),                      # day 10: the limit holds for cups too
+                prev("BACK", ihs, status="WATCHLIST", first="2026-08-31"),  # pulled back: the count goes on
+                prev("STALE", ihs, first="2026-08-20")]                    # not produced today: nothing to carry
+    memory = [{"ticker": "GONE", "pattern": ihs, "stop": 95.0, "first_listed": "2026-08-20",
+               "retired_on": "2026-09-03"},
+              {"ticker": "STALE", "pattern": ihs, "stop": 95.0, "first_listed": "2026-08-20",
+               "retired_on": "2026-09-02"}]
+    kept, retired, closed = scan.carry_listing(signals, previous, memory, data)
+    by = {s.ticker: s for s in kept}
+    assert (by["NEW"].first_listed, by["NEW"].listed_day) == (today, 1)
+    assert (by["OLD"].first_listed, by["OLD"].listed_day) == ("2026-09-03", 2)   # counted from the previous report
+    assert (by["IHS"].first_listed, by["IHS"].listed_day) == ("2026-08-28", 6)
+    assert (by["BACK"].first_listed, by["BACK"].listed_day) == ("2026-08-31", 5)  # a watchlist row keeps its count
+    assert set(by) == {"NEW", "OLD", "IHS", "BACK"}                                 # WW, CUP retired; GONE remembered
+    assert [(c["ticker"], c["outcome"]) for c in closed] == [("WW", "RETIRED"), ("CUP", "RETIRED")]
+    assert closed[0]["detail"] == "listed 6 sessions since 2026-08-28, limit 5" and closed[0]["was"] == "CONFIRMED"
+    assert [r["ticker"] for r in retired] == ["GONE", "WW", "CUP"]        # STALE no longer produced: forgotten
+    assert retired[1] == {"ticker": "WW", "pattern": ww, "stop": 95.0, "first_listed": "2026-08-28",
+                          "retired_on": today, "detail": closed[0]["detail"]}
+    # Legacy profile: no limit, nothing retired, the count still reported.
+    scan.apply_profile("legacy")
+    kept, retired, closed = scan.carry_listing([sig("CUP", cup)], [prev("CUP", cup, first="2026-08-24")], [], data)
+    assert closed == [] and retired == [] and kept[0].listed_day == 10
 
 
 def test_end_to_end_min_score_filters_and_is_reported(tmp_path, universe_csv, fake_yfinance, mini_universe):
