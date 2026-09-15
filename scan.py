@@ -44,7 +44,7 @@ import sys
 import time
 import urllib.request
 from dataclasses import dataclass, asdict
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
+from typing import Any, Callable, Container, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import pandas as pd
@@ -188,6 +188,15 @@ MAX_WAIT_BARS: Optional[int] = None      # drop a WATCHLIST row whose last ancho
 #                                          point 5) is more than this many bars old; breakouts are always reported
 MAX_BUY_RISK_MULT: Optional[float] = 1.5  # Max buy is also capped where the risk at the fill reaches this x the
 #                                          planned (entry - stop); None = trigger + MAX_RUNAWAY only
+# Sessions a confirmed row stays listed from its first report, per pattern (None = no limit).  The
+# eleven-year late-entry replay (#115, 2026-09-09) scored every later listing of a signal against the
+# same signal bought at its first report: a row on its second day was as good as new, from the third
+# the same signals paid about 0.1 R less than on day 1 (worse in 10 of 11 years), and from day 7 (a
+# Wolfe from day 6) nothing was left for a late buyer.  So a row is retired at the limit rather than
+# shown again as an entry; the breakout age limit still applies on top.  Carried across nights through
+# ``first_listed`` in the previous signals.json (see ``carry_listing``).
+MAX_LISTED_DAYS: Dict[str, Optional[int]] = {"Cup & Handle": 6, "Inverse Head & Shoulders": 6,
+                                             "Bullish Wolfe Wave": 5}
 
 RULE_PROFILES: Dict[str, Dict[str, Any]] = {
     "spec": {},                          # the module defaults above
@@ -215,6 +224,7 @@ RULE_PROFILES: Dict[str, Dict[str, Any]] = {
         "VOLUME_CONFIRM": {"Cup & Handle": None, "Inverse Head & Shoulders": None, "Bullish Wolfe Wave": None},
         "MAX_RISK_PCT": {"Cup & Handle": 15.0, "Inverse Head & Shoulders": 15.0, "Bullish Wolfe Wave": 15.0},
         "MIN_REWARD_RISK": None, "MAX_WAIT_BARS": None, "MAX_BUY_RISK_MULT": None,
+        "MAX_LISTED_DAYS": {"Cup & Handle": None, "Inverse Head & Shoulders": None, "Bullish Wolfe Wave": None},
     },
 }
 ACTIVE_PROFILE = "spec"
@@ -248,6 +258,12 @@ def max_breakout_age(pattern: str) -> int:
         ``BREAKOUT_AGE_LAG``).  Reads the module global so ``--max-age`` applies.
     """
     return MAX_BREAKOUT_AGE + BREAKOUT_AGE_LAG.get(pattern, 0)
+
+
+def max_listed_days(pattern: str) -> Optional[int]:
+    """Sessions a confirmed ``pattern`` row stays listed from its first report (``MAX_LISTED_DAYS``);
+    ``None`` = no limit."""
+    return MAX_LISTED_DAYS.get(pattern)
 
 
 def reward_risk(entry: float, stop: float, target: Optional[float]) -> Optional[float]:
@@ -327,6 +343,11 @@ class Signal:
     :param reward_risk: ``(target - entry) / (entry - stop)`` or None (see :func:`reward_risk`).
     :param fear_greed: The stock's fear-and-greed composite at the last close, 0-100
         (see :func:`fear_greed`); informational.
+    :param first_listed: Session (ISO) of the row's first CONFIRMED report, carried
+        from the previous ``signals.json`` (see :func:`carry_listing`); ``None`` for
+        a watchlist row that was never confirmed.
+    :param listed_day: Sessions from ``first_listed`` to ``last_date`` inclusive
+        (1 = first report); the row is retired past ``max_listed_days(pattern)``.
     """
 
     ticker: str
@@ -346,6 +367,8 @@ class Signal:
     max_buy: Optional[float] = None      # above this at the open, do not chase (max_buy_level)
     reward_risk: Optional[float] = None  # reward per unit of planned risk, None without a target
     fear_greed: Optional[float] = None   # the stock's fear-and-greed reading at the last close, 0-100 (fear_greed)
+    first_listed: Optional[str] = None   # session of the first CONFIRMED report of this structure (carry_listing)
+    listed_day: Optional[int] = None     # sessions on the list, 1 = first report; retired past MAX_LISTED_DAYS
 
 
 # --------------------------------------------------------------------------- #
@@ -1692,8 +1715,78 @@ def scan_symbol(sym: str, df: pd.DataFrame, detectors: Optional[Sequence[Callabl
     return out
 
 
+def _listing_key(row: Any) -> tuple:
+    """The identity of a structure across nights: ticker, pattern and the stop, the anchor that does not move
+    (the replay and the evaluator key the same way)."""
+    get = row.get if isinstance(row, Mapping) else lambda k: getattr(row, k)
+    return (get("ticker"), get("pattern"), round(float(get("stop")), 2))
+
+
+def carry_listing(signals: Sequence[Signal], previous: Sequence[Mapping[str, Any]],
+                  previous_retired: Sequence[Mapping[str, Any]], data: Mapping[str, pd.DataFrame]
+                  ) -> Tuple[List[Signal], List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Give every row its first listing and its day on the list; retire confirmed rows past ``MAX_LISTED_DAYS``.
+
+    ``first_listed`` is the session of the structure's first CONFIRMED report,
+    carried from the previous file whatever the row's status in between, so a
+    pull-back to the watchlist does not restart the count (the replay counted
+    sessions the same way); a previous row that predates the field counts
+    from the previous report's session.  ``listed_day`` is the number of
+    sessions from that bar to today's, inclusive.
+
+    A confirmed row whose ``listed_day`` exceeds its pattern's limit is
+    retired: reported once in the close-out list (``RETIRED``) and remembered
+    in the file's ``retired`` list for as long as the scan keeps producing the
+    structure, in any status, so it neither returns as "new" the next night
+    nor sits on the watchlist inviting the entry the replay found worthless.
+    The memory is dropped when the structure is no longer produced.
+
+    :param signals: Today's signals (mutated: ``first_listed`` / ``listed_day``).
+    :param previous: ``signals`` list of the previous ``signals.json``.
+    :param previous_retired: ``retired`` list of the previous ``signals.json``.
+    :param data: ``{symbol: OHLCV frame}`` through today, to count sessions.
+    :returns: ``(kept, retired, closed)``: the rows to report, the ``retired``
+        list to write, and today's retirements as close-out dicts.
+
+    Complexity: O(previous + signals).
+    """
+    first_seen: Dict[tuple, str] = {}
+    for p in previous:
+        first = p.get("first_listed") or (p.get("last_date") if p.get("status") == "CONFIRMED" else None)
+        key = _listing_key(p)
+        if first and (key not in first_seen or first < first_seen[key]):
+            first_seen[key] = first
+    memory = {_listing_key(r): dict(r) for r in previous_retired}
+    produced = {_listing_key(s) for s in signals}
+    retired = [r for k, r in memory.items() if k in produced]        # still produced: stay retired, silently
+    kept: List[Signal] = []
+    closed: List[Dict[str, Any]] = []
+    for s in signals:
+        key = _listing_key(s)
+        if key in memory:
+            continue
+        first = first_seen.get(key)
+        if first is None and s.status == "CONFIRMED":
+            first = s.last_date
+        s.first_listed = first
+        df = data.get(s.ticker)
+        if first is not None and df is not None:
+            s.listed_day = int((df.index > pd.Timestamp(first)).sum()) + 1
+        limit = max_listed_days(s.pattern)
+        if s.status == "CONFIRMED" and limit is not None and s.listed_day is not None and s.listed_day > limit:
+            detail = f"listed {s.listed_day} sessions since {first}, limit {limit}"
+            closed.append({"ticker": s.ticker, "pattern": s.pattern, "was": "CONFIRMED", "since": first,
+                           "entry": s.entry, "stop": s.stop, "target": s.target, "outcome": "RETIRED",
+                           "detail": detail})
+            retired.append({"ticker": s.ticker, "pattern": s.pattern, "stop": s.stop, "first_listed": first,
+                            "retired_on": s.last_date, "detail": detail})
+            continue
+        kept.append(s)
+    return kept, retired, closed
+
+
 def close_out(previous: Sequence[Mapping[str, Any]], current: Sequence[Signal],
-              data: Mapping[str, pd.DataFrame]) -> List[Dict[str, Any]]:
+              data: Mapping[str, pd.DataFrame], skip: Optional[Container[tuple]] = None) -> List[Dict[str, Any]]:
     """Explain every setup listed in the previous report that is absent from this one.
 
     The spec's lifecycle has ``FAILED`` and ``TARGET_REACHED`` states; a stateless
@@ -1704,6 +1797,8 @@ def close_out(previous: Sequence[Mapping[str, Any]], current: Sequence[Signal],
     * ``FAILED``          -- a close at or below the stop (the spec's invalidation)
     * ``TARGET_REACHED``  -- a high at or above the target
     * ``EXPIRED``         -- a confirmed breakout aged past ``max_breakout_age``
+    * ``RETIRED``         -- listed past ``MAX_LISTED_DAYS`` (reported by :func:`carry_listing`,
+                             whose rows are passed here as ``skip`` so they are not judged twice)
     * ``FADED``           -- the close fell more than ``WATCH_PROXIMITY`` below the entry
     * ``DROPPED``         -- none of the above: the pattern itself no longer qualifies
                              (or there is no price data)
@@ -1715,12 +1810,13 @@ def close_out(previous: Sequence[Mapping[str, Any]], current: Sequence[Signal],
     :param previous: ``signals`` list from the previous ``signals.json``.
     :param current: Today's signals.
     :param data: ``{symbol: OHLCV frame}`` through today.
+    :param skip: ``(ticker, pattern)`` pairs already explained (today's retirements).
     :returns: One dict per closed setup: ticker, pattern, was, since, entry, stop,
         target, outcome, detail.
 
     Complexity: O(previous * bars since).
     """
-    still = {(s.ticker, s.pattern) for s in current}
+    still = {(s.ticker, s.pattern) for s in current} | set(skip or ())
     out: List[Dict[str, Any]] = []
     for p in previous:
         if (p["ticker"], p["pattern"]) in still:
@@ -1787,6 +1883,8 @@ def render_markdown(signals: List[Signal], meta: Mapping[str, Any],
     ages = meta.get("max_breakout_age_by_pattern") or {
         p: max_breakout_age(p) for p in BREAKOUT_AGE_LAG}
     age_text = ", ".join(f"{p} {a}" for p, a in ages.items())
+    listed = meta.get("max_listed_days") or {p: max_listed_days(p) for p in BREAKOUT_AGE_LAG}
+    listed_text = ", ".join(f"{p} session {d}" for p, d in listed.items() if d is not None)
     lines.append(f"Scanned {meta['scanned']} of {meta['universe']} symbols "
                  f"(daily bars, last bar {meta.get('last_bar', 'n/a')}). "
                  f"Min quality score {MIN_SCORE}. Breakouts older than the per-pattern "
@@ -1796,7 +1894,9 @@ def render_markdown(signals: List[Signal], meta: Mapping[str, Any],
                  + (f" Rows with reward:risk below {MIN_REWARD_RISK} are dropped."
                     if MIN_REWARD_RISK is not None else "")
                  + (f" Watchlist rows whose pattern completed more than {MAX_WAIT_BARS} bars ago are "
-                    f"dropped (a breakout is reported whenever it comes)." if MAX_WAIT_BARS is not None else ""))
+                    f"dropped (a breakout is reported whenever it comes)." if MAX_WAIT_BARS is not None else "")
+                 + (f" A confirmed row is retired after its {listed_text} on the list: entries later than that "
+                    f"showed no edge in replay." if listed_text else ""))
     if meta.get("skipped_bar"):
         lines.append(f"Newest bar {meta['skipped_bar']} not scanned: complete for "
                      f"{meta.get('skipped_bar_complete', 0)} symbols, still missing OHLC at "
@@ -1817,17 +1917,20 @@ def render_markdown(signals: List[Signal], meta: Mapping[str, Any],
             lines.append("_none_")
             lines.append("")
             continue
-        lines.append("| Ticker | Pattern | Entry | Max buy | Stop | Risk % | Target | R:R | Score | Age | Vol× | "
+        lines.append("| Ticker | Pattern | Entry | Max buy | Stop | Risk % | Target | R:R | Score | Age | Day | Vol× | "
                      "F&G | Trend | Details |")
-        lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+        lines.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
         for s in rows:
             # Age = bars since the breakout close / the pattern's limit, so a reader
             # can see whether a confirmed row is fresh (0/3) or about to expire (3/3).
             age = (f"{s.bars_since_break}/{max_breakout_age(s.pattern)}"
                    if s.bars_since_break is not None else "-")
+            limit = max_listed_days(s.pattern)
+            day = (f"{s.listed_day}/{limit}" if limit is not None else str(s.listed_day)) \
+                if s.listed_day is not None else "-"
             lines.append(f"| {s.ticker} | {s.pattern} | {s.entry} | {s.max_buy if s.max_buy else '-'} | {s.stop} | "
                          f"{s.risk_pct} | {s.target if s.target else '-'} | "
-                         f"{s.reward_risk if s.reward_risk is not None else '-'} | {s.score} | {age} | "
+                         f"{s.reward_risk if s.reward_risk is not None else '-'} | {s.score} | {age} | {day} | "
                          f"{s.volume_ratio if s.volume_ratio else '-'} | "
                          f"{s.fear_greed if s.fear_greed is not None else '-'} | {s.trend} | {s.notes} |")
         lines.append("")
@@ -1846,7 +1949,7 @@ def render_markdown(signals: List[Signal], meta: Mapping[str, Any],
         else:
             lines.append("| Ticker | Pattern | Was | Outcome | Entry | Stop | Target | Detail |")
             lines.append("|---|---|---|---|---|---|---|---|")
-            order = {"TARGET_REACHED": 0, "FAILED": 1, "EXPIRED": 2, "FADED": 3, "DROPPED": 4}
+            order = {"TARGET_REACHED": 0, "FAILED": 1, "EXPIRED": 2, "RETIRED": 3, "FADED": 4, "DROPPED": 5}
             for c in sorted(closed, key=lambda c: (order[c["outcome"]], c["ticker"])):
                 lines.append(f"| {c['ticker']} | {c['pattern']} | {c['was']} | {c['outcome']} | {c['entry']} | "
                              f"{c['stop']} | {c['target'] if c['target'] is not None else '-'} | {c['detail']} |")
@@ -1857,6 +1960,9 @@ def render_markdown(signals: List[Signal], meta: Mapping[str, Any],
     lines.append(f"_Max buy = {max_buy_rule}: if the open is above it the setup no longer qualifies. "
                  f"R:R = (target - entry) / (entry - stop) at the reported entry; it shrinks with every "
                  f"session the entry drifts above the trigger. "
+                 f"Day = sessions on the list since the row's first report / the limit after which it is retired: "
+                 f"in the eleven-year replay a row on its second day was as good as new, from the third the same "
+                 f"signals paid about 0.1 R less than on day 1, and from day 7 (a Wolfe from day 6) nothing was left. "
                  f"F&G = the stock's own fear-and-greed reading at the last close, 0 to 100 (RSI {FG_RSI_LEN}, "
                  f"MACD-histogram percentile and Bollinger %B averaged): above 80 the stock is stretched and such "
                  f"breakouts replayed worst, below 20 it is washed out; information only, no rule uses it. "
@@ -1940,24 +2046,29 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "profile": ACTIVE_PROFILE, "min_score": MIN_SCORE, "max_breakout_age": MAX_BREAKOUT_AGE,
             "min_reward_risk": MIN_REWARD_RISK, "max_wait_bars": MAX_WAIT_BARS,
             "max_buy_risk_mult": MAX_BUY_RISK_MULT, "market": market,
-            "max_breakout_age_by_pattern": {p: max_breakout_age(p) for p in BREAKOUT_AGE_LAG}}
+            "max_breakout_age_by_pattern": {p: max_breakout_age(p) for p in BREAKOUT_AGE_LAG},
+            "max_listed_days": {p: max_listed_days(p) for p in BREAKOUT_AGE_LAG}}
     os.makedirs(args.out_dir, exist_ok=True)
     out_path = os.path.join(args.out_dir, "signals.json")
     previous: List[Dict[str, Any]] = []
+    previous_retired: List[Dict[str, Any]] = []
     if os.path.exists(out_path):
         try:
             with open(out_path, encoding="utf-8") as fh:
                 prev_doc = json.load(fh)
             previous = list(prev_doc.get("signals", []))
+            previous_retired = list(prev_doc.get("retired") or [])
             meta["previous_run"] = prev_doc.get("meta", {}).get("run_date")
             meta["previous_profile"] = prev_doc.get("meta", {}).get("profile")
         except (OSError, ValueError) as exc:  # a corrupt previous file must not stop today's report
             log.warning("previous signals.json unreadable, no close-out: %s", exc)
-    closed = close_out(previous, signals, data)
-    log.info("closed since the last report: %d (%s)", len(closed),
-             ", ".join(f"{c['ticker']} {c['outcome']}" for c in closed) or "none")
+    signals, retired, retired_now = carry_listing(signals, previous, previous_retired, data)
+    closed = retired_now + close_out(previous, signals, data, skip={(c["ticker"], c["pattern"]) for c in retired_now})
+    log.info("closed since the last report: %d (%s); retired structures remembered: %d", len(closed),
+             ", ".join(f"{c['ticker']} {c['outcome']}" for c in closed) or "none", len(retired))
     with open(out_path, "w", encoding="utf-8") as fh:
-        json.dump({"meta": meta, "signals": [asdict(s) for s in signals], "closed": closed}, fh, indent=2)
+        json.dump({"meta": meta, "signals": [asdict(s) for s in signals], "closed": closed, "retired": retired},
+                  fh, indent=2)
     md = render_markdown(signals, meta, closed)
     with open(os.path.join(args.out_dir, "report.md"), "w", encoding="utf-8") as fh:
         fh.write(md)

@@ -5,6 +5,16 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed (the listing limit, #115)
+- A confirmed row is retired after its sixth session on the list (a Wolfe
+  after its fifth): `MAX_LISTED_DAYS`, adopted on the eleven-year late-entry
+  replay (day 2 as good as day 1, from day 3 about 0.1 R less, from day 7
+  nothing). Rows carry `first_listed` and `listed_day` across nights (keyed
+  on ticker, pattern and stop), the report gains a `Day` column and a
+  `RETIRED` close-out outcome, and `signals.json` a `retired` list that
+  keeps a retired structure silent while the detector still produces it.
+  The `legacy` profile has no limit. The page reads the scanner's count.
+
 ### Added (charts on the page)
 - Every setup card and every watchlist entry carries a candlestick chart of
   the last 120 sessions with the buy zone, the stop, the target (named at

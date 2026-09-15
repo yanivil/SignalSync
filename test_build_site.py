@@ -111,6 +111,8 @@ def test_day_on_list_needs_the_signals_own_session():
     stale = [{**r, "last_listed": "2026-09-04"} for r in rows]                # track record built before this bar
     assert bs.day_on_list(sig, stale) is None
     assert bs.day_on_list({**sig, "stop": 1.0}, rows) is None                 # unknown structure
+    assert bs.day_on_list({**sig, "listed_day": 3}, stale) == 3               # the scanner's own count wins
+    assert bs.day_on_list({**sig, "listed_day": None}, rows) == 4
 
 
 def test_track_record_rows_statuses_and_curve():
