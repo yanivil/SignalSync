@@ -1,18 +1,17 @@
 {
   "meta": {
-    "run_date": "2026-09-15 06:11",
+    "run_date": "2026-09-16 06:02",
     "universe": 503,
     "scanned": 503,
     "errors": 0,
-    "last_bar": "2026-09-14",
-    "last_bar_symbols": 502,
-    "lagging_symbols": 1,
+    "last_bar": "2026-09-15",
+    "last_bar_symbols": 503,
+    "lagging_symbols": 0,
     "skipped_bar": null,
     "skipped_bar_complete": 0,
     "skipped_bar_partial": 0,
     "last_bar_histogram": {
-      "2026-09-14": 502,
-      "2026-09-11": 1
+      "2026-09-15": 503
     },
     "filled_close_symbols": 1,
     "profile": "tuned",
@@ -23,21 +22,26 @@
     "max_buy_risk_mult": 1.5,
     "market": {
       "index": "SPY",
-      "as_of": "2026-09-14",
-      "index_close": 760.88,
-      "index_vs_sma200_pct": 6.78,
-      "index_sma50_vs_sma200_pct": 6.51,
+      "as_of": "2026-09-15",
+      "index_close": 757.39,
+      "index_vs_sma200_pct": 6.23,
+      "index_sma50_vs_sma200_pct": 6.46,
       "regime": "bull",
-      "vix": 17.1,
-      "breadth": 0.592,
-      "breadth_symbols": 500
+      "vix": 17.2,
+      "breadth": 0.5669,
+      "breadth_symbols": 501
     },
     "max_breakout_age_by_pattern": {
       "Cup & Handle": 3,
       "Inverse Head & Shoulders": 8,
       "Bullish Wolfe Wave": 8
     },
-    "previous_run": "2026-09-14 06:18",
+    "max_listed_days": {
+      "Cup & Handle": 6,
+      "Inverse Head & Shoulders": 6,
+      "Bullish Wolfe Wave": 5
+    },
+    "previous_run": "2026-09-15 06:11",
     "previous_profile": "tuned"
   },
   "signals": [
@@ -45,20 +49,22 @@
       "ticker": "NVDA",
       "pattern": "Inverse Head & Shoulders",
       "status": "WATCHLIST",
-      "entry": 213.1,
+      "entry": 213.09,
       "stop": 195.91,
       "risk_pct": 8.06,
-      "target": 237.21,
+      "target": 237.19,
       "score": 89,
-      "last_close": 210.96,
-      "last_date": "2026-09-14",
+      "last_close": 212.17,
+      "last_date": "2026-09-15",
       "bars_since_break": null,
       "volume_ratio": null,
       "trend": "close above SMA200, SMA50 > SMA200, SMA200 rising/flat",
-      "notes": "LS 2026-06-09 @199.12, head 2026-06-29 @189.59, RS 2026-07-17 @197.75, neckline 213.75->213.57 (now 213.10)",
-      "max_buy": 221.69,
+      "notes": "LS 2026-06-09 @199.12, head 2026-06-29 @189.59, RS 2026-07-17 @197.75, neckline 213.75->213.57 (now 213.09)",
+      "max_buy": 221.67,
       "reward_risk": 1.4,
-      "fear_greed": 25.2
+      "fear_greed": 26.2,
+      "first_listed": null,
+      "listed_day": null
     },
     {
       "ticker": "HAL",
@@ -66,37 +72,41 @@
       "status": "WATCHLIST",
       "entry": 35.84,
       "stop": 32.64,
-      "risk_pct": 8.93,
-      "target": 40.99,
+      "risk_pct": 8.92,
+      "target": 40.98,
       "score": 87,
-      "last_close": 35.01,
-      "last_date": "2026-09-14",
+      "last_close": 35.67,
+      "last_date": "2026-09-15",
       "bars_since_break": null,
       "volume_ratio": null,
       "trend": "close above SMA200, SMA50 < SMA200, SMA200 rising/flat",
       "notes": "LS 2026-07-02 @32.44, head 2026-07-30 @30.84, RS 2026-08-26 @32.88, neckline 36.03->35.91 (now 35.84)",
       "max_buy": 37.44,
       "reward_risk": 1.61,
-      "fear_greed": 37.3
+      "fear_greed": 41.9,
+      "first_listed": null,
+      "listed_day": null
     },
     {
       "ticker": "GILD",
       "pattern": "Cup & Handle",
       "status": "WATCHLIST",
-      "entry": 151.48,
-      "stop": 142.69,
+      "entry": 150.63,
+      "stop": 141.89,
       "risk_pct": 5.8,
-      "target": 183.43,
+      "target": 182.41,
       "score": 75,
-      "last_close": 146.41,
-      "last_date": "2026-09-14",
+      "last_close": 146.3,
+      "last_date": "2026-09-15",
       "bars_since_break": null,
       "volume_ratio": null,
       "trend": "close above SMA200, SMA50 > SMA200, SMA200 rising/flat",
-      "notes": "left rim 2026-02-11 @155.38, bottom 2026-06-10 @120.60 (depth 22%), right rim 2026-09-02 @152.55, handle low 2026-09-11 @143.50 (depth 5.9%), trigger 151.48",
-      "max_buy": 155.87,
+      "notes": "left rim 2026-02-11 @154.51, bottom 2026-06-10 @119.92 (depth 22%), right rim 2026-09-02 @151.70, handle low 2026-09-11 @142.70 (depth 5.9%), trigger 150.63",
+      "max_buy": 155.0,
       "reward_risk": 3.64,
-      "fear_greed": 38.4
+      "fear_greed": 40.4,
+      "first_listed": null,
+      "listed_day": null
     },
     {
       "ticker": "RTX",
@@ -107,15 +117,17 @@
       "risk_pct": 5.75,
       "target": 233.5,
       "score": 71,
-      "last_close": 195.34,
-      "last_date": "2026-09-14",
+      "last_close": 195.5,
+      "last_date": "2026-09-15",
       "bars_since_break": null,
       "volume_ratio": null,
       "trend": "close above SMA200, SMA50 > SMA200, SMA200 rising/flat",
       "notes": "left rim 2026-04-09 @203.83, bottom 2026-05-15 @169.51 (depth 17%), right rim 2026-07-07 @203.26, handle low 2026-07-21 @189.39 (depth 6.8%), trigger 199.75",
       "max_buy": 205.49,
       "reward_risk": 2.94,
-      "fear_greed": 17.7
+      "fear_greed": 19.8,
+      "first_listed": null,
+      "listed_day": null
     },
     {
       "ticker": "FCX",
@@ -126,15 +138,17 @@
       "risk_pct": 8.37,
       "target": 86.19,
       "score": 69,
-      "last_close": 69.34,
-      "last_date": "2026-09-14",
+      "last_close": 69.38,
+      "last_date": "2026-09-15",
       "bars_since_break": null,
       "volume_ratio": null,
       "trend": "close above SMA200, SMA50 > SMA200, SMA200 rising/flat",
       "notes": "left rim 2026-06-17 @72.10, bottom 2026-07-08 @55.86 (depth 23%), right rim 2026-08-10 @71.22, handle low 2026-08-14 @65.57 (depth 7.9%), trigger 70.83",
       "max_buy": 73.79,
       "reward_risk": 2.59,
-      "fear_greed": 24.4
+      "fear_greed": 23.8,
+      "first_listed": null,
+      "listed_day": null
     },
     {
       "ticker": "HAS",
@@ -145,28 +159,19 @@
       "risk_pct": 7.37,
       "target": 116.29,
       "score": 68,
-      "last_close": 90.76,
-      "last_date": "2026-09-14",
+      "last_close": 90.21,
+      "last_date": "2026-09-15",
       "bars_since_break": null,
       "volume_ratio": null,
       "trend": "close above SMA200, SMA50 > SMA200, SMA200 rising/flat",
       "notes": "left rim 2026-05-07 @97.30, bottom 2026-07-08 @74.63 (depth 23%), right rim 2026-07-29 @96.28, handle low 2026-08-04 @88.44 (depth 8.1%), trigger 94.64",
       "max_buy": 98.13,
       "reward_risk": 3.1,
-      "fear_greed": 26.0
+      "fear_greed": 24.7,
+      "first_listed": null,
+      "listed_day": null
     }
   ],
-  "closed": [
-    {
-      "ticker": "PH",
-      "pattern": "Cup & Handle",
-      "was": "WATCHLIST",
-      "since": "2026-09-11",
-      "entry": 980.43,
-      "stop": 921.31,
-      "target": 1168.83,
-      "outcome": "FADED",
-      "detail": "close 928.83 more than 5% below entry 980.43"
-    }
-  ]
+  "closed": [],
+  "retired": []
 }
