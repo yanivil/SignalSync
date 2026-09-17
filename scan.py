@@ -197,6 +197,12 @@ MAX_BUY_RISK_MULT: Optional[float] = 1.5  # Max buy is also capped where the ris
 # ``first_listed`` in the previous signals.json (see ``carry_listing``).
 MAX_LISTED_DAYS: Dict[str, Optional[int]] = {"Cup & Handle": 6, "Inverse Head & Shoulders": 6,
                                              "Bullish Wolfe Wave": 5}
+# Patterns reported for information only: their breakouts are listed on the watchlist, never as a
+# confirmed buy signal (``demote_watch_only``).  The cup: +0.03 R per signal on 305 signals over the
+# eleven point-in-time years with 18 % reaching the target, against +0.23 for the inverse H&S and
+# +0.43 for the Wolfe (#109, adopted 2026-09-17).  Applied when the report is written, so the
+# detector and the replay keep measuring the pattern and the decision can be revisited.
+WATCH_ONLY_PATTERNS: Tuple[str, ...] = ("Cup & Handle",)
 
 RULE_PROFILES: Dict[str, Dict[str, Any]] = {
     "spec": {},                          # the module defaults above
@@ -225,6 +231,7 @@ RULE_PROFILES: Dict[str, Dict[str, Any]] = {
         "MAX_RISK_PCT": {"Cup & Handle": 15.0, "Inverse Head & Shoulders": 15.0, "Bullish Wolfe Wave": 15.0},
         "MIN_REWARD_RISK": None, "MAX_WAIT_BARS": None, "MAX_BUY_RISK_MULT": None,
         "MAX_LISTED_DAYS": {"Cup & Handle": None, "Inverse Head & Shoulders": None, "Bullish Wolfe Wave": None},
+        "WATCH_ONLY_PATTERNS": (),
     },
 }
 ACTIVE_PROFILE = "spec"
@@ -348,6 +355,9 @@ class Signal:
         a watchlist row that was never confirmed.
     :param listed_day: Sessions from ``first_listed`` to ``last_date`` inclusive
         (1 = first report); the row is retired past ``max_listed_days(pattern)``.
+    :param watch_only: The pattern is in ``WATCH_ONLY_PATTERNS``: the row is
+        information, never a buy signal; a breakout keeps ``bars_since_break``
+        but is reported as ``WATCHLIST`` (see :func:`demote_watch_only`).
     """
 
     ticker: str
@@ -369,6 +379,7 @@ class Signal:
     fear_greed: Optional[float] = None   # the stock's fear-and-greed reading at the last close, 0-100 (fear_greed)
     first_listed: Optional[str] = None   # session of the first CONFIRMED report of this structure (carry_listing)
     listed_day: Optional[int] = None     # sessions on the list, 1 = first report; retired past MAX_LISTED_DAYS
+    watch_only: bool = False             # a WATCH_ONLY_PATTERNS row: listed for information, never a buy signal
 
 
 # --------------------------------------------------------------------------- #
@@ -1715,6 +1726,27 @@ def scan_symbol(sym: str, df: pd.DataFrame, detectors: Optional[Sequence[Callabl
     return out
 
 
+def demote_watch_only(signals: Sequence[Signal]) -> List[Signal]:
+    """Mark the rows of ``WATCH_ONLY_PATTERNS`` and report their breakouts as ``WATCHLIST``.
+
+    The row keeps its levels and ``bars_since_break`` (so the report can say
+    the breakout happened and when) and gains a note; with status
+    ``WATCHLIST`` no consumer treats it as a trade: the evaluator does not
+    track it, the listing rule does not count it, the page lists it under the
+    stocks being watched.  Applied when the report is written, not in the
+    detectors, so the replay keeps measuring the pattern.
+
+    :returns: The same list (rows mutated).
+    """
+    for s in signals:
+        if s.pattern in WATCH_ONLY_PATTERNS:
+            s.watch_only = True
+            if s.status == "CONFIRMED":
+                s.status = "WATCHLIST"
+                s.notes = (s.notes + "; " if s.notes else "") + "breakout listed for information: watch-only pattern"
+    return list(signals)
+
+
 def _listing_key(row: Any) -> tuple:
     """The identity of a structure across nights: ticker, pattern and the stop, the anchor that does not move
     (the replay and the evaluator key the same way)."""
@@ -1885,6 +1917,9 @@ def render_markdown(signals: List[Signal], meta: Mapping[str, Any],
     age_text = ", ".join(f"{p} {a}" for p, a in ages.items())
     listed = meta.get("max_listed_days") or {p: max_listed_days(p) for p in BREAKOUT_AGE_LAG}
     listed_text = ", ".join(f"{p} session {d}" for p, d in listed.items() if d is not None)
+    watch_only = meta.get("watch_only_patterns")
+    watch_only = list(WATCH_ONLY_PATTERNS) if watch_only is None else watch_only
+    watch_text = " and ".join(watch_only) + (" are" if len(watch_only) > 1 else " is") if watch_only else ""
     lines.append(f"Scanned {meta['scanned']} of {meta['universe']} symbols "
                  f"(daily bars, last bar {meta.get('last_bar', 'n/a')}). "
                  f"Min quality score {MIN_SCORE}. Breakouts older than the per-pattern "
@@ -1896,7 +1931,9 @@ def render_markdown(signals: List[Signal], meta: Mapping[str, Any],
                  + (f" Watchlist rows whose pattern completed more than {MAX_WAIT_BARS} bars ago are "
                     f"dropped (a breakout is reported whenever it comes)." if MAX_WAIT_BARS is not None else "")
                  + (f" A confirmed row is retired after its {listed_text} on the list: entries later than that "
-                    f"showed no edge in replay." if listed_text else ""))
+                    f"showed no edge in replay." if listed_text else "")
+                 + (f" {watch_text} watch-only: breakouts are listed on the watchlist for information, never as a "
+                    f"buy signal (ten-year replay +0.03 R for the cup)." if watch_text else ""))
     if meta.get("skipped_bar"):
         lines.append(f"Newest bar {meta['skipped_bar']} not scanned: complete for "
                      f"{meta.get('skipped_bar_complete', 0)} symbols, still missing OHLC at "
@@ -2038,6 +2075,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     signals: List[Signal] = []
     for sym, df in data.items():
         signals.extend(scan_symbol(sym, df))
+    signals = demote_watch_only(signals)
     signals.sort(key=lambda s: (s.status != "CONFIRMED", -s.score))
 
     meta: Dict[str, Any] = {"run_date": dt.datetime.now().strftime("%Y-%m-%d %H:%M"), "universe": len(symbols),
@@ -2047,7 +2085,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "min_reward_risk": MIN_REWARD_RISK, "max_wait_bars": MAX_WAIT_BARS,
             "max_buy_risk_mult": MAX_BUY_RISK_MULT, "market": market,
             "max_breakout_age_by_pattern": {p: max_breakout_age(p) for p in BREAKOUT_AGE_LAG},
-            "max_listed_days": {p: max_listed_days(p) for p in BREAKOUT_AGE_LAG}}
+            "max_listed_days": {p: max_listed_days(p) for p in BREAKOUT_AGE_LAG},
+            "watch_only_patterns": list(WATCH_ONLY_PATTERNS)}
     os.makedirs(args.out_dir, exist_ok=True)
     out_path = os.path.join(args.out_dir, "signals.json")
     previous: List[Dict[str, Any]] = []

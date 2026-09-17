@@ -153,7 +153,10 @@ def test_end_to_end_mini_universe(tmp_path, universe_csv, fake_yfinance, mini_un
         assert s["stop"] < s["entry"] and 0 < s["risk_pct"] <= 15
         assert s["target"] is None or s["target"] > s["entry"]
         assert s["last_date"] == END and s["notes"] and s["trend"]
-        assert (s["bars_since_break"] is not None) == (s["status"] == "CONFIRMED")
+        if s["status"] == "CONFIRMED":
+            assert s["bars_since_break"] is not None and not s["watch_only"]
+        elif not s["watch_only"]:
+            assert s["bars_since_break"] is None
         assert s["risk_pct"] == pytest.approx((s["entry"] - s["stop"]) / s["entry"] * 100, abs=0.02)
     # Sorted: confirmed first, then by score descending.
     keys = [(s["status"] != "CONFIRMED", -s["score"]) for s in signals]
@@ -175,7 +178,7 @@ def test_end_to_end_mini_universe(tmp_path, universe_csv, fake_yfinance, mini_un
     for s in signals:                                        # Age column: bars/limit for confirmed, '-' otherwise
         cells = by_row[s["ticker"]].split(" | ")
         assert cells[9] == (f"{s['bars_since_break']}/{scan.max_breakout_age(s['pattern'])}"
-                            if s["status"] == "CONFIRMED" else "-"), by_row[s["ticker"]]
+                            if s["bars_since_break"] is not None else "-"), by_row[s["ticker"]]
         assert 0 <= s["fear_greed"] <= 100 and cells[12] == str(s["fear_greed"])   # F&G column, one reading per symbol
         # Day column: sessions on the list / the limit; a first run lists every confirmed row on its day 1.
         limit = scan.max_listed_days(s["pattern"])
@@ -190,6 +193,13 @@ def test_end_to_end_mini_universe(tmp_path, universe_csv, fake_yfinance, mini_un
             assert s["reward_risk"] == pytest.approx((s["target"] - s["entry"]) / (s["entry"] - s["stop"]), abs=0.01)
     assert "## Closed since the last report" in report and data["closed"] == []   # first run: nothing to close
     assert data["retired"] == [] and meta["max_listed_days"] == scan.MAX_LISTED_DAYS
+    # The cup is watch-only: its breakout is listed on the watchlist with its age and a note, never as a signal.
+    cup = by_ticker["CUP"]
+    assert meta["watch_only_patterns"] == ["Cup & Handle"] and cup["watch_only"] and cup["status"] == "WATCHLIST"
+    assert cup["bars_since_break"] is not None and cup["notes"].endswith("breakout listed for information: "
+                                                                          "watch-only pattern")
+    assert not by_ticker["IHS"]["watch_only"] and by_ticker["IHS"]["status"] == "CONFIRMED"
+    assert "Cup & Handle is watch-only: breakouts are listed on the watchlist for information" in report
     assert "A confirmed row is retired after its" in report and "| Day |" in report
     # No index or volatility frames in this fake: the context degrades to breadth alone, never to a failure.
     m = meta["market"]
@@ -261,9 +271,9 @@ def test_second_run_reports_what_happened_to_yesterdays_rows(tmp_path, universe_
     rc, second, report = _run(tmp_path, universe_csv)
     assert rc == 0 and second["meta"]["previous_run"] == first["meta"]["run_date"]
     closed = {c["ticker"]: c for c in second["closed"]}
-    assert "CUP" in closed and closed["CUP"]["outcome"] == "TARGET_REACHED" and closed["CUP"]["was"] == "CONFIRMED"
+    assert "CUP" in closed and closed["CUP"]["outcome"] == "TARGET_REACHED" and closed["CUP"]["was"] == "WATCHLIST"
     assert "## Closed since the last report" in report
-    assert "| CUP | Cup & Handle | CONFIRMED | TARGET_REACHED | " in report
+    assert "| CUP | Cup & Handle | WATCHLIST | TARGET_REACHED | " in report      # watch-only: never confirmed
     # The rows confirmed on both nights carry their first listing forward: three sessions later is day 4.
     first_conf = {s["ticker"]: s["stop"] for s in first["signals"] if s["status"] == "CONFIRMED"}
     carried = [s for s in second["signals"] if s["status"] == "CONFIRMED" and first_conf.get(s["ticker"]) == s["stop"]]
@@ -298,6 +308,23 @@ def test_third_run_retires_a_row_listed_past_its_limit(tmp_path, universe_csv, f
     assert rc == 0 and row["ticker"] not in {s["ticker"] for s in third["signals"]}
     assert not [c for c in third["closed"] if c["ticker"] == row["ticker"]] and third["retired"] == second["retired"]
     assert f"| {row['ticker']} |" not in report.split("## Closed since")[1]
+
+
+def test_demote_watch_only_lists_cup_breakouts_for_information():
+    def sig(t, pattern, status, notes=""):
+        return scan.Signal(t, pattern, status, 100.0, 95.0, 5.0, 110.0, 70, 100.0, "2026-09-16",
+                           0 if status == "CONFIRMED" else None, 1.5 if status == "CONFIRMED" else None, "", notes)
+    rows = scan.demote_watch_only([sig("A", "Cup & Handle", "CONFIRMED", "left rim ..., trigger 99.00"),
+                                   sig("B", "Cup & Handle", "WATCHLIST"),
+                                   sig("C", "Inverse Head & Shoulders", "CONFIRMED")])
+    a, b, c = rows
+    assert (a.status, a.watch_only, a.bars_since_break, a.volume_ratio) == ("WATCHLIST", True, 0, 1.5)
+    assert a.notes == "left rim ..., trigger 99.00; breakout listed for information: watch-only pattern"
+    assert (b.status, b.watch_only, b.notes) == ("WATCHLIST", True, "")           # not broken out: unchanged
+    assert (c.status, c.watch_only) == ("CONFIRMED", False)
+    scan.apply_profile("legacy")                                                  # the old rules: cups confirm
+    (d,) = scan.demote_watch_only([sig("D", "Cup & Handle", "CONFIRMED")])
+    assert (d.status, d.watch_only) == ("CONFIRMED", False)
 
 
 def test_carry_listing_counts_sessions_and_retires_late_rows():

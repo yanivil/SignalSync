@@ -110,6 +110,22 @@ def test_view_model_setups_levels_and_notes():
     assert vm["market"]["regime"] == "bull" and vm["generated"] == "2026-09-09"
 
 
+def test_watch_only_cup_breakout_is_listed_for_information():
+    doc = _doc()
+    doc["meta"]["watch_only_patterns"] = ["Cup & Handle"]
+    doc["signals"].append(_signal("CUPX", "Cup & Handle", "WATCHLIST", 50.0, 46.0, 60.0, 72, bars_since_break=1,
+                                  last_close=51.0, watch_only=True,
+                                  notes="left rim 2026-06-01 @49.00, trigger 50.00; breakout listed for "
+                                        "information: watch-only pattern"))
+    vm = bs.view_model(doc, _evaluation(), dt.date(2026, 9, 9))
+    cupx = next(w for w in vm["watchlist"] if w["ticker"] == "CUPX")
+    assert cupx["watch_only"] and cupx["broke_out"] == 1 and "CUPX" not in {v["ticker"] for v in vm["setups"]}
+    page = bs.render_page(vm)
+    assert "broke out 1 session ago: watch-only" in page and "Cup &amp; Handle is watch-only" in page
+    assert "Today: 3 buy signals · 2 stocks watched" in page and "<td class=\"num\">–</td>" in page
+    assert "Watch-only pattern" in page                                            # the glossary entry
+
+
 def test_day_on_list_prefers_the_scanner_then_the_track_record():
     sig = _signal("HAL", "Inverse Head & Shoulders", "CONFIRMED", 36.8, 32.64, 41.94)
     rows = _evaluation()["rows"]
