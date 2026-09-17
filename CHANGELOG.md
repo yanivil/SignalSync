@@ -5,6 +5,17 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed (the page, rewritten for a first-time reader)
+- Three numbered sections in the order a reader needs them: buy signals now
+  (a table of buy limit, stop loss and take profit, one instruction on how
+  to act, a status per row), why these stocks (the pattern in plain words,
+  the chart, the context, the eleven-year figure, then the stocks being
+  watched and what left the page), and past signals with the result in
+  price terms (took profit at, stopped out at, still open at, not bought)
+  and the gain or loss in percent. The R-based track record and the glossary
+  are folded away; the metric cards, the closed table and the setup cards
+  are gone; the data file gains `results`.
+
 ### Changed (the listing limit, #115)
 - A confirmed row is retired after its sixth session on the list (a Wolfe
   after its fifth): `MAX_LISTED_DAYS`, adopted on the eleven-year late-entry

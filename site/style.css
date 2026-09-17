@@ -46,7 +46,7 @@ nav.sections a:hover { text-decoration: underline; }
 .metric .label { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
 .metric .value { font-size: 26px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
 h2 { font-size: 19px; margin: 30px 0 10px; }
-h2 .count { color: var(--muted); font-weight: 400; font-size: 15px; margin-left: 8px; }
+h2 .count, h3 .count { color: var(--muted); font-weight: 400; font-size: 15px; margin-left: 8px; }
 h3 { font-size: 16px; margin: 22px 0 8px; }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px;
   margin-bottom: 14px; box-shadow: var(--shadow); }
@@ -133,3 +133,29 @@ footer { margin-top: 36px; padding-top: 16px; border-top: 1px solid var(--border
 .chart .pivot-l { fill: var(--accent); font-size: 11px; font-weight: 600; }
 details.anchors li { margin: 6px 0 10px; }
 details.anchors li .chart { max-width: 640px; margin-top: 4px; }
+.glance { margin: 0 0 6px; font-size: 15px; }
+h2 .num { display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px;
+  border-radius: 50%; background: var(--accent); color: #fff; font-size: 14px; margin-right: 10px;
+  vertical-align: middle; }
+.instruction { background: var(--accent-bg); border-left: 4px solid var(--accent); border-radius: 0 10px 10px 0;
+  padding: 10px 14px; margin: 0 0 12px; font-size: 14px; }
+.empty { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 20px;
+  font-size: 15px; }
+table.signals td, table.results td { white-space: normal; }
+table.signals td .sub, table.results td .sub { font-size: 12px; color: var(--muted); white-space: normal; }
+table.signals td strong { font-size: 16px; }
+section.why { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 20px;
+  margin-bottom: 14px; box-shadow: var(--shadow); }
+section.why h3 { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px; margin: 0 0 8px; }
+section.why h3 .pattern { margin-left: 0; }
+section.why p { margin: 6px 0; }
+p.note.late { border-left: 3px solid var(--amber); padding-left: 10px; color: var(--text); }
+.tally { font-size: 15px; margin: 0 0 10px; }
+details.more, details.how { margin: 10px 0 0; }
+details.more summary, details.how summary { cursor: pointer; font-size: 14px; color: var(--muted); }
+details.how summary h2 { display: inline; font-size: 17px; margin: 0; color: var(--text); }
+details.how { margin-top: 30px; }
+details.how dl.glossary { margin-top: 12px; }
+h3#watching { margin-top: 26px; }
+.badge-pending { background: var(--accent-bg); color: var(--accent); }
+table.results td.date { white-space: nowrap; }

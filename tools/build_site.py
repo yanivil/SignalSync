@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the SignalSync web page: today's setups with a plan for each, the watchlist and the live track record.
+"""Build the SignalSync web page: buy signals now, why each stock was triggered, and how past signals turned out.
 
 Why: the nightly scan commits ``output/signals.json`` and a Markdown report;
 an e-mail relayed the tables, which was fragile.  A static page rebuilt after
@@ -13,27 +13,34 @@ Usage:
 
 ``--evaluation`` is the JSON written by ``tools/evaluate_signals.py --json``
 (the live track record, scored with the backtest's accounting); without it
-the page says the track record is not available yet.  ``--charts`` is the
-JSON written by ``tools/site_charts.py`` (the recent bars of every ticker on
-the page); with it every setup card and watchlist entry carries a candlestick
-chart with the buy zone, stop, target and the pattern's pivots drawn on it,
-without it the page simply has no charts.  ``--fragment`` writes
-the page without the document wrapper, for a preview host that supplies its
-own.  The stylesheet and the script in ``site/`` are inlined, so the output
-is one self-contained ``index.html`` plus ``data.json`` (the view model).
+the page says the results are not available yet.  ``--charts`` is the JSON
+written by ``tools/site_charts.py`` (the recent bars of every ticker on the
+page); with it every stock's "why" block and every watched stock carries a
+candlestick chart with the buy zone, stop, target and the pattern's pivots
+drawn on it.  ``--fragment`` writes the page without the document wrapper,
+for a preview host that supplies its own.  The stylesheet and the script in
+``site/`` are inlined, so the output is one self-contained ``index.html``
+plus ``data.json`` (the view model).
 
-What the page says, and where it comes from:
+The page is written for a reader who has never seen the scanner, in the order
+they need it:
 
-* Every number on a setup card is the scanner's own: entry, Max buy, stop,
-  target, reward:risk, score, age, volume ratio, fear-and-greed, trend.  The
-  action line restates the report's rule (buy at the next open only inside
-  the buy zone; exit on a close at or below the stop) and is graded by the
-  row's day on the list, from the late-entry replay (#115): days 1-2 enter,
-  days 3-6 late (about 0.1 R less than on day 1 over eleven years), from day 7
-  no entry (a Wolfe from day 6).  Nothing here is a new rule or a probability.
-* The track record counts every signal once, at its first report, filled at
-  the next open (``tools/evaluate_signals.py``), so it is comparable with the
-  replay figures shown next to it (``REPLAY_REFERENCE``, the tuning page).
+1. **Buy signals now**: the confirmed rows with the buy limit, the stop loss
+   and the take-profit price, one instruction on how to act, and a status
+   (new today, day N of the limit, late).  Rows leave when the scanner drops
+   them: the stock closed below the stop, the pattern failed, the breakout
+   got too old, or the row was listed past ``MAX_LISTED_DAYS`` (#115).
+2. **Why these stocks**: per row, the pattern in plain words, the chart with
+   the levels and the pivots, the context (trend, volume, fear and greed),
+   how the pattern has done over eleven years, and the stocks being watched
+   that are not signals yet.
+3. **Past signals, were we right?**: every signal the scan has committed,
+   counted once at its first report and filled at the next open, with the
+   result in price terms (took profit at, stopped out at, still open at) and
+   the gain or loss in percent.
+
+Every number on the page is the scanner's or the evaluator's; the day on the
+list is the scanner's own count.  Nothing here is a new rule or a probability.
 """
 
 from __future__ import annotations
@@ -54,12 +61,24 @@ REPO_URL = "https://github.com/yanivil/SignalSync"
 LATE_FROM = 3                                             # day on the list from which an entry is "late"
 NO_ENTRY_FROM = {"Bullish Wolfe Wave": 6, "default": 7}   # ... and from which the replay found no edge left
 FG_ZONES = ((20.0, "extreme fear"), (40.0, "fear"), (60.0, "neutral"), (80.0, "greed"), (float("inf"), "extreme greed"))
-OUTCOME_LABELS = {"target": "Target hit", "stop": "Stopped", "expired": "Time exit", "open": "Open",
-                  "gap": "Not traded: gap", "below_stop": "Not traded: below stop", "no_data": "No data yet"}
 OUTCOME_STATUS = {"target": "closed", "stop": "closed", "expired": "closed", "open": "open",
                   "gap": "none", "below_stop": "none", "no_data": "none"}
-CLOSED_LABELS = {"TARGET_REACHED": "Target reached", "FAILED": "Stop hit", "EXPIRED": "Expired", "FADED": "Faded",
-                 "DROPPED": "Dropped"}
+CLOSED_PLAIN = {"TARGET_REACHED": "reached its target", "FAILED": "closed below its stop",
+                "EXPIRED": "too old to enter", "RETIRED": "listed for the limit of sessions",
+                "FADED": "fell away from its trigger", "DROPPED": "pattern no longer valid"}
+RESULT_WORDS = {"win": "Win", "loss": "Loss", "flat": "Flat", "open": "Open", "none": "Not bought",
+                "pending": "Pending"}
+PATTERN_EXPLAINED = {
+    "Cup & Handle": "The stock fell and recovered in a rounded curve over weeks or months (the cup), then dipped a "
+                    "little (the handle). A daily close above the handle's high is the trigger: the sellers who "
+                    "sold into the recovery have been absorbed.",
+    "Inverse Head & Shoulders": "Three lows with the middle one the deepest (the head), and the line through the two "
+                                "highs between them is the neckline. A daily close above the neckline is the "
+                                "trigger: the sellers of the downtrend have run out.",
+    "Bullish Wolfe Wave": "Five swings inside a narrowing, falling channel, the fifth briefly undershooting the "
+                          "channel's lower line. A daily close back above the line through points 1 and 3 is the "
+                          "trigger; the target is where the line through points 1 and 4 will be.",
+}
 # The tuning page's figures the page quotes next to the live numbers (docs/wiki/03-Configuration-and-Tuning.md).
 REPLAY_REFERENCE: Dict[str, Any] = {
     "source": "eleven yearly replays on the index as it was, 2016 to 2026, tuned profile, runs 34323013559 to "
@@ -76,29 +95,27 @@ REPLAY_REFERENCE: Dict[str, Any] = {
                    {"day": "6 to 9", "trades": 1169, "mean_r": 0.14, "vs_day1": -0.12}],
 }
 GLOSSARY = (
-    ("Entry", "The trigger level, or the breakout close when it is above the trigger. It is the last close: a trade "
-              "happens at the next open."),
-    ("Buy zone", "From the entry up to Max buy, the lower of trigger + 5 % and the open at which the risk to the "
-                 "stop reaches 1.5 times the planned entry-to-stop distance. An open above it no longer qualifies."),
-    ("Stop", "The structural level (handle low, right-shoulder low, point 5) minus 0.25 ATR. Exiting on a close at "
-             "or below it scored higher in replay than an intraday touch."),
-    ("Target", "The pattern's measured move. R:R = (target − entry) / (entry − stop); it shrinks with every session "
-               "the entry drifts above the trigger."),
-    ("Score", "0 to 100, the cleanliness of the geometry. Rows below 60 are not reported."),
-    ("Age", "Bars since the breakout close and the limit after which the row is dropped (3 for a cup, 8 for an "
-            "inverse H&S or a Wolfe, whose last pivot is only visible five bars after it prints)."),
-    ("Day on the list", "Sessions since the row was first reported. In the eleven-year replay a row on its second "
+    ("Buy at the open, up to", "The trade happens at the next market open. The upper number is the most you should "
+                               "pay: the lower of trigger + 5 % and the price at which the risk to the stop reaches "
+                               "1.5 times the planned one. If the stock opens above it, the signal no longer applies."),
+    ("Stop loss", "The pattern's structural low (handle low, right-shoulder low, point 5) minus a quarter of the "
+                  "average daily range. Selling on a daily close at or below it did better in the replay than "
+                  "selling the moment it is touched."),
+    ("Take profit", "The pattern's measured move: the height of the pattern added to the trigger."),
+    ("Score", "0 to 100, how clean the geometry is. Rows below 60 are not reported."),
+    ("Day on the list", "Sessions since the row was first reported. In eleven years of history a row on its second "
                         "day was as good as new; from the third day the same signals paid about 0.1 R less than on "
-                        "day 1; from day 7 (a Wolfe from day 6) no edge was left for late buyers, so the scanner "
-                        "retires a confirmed row after its sixth session, a Wolfe after its fifth."),
-    ("Vol×", "Breakout-day volume against the 20-day average."),
-    ("F&G", "The stock's own fear-and-greed reading at the last close, 0 to 100 (RSI 14, MACD-histogram percentile "
-            "and Bollinger %B averaged). Above 80 the stock is stretched and such breakouts replayed worst; below "
-            "20 it is washed out. Information only, no rule uses it."),
-    ("Track record", "Every confirmed signal the nightly scan committed, counted once at its first report, filled at "
-                     "the next session's open. Not traded when that open was above Max buy or through the stop. "
-                     "Target and stop are intraday touches (a bar touching both is a stop); after 60 bars a position "
-                     "still open is closed at that close (time exit). R = (exit − fill) / (fill − stop)."),
+                        "day 1; from day 7 (a Wolfe from day 6) nothing was left, so the scanner retires a row "
+                        "after its sixth session, a Wolfe after its fifth."),
+    ("Fear and greed", "The stock's own reading at the last close, 0 to 100, averaging RSI 14, the MACD histogram's "
+                       "percentile over the past year and Bollinger %B. Above 80 the stock is stretched, and such "
+                       "breakouts did worst in the replay; below 20 it is washed out. Information, not a rule."),
+    ("R", "One unit of risk: the distance from the buy price to the stop loss. A stop-out is −1 R; a take-profit at "
+          "twice that distance is +2 R. It lets signals with different prices be added up."),
+    ("Result", "Every signal is counted once, at its first report, bought at the next open. Not bought when that "
+               "open was above the buy limit or below the stop. Take profit and stop loss count as touched "
+               "during the day (a day touching both counts as a stop). After 60 sessions a position still open is "
+               "closed at that day's close (time limit)."),
 )
 
 
@@ -133,36 +150,32 @@ def day_on_list(signal: Mapping[str, Any], evaluation_rows: Sequence[Mapping[str
     return None
 
 
-def grade(pattern: str, day: Optional[int]) -> Tuple[str, str]:
-    """``(grade, badge)``: ``enter`` / ``late`` / ``skip`` by the day on the list (see #115)."""
+def grade(pattern: str, day: Optional[int], limit: Optional[int] = None) -> Tuple[str, str]:
+    """``(grade, status)``: ``enter`` / ``late`` / ``skip`` by the day on the list (see #115), with the words the
+    status cell shows; ``limit`` is the pattern's ``MAX_LISTED_DAYS``."""
     no_entry = NO_ENTRY_FROM.get(pattern, NO_ENTRY_FROM["default"])
+    limit = limit or no_entry - 1
     if day is None:
         return "enter", "First report unknown"
     if day == 1:
         return "enter", "New today"
     if day < LATE_FROM:
-        return "enter", f"Day {day} on the list"
+        return "enter", f"Day {day} of {limit}"
     if day >= no_entry:
-        return "skip", f"Day {day} on the list: no entry"
-    return "late", f"Day {day} on the list: late"
+        return "skip", f"Day {day}: too late to enter"
+    return "late", f"Day {day} of {limit}: late, smaller edge"
 
 
-def action_text(signal: Mapping[str, Any], grade_: str, day: Optional[int]) -> str:
-    """The plan for a setup, in words: the report's rule graded by the day on the list."""
-    zone_hi = signal.get("max_buy") or signal["entry"]
-    stop, target = signal["stop"], signal.get("target")
-    exit_rule = f"Stop {stop:.2f}: exit on a close at or below it."
-    goal = f" Take profit at {target:.2f}." if target else ""
-    if grade_ == "enter":
-        return (f"Buy at the next open only if it prints at or below {zone_hi:.2f}. If the open is higher, the "
-                f"setup no longer qualifies. {exit_rule}{goal}")
+def late_note(pattern: str, grade_: str, day: Optional[int]) -> str:
+    """The sentence a late or too-late row carries; empty for a fresh one."""
     if grade_ == "late":
-        return (f"Late entry, day {day} on the list. In the eleven-year replay the same signals bought this late "
-                f"paid about 0.1 R less than on their first day, still positive on average. Only at or below "
-                f"{zone_hi:.2f} at the open. {exit_rule}{goal}")
-    no_entry = NO_ENTRY_FROM.get(signal["pattern"], NO_ENTRY_FROM["default"])
-    return (f"No entry, day {day} on the list. From day {no_entry} the eleven-year replay found no edge left for "
-            f"late buyers of this pattern. Keep watching; the row stays until it expires.")
+        return (f"This signal is on its day {day}. In eleven years of history, buying this late earned about 0.1 R "
+                f"less than buying on day 1, still positive on average. Only inside the buy range.")
+    if grade_ == "skip":
+        no_entry = NO_ENTRY_FROM.get(pattern, NO_ENTRY_FROM["default"])
+        return (f"Day {day} on the list: from day {no_entry} the history shows no edge left for late buyers of this "
+                f"pattern. Do not buy; the row stays only until it expires.")
+    return ""
 
 
 def _pct(a: float, b: float) -> float:
@@ -178,40 +191,42 @@ def _pivots(notes: str) -> List[Tuple[str, str, float]]:
 def setup_view(signal: Mapping[str, Any], meta: Mapping[str, Any],
                evaluation_rows: Sequence[Mapping[str, Any]],
                charts: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
-    """One confirmed row as the card shows it (``charts``: ``symbols`` of the charts JSON)."""
+    """One confirmed row as the page shows it (``charts``: ``symbols`` of the charts JSON)."""
     day = day_on_list(signal, evaluation_rows)
-    g, badge = grade(signal["pattern"], day)
+    limit = (meta.get("max_listed_days") or {}).get(signal["pattern"])
+    g, status = grade(signal["pattern"], day, limit)
     entry, stop, target = float(signal["entry"]), float(signal["stop"]), signal.get("target")
     limits = meta.get("max_breakout_age_by_pattern") or {}
     vr = signal.get("volume_ratio")
     chips: List[Tuple[str, str]] = []
     market = meta.get("market") or {}
     if market.get("regime"):
-        chips.append((f"Market: {market['regime']} regime", {"bull": "good", "bear": "bad"}.get(market["regime"], "")))
+        chips.append((f"Market: {market['regime']} trend", {"bull": "good", "bear": "bad"}.get(market["regime"], "")))
     for part in (signal.get("trend") or "").split(", "):
         if part:
             chips.append((part[0].upper() + part[1:], "warn" if "below SMA200" in part or "falling" in part else ""))
     if vr is not None:
-        chips.append((f"Volume {vr:.1f}× average" if vr >= 1.0 else f"Volume {vr:.1f}×, below average",
-                      "" if vr >= 1.0 else "warn"))
+        chips.append((f"Breakout volume {vr:.2f}× the average" if vr >= 1.0
+                      else f"Breakout volume {vr:.2f}×, below average", "" if vr >= 1.0 else "warn"))
     fg = signal.get("fear_greed")
     zone = fg_zone(fg)
     if fg is not None:
         chips.append((f"Fear and greed {fg:.0f}, {zone}", "bad" if fg >= 80 else ("warn" if fg >= 60 else "")))
     ref = REPLAY_REFERENCE["patterns"].get(signal["pattern"])
     return {"ticker": signal["ticker"], "pattern": signal["pattern"], "score": signal["score"], "day": day,
-            "grade": g, "badge": badge, "entry": entry, "max_buy": signal.get("max_buy"), "stop": stop,
-            "target": target, "risk_pct": round(-_pct(stop, entry), 1),
+            "list_limit": limit, "grade": g, "status": status, "note": late_note(signal["pattern"], g, day),
+            "entry": entry, "max_buy": signal.get("max_buy"), "stop": stop, "target": target,
+            "risk_pct": round(-_pct(stop, entry), 1),
             "reward_pct": _pct(float(target), entry) if target else None, "reward_risk": signal.get("reward_risk"),
             "last_close": signal.get("last_close"), "age": signal.get("bars_since_break"),
             "age_limit": limits.get(signal["pattern"]), "volume_ratio": vr, "fear_greed": fg, "fg_zone": zone,
             "trend": signal.get("trend"), "notes": signal.get("notes"), "chips": chips,
-            "action": action_text(signal, g, day), "reference": ref,
+            "explained": PATTERN_EXPLAINED.get(signal["pattern"], ""), "reference": ref,
             "pivots": _pivots(signal.get("notes") or ""), "chart": (charts or {}).get(signal["ticker"])}
 
 
 def watch_view(signal: Mapping[str, Any], charts: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
-    """One watchlist row as the table shows it."""
+    """One watched row as the page shows it."""
     entry, last = float(signal["entry"]), signal.get("last_close")
     return {"ticker": signal["ticker"], "pattern": signal["pattern"], "score": signal["score"], "trigger": entry,
             "max_buy": signal.get("max_buy"), "last_close": last,
@@ -222,8 +237,53 @@ def watch_view(signal: Mapping[str, Any], charts: Optional[Mapping[str, Any]] = 
             "pivots": _pivots(signal.get("notes") or ""), "chart": (charts or {}).get(signal["ticker"])}
 
 
+def result_text(row: Mapping[str, Any]) -> Tuple[str, str]:
+    """``(label, sentence)`` of one past signal in price terms: ``win`` / ``loss`` / ``flat`` / ``open`` /
+    ``none`` (not bought) / ``pending`` (no bar after the signal yet)."""
+    o, exit_, date, fill = row["outcome"], row.get("exit"), row.get("exit_date"), row.get("fill")
+    if o == "target":
+        return "win", f"Took profit at {float(exit_):.2f} on {date}"
+    if o == "stop":
+        return "loss", f"Stopped out at {float(exit_):.2f} on {date}"
+    if o == "expired":
+        pnl = row.get("pnl_pct") or 0.0
+        label = "win" if pnl > 0 else ("loss" if pnl < 0 else "flat")
+        return label, f"Time limit reached: closed at {float(exit_):.2f} on {date}"
+    if o == "open":
+        return "open", f"Still open: last close {float(exit_):.2f} on {date}"
+    if o == "gap":
+        return "none", f"Not bought: it opened at {float(fill):.2f}, above the buy limit"
+    if o == "below_stop":
+        return "none", f"Not bought: it opened at {float(fill):.2f}, below the stop loss"
+    return "pending", "Signal from the last scan: the buy happens at the next open"
+
+
+def results_view(evaluation: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
+    """Past signals in the order they were reported, each with its result in words, plus the tally."""
+    if not evaluation:
+        return {"available": False, "rows": [], "summary": None}
+    rows = sorted(evaluation.get("rows", []), key=lambda r: (r["last_date"], r["ticker"]))
+    out = []
+    for r in rows:
+        label, text = result_text(r)
+        out.append({"date": r["last_date"], "ticker": r["ticker"], "pattern": r["pattern"], "bought": r.get("fill"),
+                    "stop": r["stop"], "target": r.get("target"), "outcome": r["outcome"], "label": label,
+                    "text": text, "pnl_pct": r.get("pnl_pct"), "r": r.get("r"), "listed_days": r.get("listed_days"),
+                    "exit": r.get("exit"), "exit_date": r.get("exit_date")})
+    closed = [x for x in out if x["outcome"] in ("target", "stop", "expired") and x["pnl_pct"] is not None]
+    summary = {"n": len(out), "wins": sum(1 for x in out if x["label"] == "win"),
+               "losses": sum(1 for x in out if x["label"] == "loss"),
+               "flat": sum(1 for x in out if x["label"] == "flat"),
+               "open": sum(1 for x in out if x["label"] == "open"),
+               "not_bought": sum(1 for x in out if x["label"] == "none"),
+               "pending": sum(1 for x in out if x["label"] == "pending"),
+               "avg_pnl_pct": round(sum(x["pnl_pct"] for x in closed) / len(closed), 1) if closed else None,
+               "since": out[0]["date"] if out else None}
+    return {"available": True, "rows": out, "summary": summary}
+
+
 def track_view(evaluation: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
-    """The live track record: rows in signal order with a status, the summary and the cumulative-R curve."""
+    """The technical track record: rows in signal order with a status, the summary and the cumulative-R curve."""
     if not evaluation:
         return {"available": False, "rows": [], "summary": None, "curve": [], "horizon": None, "since": None}
     rows = sorted(evaluation.get("rows", []), key=lambda r: (r["last_date"], r["ticker"]))
@@ -234,7 +294,7 @@ def track_view(evaluation: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
         if status != "none" and r.get("r") is not None:
             total += float(r["r"])
             curve.append(round(total, 2))
-        out.append({**r, "status": status, "label": OUTCOME_LABELS.get(r["outcome"], r["outcome"])})
+        out.append({**r, "status": status, "label": result_text(r)[1]})
     return {"available": True, "rows": out, "summary": evaluation.get("summary"), "curve": curve,
             "horizon": evaluation.get("horizon"), "since": rows[0]["last_date"] if rows else None}
 
@@ -259,9 +319,9 @@ def view_model(doc: Mapping[str, Any], evaluation: Optional[Mapping[str, Any]],
             | {"stale_days": stale_days},
             "market": meta.get("market"), "setups": setups, "watchlist": watch,
             "charts_as_of": (charts or {}).get("as_of"),
-            "closed": [{**c, "label": CLOSED_LABELS.get(c.get("outcome"), c.get("outcome"))}
+            "closed": [{**c, "plain": CLOSED_PLAIN.get(c.get("outcome"), str(c.get("outcome")).lower())}
                        for c in doc.get("closed") or []],
-            "track": track_view(evaluation), "reference": REPLAY_REFERENCE}
+            "results": results_view(evaluation), "track": track_view(evaluation), "reference": REPLAY_REFERENCE}
 
 
 # --------------------------------------------------------------------------- #
@@ -359,15 +419,15 @@ def chart_svg(series: Mapping[str, Sequence[Any]], levels: Mapping[str, Optional
     if stop is not None:
         parts.append(f'<line class="stop" x1="{left}" y1="{y(float(stop)):.1f}" x2="{left + pw}" '
                      f'y2="{y(float(stop)):.1f}"/><text class="lvl stop-l" x="{left + 4}" '
-                     f'y="{y(float(stop)) - 4:.1f}">stop {float(stop):.2f}</text>')
+                     f'y="{y(float(stop)) - 4:.1f}">stop loss {float(stop):.2f}</text>')
     if target is not None:
         if clipped:
-            parts.append(f'<text class="lvl target-l" x="{left + 4}" y="{top + 10}">target {float(target):.2f}, '
+            parts.append(f'<text class="lvl target-l" x="{left + 4}" y="{top + 10}">take profit {float(target):.2f}, '
                          f'above this chart</text>')
         else:
             parts.append(f'<line class="target" x1="{left}" y1="{y(float(target)):.1f}" x2="{left + pw}" '
                          f'y2="{y(float(target)):.1f}"/><text class="lvl target-l" x="{left + 4}" '
-                         f'y="{y(float(target)) - 4:.1f}">target {float(target):.2f}</text>')
+                         f'y="{y(float(target)) - 4:.1f}">take profit {float(target):.2f}</text>')
     index = {d: i for i, d in enumerate(dates)}
     for label, day, price in pivots:
         if day in index:
@@ -387,162 +447,189 @@ def _levels(v: Mapping[str, Any], entry: Optional[float]) -> Dict[str, Optional[
 def _header(vm: Mapping[str, Any]) -> str:
     scan, market = vm["scan"], vm.get("market") or {}
     bits = [f"Scan {scan['run_date']} UTC" if scan.get("run_date") else "No scan yet",
-            f"bars through {scan['last_bar']}" if scan.get("last_bar") else "",
-            f"{scan['scanned']} of {scan['universe']} symbols" if scan.get("scanned") else "",
-            f"profile {scan['profile']}" if scan.get("profile") else ""]
+            f"prices through {scan['last_bar']}" if scan.get("last_bar") else "",
+            f"{scan['scanned']} of {scan['universe']} S&P 500 stocks" if scan.get("scanned") else ""]
     meta_line = " · ".join(b for b in bits if b)
     notes = []
     if scan.get("stale_days") is not None and scan["stale_days"] > 4:
-        notes.append(f"The last bar is {scan['stale_days']} days old: the scan may not have run.")
+        notes.append(f"The last price is {scan['stale_days']} days old: the scan may not have run.")
     if scan.get("skipped_bar"):
-        notes.append(f"Newest bar {scan['skipped_bar']} not scanned (incomplete at the data source).")
+        notes.append(f"Newest day {scan['skipped_bar']} not scanned (incomplete at the data source).")
     if scan.get("errors"):
-        notes.append(f"Data errors: {scan['errors']}.")
+        notes.append(f"{scan['errors']} stock(s) without data.")
     strip = []
     if market:
-        strip.append(_chip(f"{market.get('index', 'SPY')} {market['index_vs_sma200_pct']:+.1f} % vs SMA200"))
-        strip.append(_chip(f"{market['regime'].capitalize()} regime",
+        strip.append(_chip(f"{market['regime'].capitalize()} trend",
                            {"bull": "good", "bear": "bad", "neutral": "info"}.get(market["regime"], "")))
+        strip.append(_chip(f"{market.get('index', 'SPY')} {market['index_vs_sma200_pct']:+.1f} % vs its "
+                           f"200-day average"))
         if market.get("vix") is not None:
             strip.append(_chip(f"VIX {market['vix']:.1f}", "warn" if market["vix"] >= 25 else ""))
         if market.get("breadth") is not None:
-            strip.append(_chip(f"{market['breadth']:.0%} of stocks above their SMA200"))
-    return (f'<header class="top"><div><h1>SignalSync <small>S&amp;P 500 daily chart patterns</small></h1>'
+            strip.append(_chip(f"{market['breadth']:.0%} of stocks above their 200-day average"))
+    return (f'<header class="top"><div><h1>SignalSync <small>S&amp;P 500 chart-pattern signals</small></h1>'
             f'<div class="meta">{_e(meta_line)}</div></div>'
-            f'<nav class="sections"><a href="#setups">Setups</a><a href="#watchlist">Watchlist</a>'
-            f'<a href="#track">Track record</a><a href="#how">How to read</a></nav></header>'
+            f'<nav class="sections"><a href="#now">1. Buy signals</a><a href="#why">2. Why</a>'
+            f'<a href="#results">3. Results</a><a href="#how">How to read</a></nav></header>'
             + (f'<p class="callout">{_e(" ".join(notes))}</p>' if notes else "")
             + (f'<div class="strip">{"".join(strip)}</div>' if strip else ""))
 
 
-def _metrics(vm: Mapping[str, Any]) -> str:
-    track = vm["track"]
-    s = track.get("summary") or {}
-    cards = [("Confirmed today", str(len(vm["setups"]))), ("Watchlist", str(len(vm["watchlist"])))]
-    if track["available"] and s:
-        traded = s["target"] + s["stop"] + s["expired"] + s["open"]
-        cards.append((f"Signals since {track['since']}" if track.get("since") else "Signals", str(s["n"])))
-        mean = f'<span class="{_rcls(s.get("mean_r")).strip()}">{_signed(s.get("mean_r"))}</span>'
-        cards.append(("Mean R so far", mean if traded else "–"))
-    return '<div class="cards-4">' + "".join(
-        f'<div class="metric"><div class="label">{_e(label)}</div><div class="value">{value}</div></div>'
-        for label, value in cards) + "</div>"
+def _glance(vm: Mapping[str, Any]) -> str:
+    res = vm["results"]
+    n_now, n_watch = len(vm["setups"]), len(vm["watchlist"])
+    bits = [f"{n_now} buy signal{'s' if n_now != 1 else ''}", f"{n_watch} stock{'s' if n_watch != 1 else ''} watched"]
+    if res["available"] and res["summary"]:
+        s = res["summary"]
+        bits.append(f"past signals: {s['wins']} won, {s['losses']} lost, {s['open']} still open")
+    return f'<p class="glance">Today: {_e(" · ".join(bits))}.</p>'
 
 
-def _setup_card(v: Mapping[str, Any]) -> str:
-    zone = f"{_num(v['entry'])} to {_num(v['max_buy'])}" if v.get("max_buy") else _num(v["entry"])
-    target = (f'<div class="level target"><div class="label">Take profit</div><div class="value">{_num(v["target"])}'
-              f'</div><div class="sub">{_signed(v["reward_pct"], 1, " %")} from entry'
-              + (f' · {_num(v["reward_risk"])} R' if v.get("reward_risk") is not None else "") + "</div></div>"
-              if v.get("target") else '<div class="level target"><div class="label">Take profit</div>'
-                                      '<div class="value">–</div><div class="sub">no measured move</div></div>')
-    age = (f"Breakout {v['age']} bars ago" + (f", listed until {v['age_limit']}" if v.get("age_limit") else "")
+def _status_badge(v: Mapping[str, Any]) -> str:
+    return f'<span class="badge badge-{v["grade"]}">{_e(v["status"])}</span>'
+
+
+def _signal_row(v: Mapping[str, Any]) -> str:
+    note = f'<div class="sub">{_e(v["note"])}</div>' if v["note"] else ""
+    gain = _signed(v["reward_pct"], 1, " %") if v.get("target") else "no target"
+    return (f'<tr><td><a href="#why-{_e(v["ticker"])}"><strong>{_e(v["ticker"])}</strong></a></td>'
+            f'<td>{_e(v["pattern"])}</td>'
+            f'<td class="num"><strong>{_num(v["max_buy"] or v["entry"])}</strong>'
+            f'<div class="sub">last close {_num(v["last_close"])}</div></td>'
+            f'<td class="num neg"><strong>{_num(v["stop"])}</strong>'
+            f'<div class="sub">{_num(v["risk_pct"], 1)} % below</div></td>'
+            f'<td class="num pos"><strong>{_num(v["target"])}</strong><div class="sub">{gain}</div></td>'
+            f'<td>{_status_badge(v)}{note}</td></tr>')
+
+
+def _signals_now(vm: Mapping[str, Any]) -> str:
+    head = f'<h2 id="now"><span class="num">1</span>Buy signals now<span class="count">{len(vm["setups"])}</span></h2>'
+    if not vm["setups"]:
+        return head + ('<p class="empty">No buy signal today. Nothing to do. The stocks being watched are in '
+                       'section 2; one becomes a signal only after a daily close above its trigger.</p>')
+    rows = "".join(_signal_row(v) for v in vm["setups"])
+    return (head
+            + '<div class="instruction"><strong>How to act.</strong> Buy at the next market open, only if the stock '
+              'opens at or below the "buy up to" price. Sell if a day closes at or below the stop loss. Sell at the '
+              'take-profit price. A signal stays here while it is still valid and leaves when the stock closes below '
+              'its stop, the pattern fails, or the row is too old to enter.</div>'
+            '<div class="table-wrap"><table class="signals"><thead><tr><th>Stock</th><th>Pattern</th>'
+            '<th class="num">Buy up to</th><th class="num">Stop loss</th><th class="num">Take profit</th>'
+            f'<th>Status</th></tr></thead><tbody>{rows}</tbody></table></div>')
+
+
+def _why_block(v: Mapping[str, Any]) -> str:
+    when = {0: "The breakout is the last session", 1: "The breakout was 1 session ago"}.get(
+        v.get("age"), f"The breakout was {v.get('age')} sessions ago")
+    age = (when + (f"; the row is dropped after {v['age_limit']}" if v.get("age_limit") else "") + "."
            if v.get("age") is not None else "")
     ref = v.get("reference")
-    ref_line = (f"Eleven-year replay, this pattern: {ref['trades']} trades, {ref['hit']:.0%} hit, "
-                f"{ref['mean_r']:+.2f} R per trade." if ref else "")
-    return (f'<article class="card setup grade-{v["grade"]}" id="setup-{_e(v["ticker"])}">'
-            f'<header class="card-head"><div><span class="ticker">{_e(v["ticker"])}</span>'
-            f'<span class="pattern">{_e(v["pattern"])}</span></div>'
-            f'<div class="head-right"><span class="badge badge-{v["grade"]}">{_e(v["badge"])}</span>'
-            f'<span class="muted">Score {_e(v["score"])}</span></div></header>'
-            f'<div class="levels"><div class="level"><div class="label">Buy zone at the open</div>'
-            f'<div class="value">{zone}</div><div class="sub">last close {_num(v["last_close"])}</div></div>'
-            f'<div class="level stop"><div class="label">Stop loss</div><div class="value">{_num(v["stop"])}</div>'
-            f'<div class="sub">{_num(v["risk_pct"], 1)} % below entry</div></div>{target}</div>'
-            + (chart_svg(v["chart"], _levels(v, v["entry"]), v["pivots"], v["ticker"]) if v.get("chart") else "")
-            + f'<p class="action {v["grade"]}">{_e(v["action"])}</p>'
-            f'<div class="chips">{"".join(_chip(t, k) for t, k in v["chips"])}</div>'
-            f'<p class="details">{_e(age)}{" · " if age and v.get("notes") else ""}{_e(v.get("notes"))}</p>'
-            + (f'<p class="reference">{_e(ref_line)}</p>' if ref_line else "") + "</article>")
+    ref_line = (f"Over eleven years of history this pattern gave {ref['trades']} signals, {ref['hit']:.0%} reached "
+                f"their target, and the average result was {ref['mean_r']:+.2f} R per signal." if ref else "")
+    chart = chart_svg(v["chart"], _levels(v, v["entry"]), v["pivots"], v["ticker"]) if v.get("chart") else ""
+    return (f'<section class="why" id="why-{_e(v["ticker"])}">'
+            f'<h3><span class="ticker">{_e(v["ticker"])}</span><span class="pattern">{_e(v["pattern"])}</span>'
+            f'<span class="muted">score {_e(v["score"])} of 100</span>{_status_badge(v)}</h3>'
+            f'<p>{_e(v["explained"])}</p>'
+            f'<p class="details"><strong>Here:</strong> {_e(v.get("notes"))}. {_e(age)}</p>'
+            + chart
+            + f'<div class="chips">{"".join(_chip(t, k) for t, k in v["chips"])}</div>'
+            + (f'<p class="note late">{_e(v["note"])}</p>' if v["note"] else "")
+            + (f'<p class="reference">{_e(ref_line)}</p>' if ref_line else "") + "</section>")
 
 
-def _setups(vm: Mapping[str, Any]) -> str:
-    body = "".join(_setup_card(v) for v in vm["setups"]) or \
-        '<p class="note">No confirmed breakout in the last scan. The watchlist below shows the patterns that are ' \
-        'complete and waiting for a close above their trigger.</p>'
-    return f'<h2 id="setups">Today\'s setups<span class="count">{len(vm["setups"])}</span></h2>{body}'
-
-
-def _watchlist(vm: Mapping[str, Any]) -> str:
+def _watching(vm: Mapping[str, Any]) -> str:
     rows = "".join(
         f'<tr><td><strong>{_e(w["ticker"])}</strong></td><td>{_e(w["pattern"])}</td>'
         f'<td class="num">{_num(w["trigger"])}</td><td class="num">{_num(w["last_close"])}</td>'
         f'<td class="num">{_signed(w["to_trigger_pct"], 1, " %")}</td><td class="num">{_num(w["stop"])}</td>'
-        f'<td class="num">{_num(w["target"])}</td><td class="num">{_num(w["reward_risk"])}</td>'
-        f'<td class="num">{_e(w["score"])}</td>'
-        f'<td>{_num(w["fear_greed"], 0)}{" " + _e(w["fg_zone"]) if w.get("fg_zone") else ""}</td></tr>'
-        for w in vm["watchlist"])
+        f'<td class="num">{_num(w["target"])}</td></tr>' for w in vm["watchlist"])
     anchors = "".join(
         f'<li><strong>{_e(w["ticker"])}</strong> {_e(w.get("notes"))}'
         + (chart_svg(w["chart"], _levels(w, w["trigger"]), w["pivots"], w["ticker"]) if w.get("chart") else "")
         + "</li>" for w in vm["watchlist"] if w.get("notes") or w.get("chart"))
-    table = ('<div class="table-wrap"><table><thead><tr><th>Ticker</th><th>Pattern</th><th class="num">Trigger</th>'
-             '<th class="num">Last close</th><th class="num">To trigger</th><th class="num">Stop</th>'
-             '<th class="num">Target</th><th class="num">R:R</th><th class="num">Score</th><th>F&amp;G</th>'
+    table = ('<div class="table-wrap"><table><thead><tr><th>Stock</th><th>Pattern</th>'
+             '<th class="num">Needs a close above</th><th class="num">Last close</th><th class="num">Distance</th>'
+             '<th class="num">Stop loss if it triggers</th><th class="num">Take profit if it triggers</th>'
              f'</tr></thead><tbody>{rows}</tbody></table></div>'
-             + (f'<details class="anchors"><summary>Pattern anchors and charts</summary><ul>{anchors}'
+             + (f'<details class="anchors"><summary>Their charts and pattern anchors</summary><ul>{anchors}'
                 '</ul></details>' if anchors else "")
-             if rows else '<p class="note">Nothing on the watchlist.</p>')
-    return (f'<h2 id="watchlist">Watchlist<span class="count">{len(vm["watchlist"])}</span></h2>'
-            '<p class="note">Not a buy yet: a row moves up to the setups only after a daily close above its trigger. '
-            'Stop and target are what the setup would have if it triggers today.</p>' + table)
+             if rows else '<p class="note">Nothing is being watched right now.</p>')
+    removed = ", ".join(f"{c['ticker']} ({c['plain']})" for c in vm["closed"])
+    return (f'<h3 id="watching">Watching, not a signal yet<span class="count">{len(vm["watchlist"])}</span></h3>'
+            '<p class="note">These patterns are complete but the stock has not closed above its trigger. Do nothing; '
+            'a stock moves up to section 1 the day it does.</p>' + table
+            + (f'<p class="note">Left the page since the previous scan: {_e(removed)}.</p>' if removed else ""))
 
 
-def _closed(vm: Mapping[str, Any]) -> str:
-    if not vm["closed"]:
-        return ""
+def _why(vm: Mapping[str, Any]) -> str:
+    head = '<h2 id="why"><span class="num">2</span>Why these stocks</h2>'
+    blocks = "".join(_why_block(v) for v in vm["setups"]) or \
+        '<p class="note">No stock to explain today: there is no buy signal.</p>'
+    return head + blocks + _watching(vm)
+
+
+def _results(vm: Mapping[str, Any]) -> str:
+    head = '<h2 id="results"><span class="num">3</span>Past signals: were we right?</h2>'
+    res = vm["results"]
+    if not res["available"]:
+        return head + '<p class="note">The results are not available in this build.</p>'
+    s = res["summary"]
+    tally = (f'{s["n"]} signals since {s["since"]}: <strong>{s["wins"]} took profit</strong>, '
+             f'<strong>{s["losses"]} stopped out</strong>'
+             + (f', {s["flat"]} closed flat' if s["flat"] else "") + f', {s["open"]} still open'
+             + (f', {s["not_bought"]} not bought' if s["not_bought"] else "")
+             + (f', {s["pending"]} pending' if s.get("pending") else "") + "."
+             + (f' Average result on the closed ones: <strong class="{_rcls(s["avg_pnl_pct"]).strip()}">'
+                f'{_signed(s["avg_pnl_pct"], 1, " %")}</strong>.' if s["avg_pnl_pct"] is not None else ""))
     rows = "".join(
-        f'<tr><td><strong>{_e(c["ticker"])}</strong></td><td>{_e(c["pattern"])}</td><td>{_e(c["was"].capitalize())}</td>'
-        f'<td>{_e(c["label"])}</td><td class="num">{_num(c["entry"])}</td><td class="num">{_num(c["stop"])}</td>'
-        f'<td class="num">{_num(c.get("target"))}</td><td class="wrap-cell">{_e(c.get("detail"))}</td></tr>'
-        for c in vm["closed"])
-    return (f'<h2 id="closed">Closed since the previous report<span class="count">{len(vm["closed"])}</span></h2>'
-            '<div class="table-wrap"><table><thead><tr><th>Ticker</th><th>Pattern</th><th>Was</th><th>Outcome</th>'
-            '<th class="num">Entry</th><th class="num">Stop</th><th class="num">Target</th><th>Detail</th></tr></thead>'
-            f'<tbody>{rows}</tbody></table></div>')
+        f'<tr><td class="date">{_e(r["date"])}</td><td><strong>{_e(r["ticker"])}</strong></td>'
+        f'<td>{_e(r["pattern"])}</td>'
+        f'<td class="num">{_num(r["bought"])}</td><td class="num">{_num(r["stop"])}</td>'
+        f'<td class="num">{_num(r["target"])}</td>'
+        f'<td><span class="badge badge-{r["label"]}">{_e(RESULT_WORDS[r["label"]])}</span>'
+        f'<div class="sub">{_e(r["text"])}</div></td>'
+        f'<td class="num{_rcls(r["pnl_pct"])}"><strong>{_signed(r["pnl_pct"], 1, " %")}</strong></td></tr>'
+        for r in res["rows"])
+    table = ('<div class="table-wrap"><table class="results"><thead><tr><th>Signal</th><th>Stock</th><th>Pattern</th>'
+             '<th class="num">Bought at</th><th class="num">Stop loss</th><th class="num">Take profit</th>'
+             f'<th>Result</th><th class="num">Gain / loss</th></tr></thead><tbody>{rows}</tbody></table></div>'
+             if rows else '<p class="note">No signal has been logged yet.</p>')
+    ref = vm["reference"]["overall"]
+    honest = (f'<p class="note">Counted the same way as the eleven-year replay: bought at the next open after the '
+              f'first report, not bought when that open was above the buy limit or below the stop, take profit and '
+              f'stop loss as touched during the day. For scale, the replay made {ref["mean_r"]:+.2f} R per signal on '
+              f'{ref["trades"]} signals with {ref["hit"]:.0%} reaching their target, {ref["note"]}. A live sample this '
+              f'small says little either way.</p>')
+    return head + f'<p class="tally">{tally}</p>' + table + honest + _technical(vm)
 
 
-def _track(vm: Mapping[str, Any]) -> str:
+def _technical(vm: Mapping[str, Any]) -> str:
+    """The R-based track record, folded away for the reader who wants it."""
     t = vm["track"]
-    head = '<h2 id="track">Track record</h2>'
-    if not t["available"]:
-        return head + '<p class="note">The track record is not available in this build.</p>'
+    if not t["available"] or not t["rows"]:
+        return ""
     s = t["summary"] or {}
     resolved = s.get("target", 0) + s.get("stop", 0)
-    intro = (f'<p class="note">Every confirmed signal the nightly scan has committed since {_e(t["since"])}, counted '
-             f'once at its first report and filled at the next open, with the same accounting as the replays. '
-             f'{s.get("n", 0)} signals: {s.get("target", 0)} reached the target, {s.get("stop", 0)} stopped, '
-             f'{s.get("expired", 0)} timed out, {s.get("open", 0)} open, {s.get("gap", 0) + s.get("below_stop", 0)} '
-             f'not traded, {s.get("no_data", 0)} without bars yet. Hit rate '
-             f'{f"{s["hit_rate"]:.0%}" if s.get("hit_rate") is not None else "–"} on {resolved} resolved, '
-             f'mean {_signed(s.get("mean_r"))} R, total {_signed(s.get("total_r"))} R.</p>')
-    ref = vm["reference"]["overall"]
-    compare = (f'<p class="callout">For scale: the eleven-year replay of the same rules made {ref["mean_r"]:+.2f} R '
-               f'per trade on {ref["trades"]} trades at a {ref["hit"]:.0%} hit rate, {ref["note"]}. A live sample '
-               f'this small says little either way.</p>')
-    spark = sparkline(t["curve"]) if t["curve"] else ""
-    filters = ('<div class="filters" role="group" aria-label="Filter">'
-               '<button type="button" data-filter="all" aria-pressed="true">All</button>'
-               '<button type="button" data-filter="open" aria-pressed="false">Open</button>'
-               '<button type="button" data-filter="closed" aria-pressed="false">Closed</button></div>')
+    hit = f"{s['hit_rate']:.0%}" if s.get("hit_rate") is not None else "–"
     rows = "".join(
         f'<tr data-status="{r["status"]}"><td>{_e(r["last_date"])}</td><td><strong>{_e(r["ticker"])}</strong></td>'
-        f'<td>{_e(r["pattern"])}</td><td class="num">{_e(r.get("listed_days"))}</td>'
-        f'<td class="num">{_num(r.get("fill"))}</td><td class="num">{_num(r["stop"])}</td>'
-        f'<td class="num">{_num(r.get("target"))}</td>'
-        f'<td><span class="badge badge-{ {"closed": "none", "open": "open", "none": "none"}[r["status"]]}'
-        f'{" badge-win" if r["outcome"] == "target" else (" badge-loss" if r["outcome"] == "stop" else "")}">'
-        f'{_e(r["label"])}</span></td><td class="num">{_e(r.get("bars"))}</td>'
-        f'<td class="num">{_num(r.get("exit"))}</td>'
-        f'<td class="num{_rcls(r.get("pnl_pct"))}">{_signed(r.get("pnl_pct"), 1, " %")}</td>'
+        f'<td class="num">{_e(r.get("listed_days"))}</td><td class="num">{_num(r.get("fill"))}</td>'
+        f'<td class="num">{_num(r.get("exit"))}</td><td class="num">{_e(r.get("bars"))}</td>'
         f'<td class="num{_rcls(r.get("r"))}">{_signed(r.get("r"))}</td></tr>' for r in t["rows"])
-    table = ('<div class="table-wrap"><table id="track-table"><thead><tr><th>Signal</th><th>Ticker</th><th>Pattern</th>'
-             '<th class="num">Listed</th><th class="num">Fill</th><th class="num">Stop</th><th class="num">Target</th>'
-             '<th>Outcome</th><th class="num">Bars</th><th class="num">Exit</th><th class="num">P&amp;L</th>'
-             f'<th class="num">R</th></tr></thead><tbody>{rows}</tbody></table></div>'
-             if rows else '<p class="note">No signal has been logged yet.</p>')
-    return head + intro + compare + spark + filters + table
+    return ('<details class="more"><summary>In units of risk (R), for the curious</summary>'
+            f'<p class="note">Hit rate {hit} on {resolved} '
+            f'resolved, mean {_signed(s.get("mean_r"))} R, total {_signed(s.get("total_r"))} R over the horizon of '
+            f'{_e(t.get("horizon"))} sessions. One R is the distance from the buy price to the stop loss.</p>'
+            + (sparkline(t["curve"]) if t["curve"] else "")
+            + '<div class="filters" role="group" aria-label="Filter">'
+              '<button type="button" data-filter="all" aria-pressed="true">All</button>'
+              '<button type="button" data-filter="open" aria-pressed="false">Open</button>'
+              '<button type="button" data-filter="closed" aria-pressed="false">Closed</button></div>'
+              '<div class="table-wrap"><table id="track-table"><thead><tr><th>Signal</th><th>Stock</th>'
+              '<th class="num">Sessions listed</th><th class="num">Bought at</th><th class="num">Exit</th>'
+              f'<th class="num">Sessions held</th><th class="num">R</th></tr></thead><tbody>{rows}</tbody>'
+              '</table></div></details>')
 
 
 def _how(vm: Mapping[str, Any]) -> str:
@@ -555,20 +642,23 @@ def _how(vm: Mapping[str, Any]) -> str:
                    f'<td class="num{_rcls(row["vs_day1"])}">{_signed(row["vs_day1"])}</td></tr>'
                    for row in ref["late_entry"])
     gloss = "".join(f"<dt>{_e(k)}</dt><dd>{_e(v)}</dd>" for k, v in GLOSSARY)
-    return (f'<h2 id="how">How to read this page</h2><dl class="glossary">{gloss}</dl>'
-            f'<h3>What the same rules did over eleven years</h3><p class="note">{_e(ref["source"])}. Point-in-time '
-            f'index membership; the survivorship bias that remains is symbols that no longer trade.</p>'
-            '<div class="two-col"><div class="table-wrap"><table><thead><tr><th>Pattern</th><th class="num">Trades</th>'
-            f'<th class="num">Hit</th><th class="num">Mean R</th></tr></thead><tbody>{pat}</tbody></table></div>'
-            '<div class="table-wrap"><table><thead><tr><th>Day on the list</th><th class="num">Trades</th>'
+    return (f'<details class="how" id="how"><summary><h2>How to read this page</h2></summary>'
+            f'<dl class="glossary">{gloss}</dl>'
+            f'<h3>What the same rules did over eleven years</h3><p class="note">{_e(ref["source"])}. Index '
+            f'membership as it was at the time; what remains of the survivorship bias is the symbols that no '
+            f'longer trade.</p>'
+            '<div class="two-col"><div class="table-wrap"><table><thead><tr><th>Pattern</th>'
+            '<th class="num">Signals</th><th class="num">Reached target</th><th class="num">Mean R</th></tr></thead>'
+            f'<tbody>{pat}</tbody></table></div>'
+            '<div class="table-wrap"><table><thead><tr><th>Day on the list</th><th class="num">Signals</th>'
             f'<th class="num">Mean R</th><th class="num">Same signals, vs day 1</th></tr></thead><tbody>{late}</tbody>'
-            '</table></div></div>')
+            '</table></div></div></details>')
 
 
 def _footer(vm: Mapping[str, Any]) -> str:
-    return (f'<footer><p><strong>Heuristic scan, not investment advice.</strong> Every level comes from a pattern '
-            f'detector on daily bars; verify on a chart before trading, size for the stop, and expect losing streaks: '
-            f'the replay lost 36 to 41 R inside four of eleven years.</p>'
+    return (f'<footer><p><strong>Not investment advice.</strong> Every level comes from a pattern detector on daily '
+            f'prices; check the chart yourself before trading, size the position for the stop loss, and expect losing '
+            f'streaks: the replay lost 36 to 41 R inside four of eleven years.</p>'
             f'<p><a href="{REPO_URL}">Source and reports</a> · '
             f'<a href="{REPO_URL}/blob/main/output/report.md">Latest report</a> · '
             f'<a href="{REPO_URL}/wiki/03-Configuration-and-Tuning">Rules and their evidence</a> · '
@@ -577,8 +667,8 @@ def _footer(vm: Mapping[str, Any]) -> str:
 
 def render_body(vm: Mapping[str, Any]) -> str:
     """The page's body content (inside ``<div class="wrap">``)."""
-    return ('<div class="wrap">' + _header(vm) + _metrics(vm) + _setups(vm) + _watchlist(vm) + _closed(vm)
-            + _track(vm) + _how(vm) + _footer(vm) + "</div>")
+    return ('<div class="wrap">' + _header(vm) + _glance(vm) + _signals_now(vm) + _why(vm) + _results(vm)
+            + _how(vm) + _footer(vm) + "</div>")
 
 
 def _asset(name: str) -> str:
@@ -595,8 +685,9 @@ def render_page(vm: Mapping[str, Any], fragment: bool = False) -> str:
         return head + body
     return ('<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
             '<meta name="viewport" content="width=device-width, initial-scale=1">\n'
-            f'<meta name="description" content="S&amp;P 500 chart-pattern setups with entry, stop and target, and '
-            f'the live track record of every signal.">\n{head}</head>\n<body>\n{body}</body>\n</html>\n')
+            f'<meta name="description" content="S&amp;P 500 chart-pattern buy signals with the buy limit, stop loss '
+            f'and take profit, why each stock was triggered, and how past signals turned out.">\n{head}</head>\n'
+            f'<body>\n{body}</body>\n</html>\n')
 
 
 def build(signals_path: str, evaluation_path: Optional[str], out_dir: str, fragment: bool = False,
@@ -631,10 +722,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     args = ap.parse_args(argv)
     today = dt.date.fromisoformat(args.today) if args.today else None
     vm = build(args.signals, args.evaluation, args.out_dir, args.fragment, today, args.charts)
-    track = f"with {len(vm['track']['rows'])} signals" if vm["track"]["available"] else "absent"
+    track = f"with {len(vm['results']['rows'])} signals" if vm["results"]["available"] else "absent"
     charted = sum(1 for v in vm["setups"] + vm["watchlist"] if v.get("chart"))
-    print(f"{args.out_dir}/index.html: {len(vm['setups'])} setups, {len(vm['watchlist'])} on the watchlist, "
-          f"track record {track}, charts for {charted} rows")
+    print(f"{args.out_dir}/index.html: {len(vm['setups'])} buy signals, {len(vm['watchlist'])} watched, "
+          f"results {track}, charts for {charted} rows")
     return 0
 
 

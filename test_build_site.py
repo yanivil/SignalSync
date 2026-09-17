@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tests for tools/build_site.py: the view model (grades by day on the list, levels, track record) and the HTML."""
+"""Tests for tools/build_site.py: the view model (status by day on the list, levels, results in words) and the HTML."""
 
 from __future__ import annotations
 
@@ -36,7 +36,8 @@ def _doc():
                      "market": {"index": "SPY", "index_vs_sma200_pct": 7.82, "regime": "bull", "vix": 15.72,
                                 "breadth": 0.6287},
                      "max_breakout_age_by_pattern": {"Cup & Handle": 3, "Inverse Head & Shoulders": 8,
-                                                     "Bullish Wolfe Wave": 8}},
+                                                     "Bullish Wolfe Wave": 8},
+                     "max_listed_days": {"Cup & Handle": 6, "Inverse Head & Shoulders": 6, "Bullish Wolfe Wave": 5}},
             "signals": [
                 _signal("HAL", "Inverse Head & Shoulders", "CONFIRMED", 36.8, 32.64, 41.94, 87, bars_since_break=6,
                         volume_ratio=0.9, fear_greed=73.6, max_buy=37.68),
@@ -69,42 +70,47 @@ def _evaluation():
     return {"summary": ev.summarise(rows), "horizon": 60, "rows": rows}
 
 
-def test_grade_by_day_on_the_list():
-    assert bs.grade("Inverse Head & Shoulders", 1) == ("enter", "New today")
-    assert bs.grade("Inverse Head & Shoulders", 2) == ("enter", "Day 2 on the list")
-    assert bs.grade("Inverse Head & Shoulders", 3)[0] == "late" and bs.grade("Inverse Head & Shoulders", 6)[0] == "late"
-    assert bs.grade("Inverse Head & Shoulders", 7) == ("skip", "Day 7 on the list: no entry")
-    assert bs.grade("Bullish Wolfe Wave", 6)[0] == "skip" and bs.grade("Cup & Handle", 4)[0] == "late"
+def test_grade_and_status_by_day_on_the_list():
+    ihs = "Inverse Head & Shoulders"
+    assert bs.grade(ihs, 1, 6) == ("enter", "New today")
+    assert bs.grade(ihs, 2, 6) == ("enter", "Day 2 of 6")
+    assert bs.grade(ihs, 3, 6) == ("late", "Day 3 of 6: late, smaller edge") and bs.grade(ihs, 6, 6)[0] == "late"
+    assert bs.grade(ihs, 7, 6) == ("skip", "Day 7: too late to enter")
+    assert bs.grade("Bullish Wolfe Wave", 6, 5)[0] == "skip" and bs.grade("Cup & Handle", 4, 6)[0] == "late"
     assert bs.grade("Cup & Handle", None) == ("enter", "First report unknown")
+    assert bs.grade(ihs, 2) == ("enter", "Day 2 of 6")                          # limit defaults from NO_ENTRY_FROM
+    assert bs.late_note(ihs, "enter", 1) == ""
+    assert bs.late_note(ihs, "late", 4).startswith("This signal is on its day 4")
+    assert "Do not buy" in bs.late_note("Bullish Wolfe Wave", "skip", 6)
     assert [bs.fg_zone(x) for x in (None, 5, 20, 39.9, 60, 80, 99)] == \
         [None, "extreme fear", "fear", "fear", "greed", "extreme greed", "extreme greed"]
 
 
-def test_view_model_setups_levels_and_actions():
+def test_view_model_setups_levels_and_notes():
     vm = bs.view_model(_doc(), _evaluation(), dt.date(2026, 9, 9))
     by = {v["ticker"]: v for v in vm["setups"]}
     assert list(by) == ["HAL", "NEW", "WW"]                                   # score order
     hal = by["HAL"]
-    assert (hal["day"], hal["grade"], hal["badge"]) == (4, "late", "Day 4 on the list: late")
+    assert (hal["day"], hal["grade"], hal["list_limit"]) == (4, "late", 6)
+    assert hal["status"] == "Day 4 of 6: late, smaller edge"
     assert (hal["risk_pct"], hal["reward_pct"], hal["age"], hal["age_limit"]) == (11.3, 14.0, 6, 8)
-    assert "Only at or below 37.68" in hal["action"] and "Stop 32.64" in hal["action"]
-    assert ("Volume 0.9×, below average", "warn") in hal["chips"]
-    assert ("Fear and greed 74, greed", "warn") in hal["chips"] and ("Market: bull regime", "good") in hal["chips"]
+    assert hal["note"].startswith("This signal is on its day 4") and hal["explained"].startswith("Three lows")
+    assert ("Breakout volume 0.90×, below average", "warn") in hal["chips"]
+    assert ("Fear and greed 74, greed", "warn") in hal["chips"] and ("Market: bull trend", "good") in hal["chips"]
     assert hal["reference"]["trades"] == 1097
     new = by["NEW"]
-    assert (new["day"], new["grade"], new["badge"]) == (1, "enter", "New today")
-    assert new["action"].startswith("Buy at the next open only if it prints at or below 105.00.")
+    assert (new["day"], new["grade"], new["status"], new["note"]) == (1, "enter", "New today", "")
     ww = by["WW"]
-    assert (ww["day"], ww["grade"]) == (6, "skip") and ww["action"].startswith("No entry, day 6")
+    assert (ww["day"], ww["grade"], ww["status"]) == (6, "skip", "Day 6: too late to enter")
     assert ww["target"] is None and ww["reward_pct"] is None
     assert ("Fear and greed 85, extreme greed", "bad") in ww["chips"]
     (ph,) = vm["watchlist"]
     assert (ph["trigger"], ph["last_close"], ph["to_trigger_pct"], ph["fg_zone"]) == (980.43, 960.0, 2.1, "fear")
-    assert vm["closed"][0]["label"] == "Stop hit" and vm["scan"]["stale_days"] == 1
+    assert vm["closed"][0]["plain"] == "closed below its stop" and vm["scan"]["stale_days"] == 1
     assert vm["market"]["regime"] == "bull" and vm["generated"] == "2026-09-09"
 
 
-def test_day_on_list_needs_the_signals_own_session():
+def test_day_on_list_prefers_the_scanner_then_the_track_record():
     sig = _signal("HAL", "Inverse Head & Shoulders", "CONFIRMED", 36.8, 32.64, 41.94)
     rows = _evaluation()["rows"]
     assert bs.day_on_list(sig, rows) == 4
@@ -115,35 +121,60 @@ def test_day_on_list_needs_the_signals_own_session():
     assert bs.day_on_list({**sig, "listed_day": None}, rows) == 4
 
 
-def test_track_record_rows_statuses_and_curve():
+def test_results_in_words_and_the_tally():
+    assert bs.result_text(_row("A", "Cup & Handle", "2026-09-03", 90.0, "target", 2.0, exit_=120.0, pnl=20.0)) == \
+        ("win", "Took profit at 120.00 on 2026-09-03")
+    assert bs.result_text(_row("A", "Cup & Handle", "2026-09-03", 90.0, "stop", -1.0, exit_=88.67, pnl=-1.5)) == \
+        ("loss", "Stopped out at 88.67 on 2026-09-03")
+    assert bs.result_text(_row("A", "Cup & Handle", "2026-09-03", 90.0, "expired", 0.2, exit_=102.0, pnl=2.0)) == \
+        ("win", "Time limit reached: closed at 102.00 on 2026-09-03")
+    flat = _row("A", "Cup & Handle", "2026-09-03", 90.0, "expired", 0.0, exit_=100.0, pnl=0.0)
+    assert bs.result_text(flat)[0] == "flat"
+    assert bs.result_text(_row("A", "Cup & Handle", "2026-09-03", 90.0, "open", 0.1, exit_=101.0, pnl=1.0)) == \
+        ("open", "Still open: last close 101.00 on 2026-09-03")
+    assert bs.result_text(_row("A", "Cup & Handle", "2026-09-03", 90.0, "gap", None, fill=108.0)) == \
+        ("none", "Not bought: it opened at 108.00, above the buy limit")
+    assert bs.result_text(_row("A", "Cup & Handle", "2026-09-03", 90.0, "below_stop", None, fill=89.0))[1] == \
+        "Not bought: it opened at 89.00, below the stop loss"
+    assert bs.result_text(_row("A", "Cup & Handle", "2026-09-03", 90.0, "no_data", None, fill=None)) == \
+        ("pending", "Signal from the last scan: the buy happens at the next open")
+    res = bs.results_view(_evaluation())
+    assert [(r["ticker"], r["label"]) for r in res["rows"]] == [
+        ("WW", "open"), ("CL", "loss"), ("HAL", "open"), ("GAP", "none"), ("WIN", "win"), ("NEW", "pending")]
+    assert res["summary"] == {"n": 6, "wins": 1, "losses": 1, "flat": 0, "open": 2, "not_bought": 1, "pending": 1,
+                              "avg_pnl_pct": 9.2, "since": "2026-09-01"}     # (20.0 - 1.52) / 2 on the closed ones
+    assert bs.results_view(None) == {"available": False, "rows": [], "summary": None}
     t = bs.track_view(_evaluation())
-    assert t["available"] and t["since"] == "2026-09-01"
-    assert [(r["ticker"], r["status"]) for r in t["rows"]] == [
-        ("WW", "open"), ("CL", "closed"), ("HAL", "open"), ("GAP", "none"), ("WIN", "closed"), ("NEW", "none")]
-    assert t["curve"] == [0.1, -0.9, -1.06, 0.94]                              # gap and no-data rows add nothing
-    assert t["rows"][3]["label"] == "Not traded: gap" and t["summary"]["total_r"] == 0.94
-    assert bs.track_view(None) == {"available": False, "rows": [], "summary": None, "curve": [], "horizon": None,
-                                   "since": None}
-    svg = bs.sparkline(t["curve"])
-    assert svg.count("<circle") == 4 and "+0.94 R after 4 trades" in svg
+    assert t["curve"] == [0.1, -0.9, -1.06, 0.94] and t["rows"][1]["label"] == "Stopped out at 88.67 on 2026-09-02"
 
 
-def test_render_page_escapes_and_carries_every_section():
+def test_render_page_reads_top_to_bottom_and_escapes():
     vm = bs.view_model(_doc(), _evaluation(), dt.date(2026, 9, 9))
     page = bs.render_page(vm)
     assert page.startswith("<!doctype html>") and "<style>" in page and "<script>" in page
     assert "Cup &amp; Handle" in page and "Inverse Head &amp; Shoulders" in page and "S&amp;P 500" in page
-    assert 'id="setup-HAL"' in page and "36.80 to 37.68" in page and "11.3 % below entry" in page
-    assert "+14.0 % from entry · 1.24 R" in page
-    assert 'class="badge badge-late">Day 4 on the list: late' in page
-    assert 'class="badge badge-enter">New today' in page
-    assert 'class="badge badge-skip">Day 6 on the list: no entry' in page
-    assert "Bull regime" in page and "VIX 15.7" in page and "63% of stocks above their SMA200" in page
-    assert "<td>2026-09-02</td><td><strong>CL</strong></td>" in page and "Stopped" in page and "Target hit" in page
-    assert "Hit rate 50% on 2 resolved" in page and "Not traded: gap" in page
-    assert 'data-status="open"' in page and 'data-filter="closed"' in page
-    assert "Heuristic scan, not investment advice." in page and "Day on the list" in page
-    assert "1097" in page and "+0.43" in page                                  # replay reference tables
+    # The three sections in order, the instruction before the first table.
+    now, why, results, how = (page.index(x) for x in ('id="now"', 'id="why"', 'id="results"', 'id="how"'))
+    assert now < why < results < how
+    assert "Today: 3 buy signals · 1 stock watched · past signals: 1 won, 1 lost, 2 still open." in page
+    assert "<strong>How to act.</strong> Buy at the next market open" in page
+    assert page.index("How to act.") < page.index('<table class="signals">')
+    assert 'href="#why-HAL"' in page and 'id="why-HAL"' in page
+    assert "<strong>37.68</strong>" in page and "11.3 % below" in page and "+14.0 %" in page
+    assert 'class="badge badge-late">Day 4 of 6: late, smaller edge' in page
+    assert 'class="badge badge-enter">New today' in page and 'class="badge badge-skip">Day 6: too late to enter' in page
+    assert "Three lows with the middle one the deepest" in page and "<strong>Here:</strong> LS 2026-07-02" in page
+    assert "Bull trend" in page and "VIX 15.7" in page and "63% of stocks above their 200-day average" in page
+    assert "Needs a close above" in page
+    assert "Left the page since the previous scan: FIS (closed below its stop)." in page
+    assert "<strong>1 took profit</strong>" in page and "<strong>1 stopped out</strong>" in page
+    assert "2 still open, 1 not bought, 1 pending." in page and 'class="badge badge-pending">Pending' in page
+    assert "The breakout is the last session; the row is dropped after 8." in page
+    assert "Stopped out at 88.67 on 2026-09-02" in page and "Took profit at 120.00 on 2026-09-03" in page
+    assert "Not bought: it opened at 108.00, above the buy limit" in page
+    assert 'class="badge badge-win">Win' in page and 'class="badge badge-loss">Loss' in page
+    assert "In units of risk (R), for the curious" in page and 'data-status="open"' in page
+    assert "Not investment advice." in page and "How to read this page" in page and "1097" in page
     frag = bs.render_page(vm, fragment=True)
     assert frag.startswith("<title>SignalSync</title>") and "<!doctype" not in frag and "<body>" not in frag
 
@@ -162,8 +193,8 @@ def test_build_writes_files_and_handles_an_empty_scan(tmp_path):
     vm = bs.build(str(sig), None, str(out), today=dt.date(2026, 9, 9))
     page = (out / "index.html").read_text()
     assert vm["scan"]["stale_days"] == 12 and "12 days old" in page
-    assert "No confirmed breakout in the last scan" in page and "Nothing on the watchlist" in page
-    assert "The track record is not available in this build" in page
+    assert "No buy signal today. Nothing to do." in page and "Nothing is being watched right now." in page
+    assert "The results are not available in this build" in page and "Today: 0 buy signals · 0 stocks watched." in page
     assert bs.main(["--signals", str(sig), "--out-dir", str(out), "--today", "2026-09-09"]) == 0
 
 
@@ -196,12 +227,12 @@ def test_chart_svg_draws_candles_levels_and_pivots():
     svg = bs.chart_svg(series, levels, [("RS", series["dates"][-9], 35.9), ("LS", "2020-01-01", 1.0)], "HAL")
     assert svg.startswith('<svg class="chart"') and 'aria-label="HAL, daily bars' in svg
     assert svg.count('class="wick"') == 30 and svg.count('class="up"') + svg.count('class="down"') == 30
-    assert 'class="zone"' in svg and 'class="stop"' in svg and "stop 32.64" in svg
-    assert 'class="target"' in svg and ">target 41.94<" in svg
+    assert 'class="zone"' in svg and 'class="stop"' in svg and "stop loss 32.64" in svg
+    assert 'class="target"' in svg and ">take profit 41.94<" in svg
     assert svg.count('class="pivot"') == 1 and ">RS<" in svg and ">LS<" not in svg     # outside the window: skipped
     assert series["dates"][0] in svg and series["dates"][-1] in svg                    # the date axis
     far = bs.chart_svg(series, {**levels, "target": 90.0}, [], "HAL")
-    assert "target 90.00, above this chart" in far and 'class="target"' not in far     # scale kept for the bars
+    assert "take profit 90.00, above this chart" in far and 'class="target"' not in far   # scale kept for the bars
     bare = bs.chart_svg(series, {}, [], "X")
     assert 'class="zone"' not in bare and 'class="stop"' not in bare and bare.count('class="wick"') == 30
     one = {"dates": ["2026-09-08"], "open": [1.0], "high": [1.0], "low": [1.0], "close": [1.0]}
@@ -216,9 +247,9 @@ def test_page_carries_charts_when_the_bars_are_there(tmp_path):
     assert hal["chart"]["dates"][-1] == LAST_BAR and hal["pivots"][2] == ("RS", "2026-08-26", 32.88)
     assert vm["charts_as_of"] == LAST_BAR and next(v for v in vm["setups"] if v["ticker"] == "NEW")["chart"] is None
     page = bs.render_page(vm)
-    assert page.count('<svg class="chart"') == 2                     # HAL's card and PH's watchlist entry
+    assert page.count('<svg class="chart"') == 2                     # HAL's why-block and PH's watched entry
     assert 'aria-label="HAL, daily bars' in page and 'aria-label="PH, daily bars' in page
-    assert "Pattern anchors and charts" in page
+    assert "Their charts and pattern anchors" in page
     without = bs.render_page(bs.view_model(_doc(), _evaluation(), dt.date(2026, 9, 9)))
     assert '<svg class="chart"' not in without
     sig, ch = tmp_path / "signals.json", tmp_path / "charts.json"
