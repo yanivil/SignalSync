@@ -5,6 +5,22 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Added (the page: open trades)
+- A section of its own for the trades still running: bought at (and when),
+  stop loss, take profit, last close, gain or loss so far, days held, and a
+  bar showing where the last close stands between the stop loss and the
+  take profit with the buy price as a tick. The closed trades keep the
+  results section, now numbered 4, with the tally over resolved trades
+  only; the instruction in section 1 points a reader who is in to section 3.
+
+### Fixed (the track record and the session in progress)
+- `tools/evaluate_signals.py` ignores bars dated on the run's own UTC day
+  before 21:00 UTC and rows without a full OHLC: the nightly build at about
+  06:00 UTC had scored Yahoo's partial row for the session that had not yet
+  opened, buying MO at a price nobody could have paid at the open. A signal
+  reported in the morning is now pending until the next run, when its fill,
+  the previous day's open, is final.
+
 ### Changed (the page, rewritten for a first-time reader)
 - Three numbered sections in the order a reader needs them: buy signals now
   (a table of buy limit, stop loss and take profit, one instruction on how

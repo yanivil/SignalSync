@@ -34,10 +34,13 @@ they need it:
    the levels and the pivots, the context (trend, volume, fear and greed),
    how the pattern has done over eleven years, and the stocks being watched
    that are not signals yet.
-3. **Past signals, were we right?**: every signal the scan has committed,
-   counted once at its first report and filled at the next open, with the
-   result in price terms (took profit at, stopped out at, still open at) and
-   the gain or loss in percent.
+3. **Open trades**: every signal bought and not yet resolved, with the last
+   close, the gain or loss so far, the days held and a bar showing where the
+   price stands between the stop loss and the take profit.
+4. **Closed trades, were we right?**: every resolved signal, counted once at
+   its first report and filled at the next open, with the result in price
+   terms (took profit at, stopped out at, not bought) and the gain or loss
+   in percent.
 
 Every number on the page is the scanner's or the evaluator's; the day on the
 list is the scanner's own count.  Nothing here is a new rule or a probability.
@@ -261,7 +264,7 @@ def result_text(row: Mapping[str, Any]) -> Tuple[str, str]:
 def results_view(evaluation: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
     """Past signals in the order they were reported, each with its result in words, plus the tally."""
     if not evaluation:
-        return {"available": False, "rows": [], "summary": None}
+        return {"available": False, "rows": [], "open": [], "closed": [], "summary": None}
     rows = sorted(evaluation.get("rows", []), key=lambda r: (r["last_date"], r["ticker"]))
     out = []
     for r in rows:
@@ -269,8 +272,11 @@ def results_view(evaluation: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
         out.append({"date": r["last_date"], "ticker": r["ticker"], "pattern": r["pattern"], "bought": r.get("fill"),
                     "stop": r["stop"], "target": r.get("target"), "outcome": r["outcome"], "label": label,
                     "text": text, "pnl_pct": r.get("pnl_pct"), "r": r.get("r"), "listed_days": r.get("listed_days"),
-                    "exit": r.get("exit"), "exit_date": r.get("exit_date")})
+                    "exit": r.get("exit"), "exit_date": r.get("exit_date"), "fill_date": r.get("fill_date"),
+                    "bars": r.get("bars")})
     closed = [x for x in out if x["outcome"] in ("target", "stop", "expired") and x["pnl_pct"] is not None]
+    open_ = [x for x in out if x["label"] in ("open", "pending")]
+    done = [x for x in out if x["label"] not in ("open", "pending")]
     summary = {"n": len(out), "wins": sum(1 for x in out if x["label"] == "win"),
                "losses": sum(1 for x in out if x["label"] == "loss"),
                "flat": sum(1 for x in out if x["label"] == "flat"),
@@ -279,7 +285,7 @@ def results_view(evaluation: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
                "pending": sum(1 for x in out if x["label"] == "pending"),
                "avg_pnl_pct": round(sum(x["pnl_pct"] for x in closed) / len(closed), 1) if closed else None,
                "since": out[0]["date"] if out else None}
-    return {"available": True, "rows": out, "summary": summary}
+    return {"available": True, "rows": out, "open": open_, "closed": done, "summary": summary}
 
 
 def track_view(evaluation: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
@@ -440,6 +446,31 @@ def chart_svg(series: Mapping[str, Sequence[Any]], levels: Mapping[str, Optional
     return "".join(parts)
 
 
+def progress_svg(stop: float, target: Optional[float], bought: float, last: float, width: int = 260) -> str:
+    """Inline SVG bar from the stop loss (left) to the take profit (right) with the buy price and the last close.
+
+    Without a target the bar runs from the stop to twice the buy price's distance above it.  Empty when
+    the stop is not below the buy price."""
+    stop, bought, last = float(stop), float(bought), float(last)
+    if bought <= stop:
+        return ""
+    top = float(target) if target is not None else bought + (bought - stop)
+    span = top - stop
+    left, right, h = 8, width - 8, 34
+
+    def x(v: float) -> float:
+        return left + max(0.0, min(1.0, (v - stop) / span)) * (right - left)
+
+    return (f'<svg class="progress" viewBox="0 0 {width} {h}" role="img" aria-label="Last close {last:.2f} between '
+            f'the stop loss {stop:.2f} and the take profit {top:.2f}">'
+            f'<line class="rail" x1="{left}" y1="12" x2="{right}" y2="12"/>'
+            f'<circle class="p-stop" cx="{left}" cy="12" r="4"/><circle class="p-target" cx="{right}" cy="12" r="4"/>'
+            f'<line class="p-buy" x1="{x(bought):.1f}" y1="5" x2="{x(bought):.1f}" y2="19"/>'
+            f'<circle class="p-last" cx="{x(last):.1f}" cy="12" r="5"/>'
+            f'<text class="p-l" x="{left}" y="30" text-anchor="start">{stop:.2f}</text>'
+            f'<text class="p-l" x="{right}" y="30" text-anchor="end">{top:.2f}</text></svg>')
+
+
 def _levels(v: Mapping[str, Any], entry: Optional[float]) -> Dict[str, Optional[float]]:
     return {"entry": entry, "max_buy": v.get("max_buy"), "stop": v.get("stop"), "target": v.get("target")}
 
@@ -470,7 +501,8 @@ def _header(vm: Mapping[str, Any]) -> str:
     return (f'<header class="top"><div><h1>SignalSync <small>S&amp;P 500 chart-pattern signals</small></h1>'
             f'<div class="meta">{_e(meta_line)}</div></div>'
             f'<nav class="sections"><a href="#now">1. Buy signals</a><a href="#why">2. Why</a>'
-            f'<a href="#results">3. Results</a><a href="#how">How to read</a></nav></header>'
+            f'<a href="#open">3. Open trades</a><a href="#results">4. Closed trades</a>'
+            f'<a href="#how">How to read</a></nav></header>'
             + (f'<p class="callout">{_e(" ".join(notes))}</p>' if notes else "")
             + (f'<div class="strip">{"".join(strip)}</div>' if strip else ""))
 
@@ -481,7 +513,9 @@ def _glance(vm: Mapping[str, Any]) -> str:
     bits = [f"{n_now} buy signal{'s' if n_now != 1 else ''}", f"{n_watch} stock{'s' if n_watch != 1 else ''} watched"]
     if res["available"] and res["summary"]:
         s = res["summary"]
-        bits.append(f"past signals: {s['wins']} won, {s['losses']} lost, {s['open']} still open")
+        n_open = len(res["open"])
+        bits.append(f"{n_open} open trade{'s' if n_open != 1 else ''}")
+        bits.append(f"closed trades: {s['wins']} won, {s['losses']} lost")
     return f'<p class="glance">Today: {_e(" · ".join(bits))}.</p>'
 
 
@@ -512,7 +546,8 @@ def _signals_now(vm: Mapping[str, Any]) -> str:
             + '<div class="instruction"><strong>How to act.</strong> Buy at the next market open, only if the stock '
               'opens at or below the "buy up to" price. Sell if a day closes at or below the stop loss. Sell at the '
               'take-profit price. A signal stays here while it is still valid and leaves when the stock closes below '
-              'its stop, the pattern fails, or the row is too old to enter.</div>'
+              'its stop, the pattern fails, or the row is too old to enter. Once you are in, follow the trade in '
+              '<a href="#open">section 3</a>.</div>'
             '<div class="table-wrap"><table class="signals"><thead><tr><th>Stock</th><th>Pattern</th>'
             '<th class="num">Buy up to</th><th class="num">Stop loss</th><th class="num">Take profit</th>'
             f'<th>Status</th></tr></thead><tbody>{rows}</tbody></table></div>')
@@ -569,17 +604,54 @@ def _why(vm: Mapping[str, Any]) -> str:
     return head + blocks + _watching(vm)
 
 
+def _open_row(r: Mapping[str, Any]) -> str:
+    if r["label"] == "pending":
+        return (f'<tr><td><strong>{_e(r["ticker"])}</strong></td><td>{_e(r["pattern"])}</td>'
+                f'<td class="num">–<div class="sub">at the next open</div></td><td class="num">{_num(r["stop"])}</td>'
+                f'<td class="num">{_num(r["target"])}</td><td class="num">–</td><td class="num">–</td>'
+                f'<td><span class="badge badge-pending">Pending</span><div class="sub">{_e(r["text"])}</div></td>'
+                f'<td class="num">0</td></tr>')
+    bar = (progress_svg(r["stop"], r.get("target"), r["bought"], r["exit"])
+           if r.get("bought") is not None and r.get("exit") is not None else "")
+    return (f'<tr><td><strong>{_e(r["ticker"])}</strong></td><td>{_e(r["pattern"])}</td>'
+            f'<td class="num">{_num(r["bought"])}<div class="sub">{_e(r.get("fill_date"))}</div></td>'
+            f'<td class="num neg">{_num(r["stop"])}</td><td class="num pos">{_num(r["target"])}</td>'
+            f'<td class="num">{_num(r["exit"])}<div class="sub">{_e(r.get("exit_date"))}</div></td>'
+            f'<td class="num{_rcls(r["pnl_pct"])}"><strong>{_signed(r["pnl_pct"], 1, " %")}</strong></td>'
+            f'<td>{bar}</td><td class="num">{_e(r.get("bars"))}</td></tr>')
+
+
+def _open_trades(vm: Mapping[str, Any]) -> str:
+    head = '<h2 id="open"><span class="num">3</span>Open trades</h2>'
+    res = vm["results"]
+    if not res["available"]:
+        return head + '<p class="note">The results are not available in this build.</p>'
+    if not res["open"]:
+        return head + '<p class="empty">No open trade. Every signal so far has been resolved; see section 4.</p>'
+    rows = "".join(_open_row(r) for r in res["open"])
+    return (head
+            + '<p class="note">Every signal, bought at the open after its report, until it is resolved. Sell if a day '
+              'closes at or below the stop loss; take profit at the target. A trade moves to section 4 the morning '
+              'after its low touches the stop, its high touches the target, or 60 sessions pass. The bar shows where '
+              'the last close (blue) stands between the stop loss (red) and the take profit (green); the tick is the '
+              'buy price.</p>'
+              '<div class="table-wrap"><table class="open"><thead><tr><th>Stock</th><th>Pattern</th>'
+              '<th class="num">Bought at</th><th class="num">Stop loss</th><th class="num">Take profit</th>'
+              '<th class="num">Last close</th><th class="num">Gain / loss</th><th>Where it stands</th>'
+              f'<th class="num">Days held</th></tr></thead><tbody>{rows}</tbody></table></div>')
+
+
 def _results(vm: Mapping[str, Any]) -> str:
-    head = '<h2 id="results"><span class="num">3</span>Past signals: were we right?</h2>'
+    head = '<h2 id="results"><span class="num">4</span>Closed trades: were we right?</h2>'
     res = vm["results"]
     if not res["available"]:
         return head + '<p class="note">The results are not available in this build.</p>'
     s = res["summary"]
-    tally = (f'{s["n"]} signals since {s["since"]}: <strong>{s["wins"]} took profit</strong>, '
-             f'<strong>{s["losses"]} stopped out</strong>'
-             + (f', {s["flat"]} closed flat' if s["flat"] else "") + f', {s["open"]} still open'
-             + (f', {s["not_bought"]} not bought' if s["not_bought"] else "")
-             + (f', {s["pending"]} pending' if s.get("pending") else "") + "."
+    n_closed = len(res["closed"])
+    tally = (f'{n_closed} closed trade{"s" if n_closed != 1 else ""} since {s["since"]}: '
+             f'<strong>{s["wins"]} took profit</strong>, <strong>{s["losses"]} stopped out</strong>'
+             + (f', {s["flat"]} closed flat' if s["flat"] else "")
+             + (f', {s["not_bought"]} not bought' if s["not_bought"] else "") + "."
              + (f' Average result on the closed ones: <strong class="{_rcls(s["avg_pnl_pct"]).strip()}">'
                 f'{_signed(s["avg_pnl_pct"], 1, " %")}</strong>.' if s["avg_pnl_pct"] is not None else ""))
     rows = "".join(
@@ -590,11 +662,11 @@ def _results(vm: Mapping[str, Any]) -> str:
         f'<td><span class="badge badge-{r["label"]}">{_e(RESULT_WORDS[r["label"]])}</span>'
         f'<div class="sub">{_e(r["text"])}</div></td>'
         f'<td class="num{_rcls(r["pnl_pct"])}"><strong>{_signed(r["pnl_pct"], 1, " %")}</strong></td></tr>'
-        for r in res["rows"])
+        for r in res["closed"])
     table = ('<div class="table-wrap"><table class="results"><thead><tr><th>Signal</th><th>Stock</th><th>Pattern</th>'
              '<th class="num">Bought at</th><th class="num">Stop loss</th><th class="num">Take profit</th>'
              f'<th>Result</th><th class="num">Gain / loss</th></tr></thead><tbody>{rows}</tbody></table></div>'
-             if rows else '<p class="note">No signal has been logged yet.</p>')
+             if rows else '<p class="note">No trade has been resolved yet.</p>')
     ref = vm["reference"]["overall"]
     honest = (f'<p class="note">Counted the same way as the eleven-year replay: bought at the next open after the '
               f'first report, not bought when that open was above the buy limit or below the stop, take profit and '
@@ -667,8 +739,8 @@ def _footer(vm: Mapping[str, Any]) -> str:
 
 def render_body(vm: Mapping[str, Any]) -> str:
     """The page's body content (inside ``<div class="wrap">``)."""
-    return ('<div class="wrap">' + _header(vm) + _glance(vm) + _signals_now(vm) + _why(vm) + _results(vm)
-            + _how(vm) + _footer(vm) + "</div>")
+    return ('<div class="wrap">' + _header(vm) + _glance(vm) + _signals_now(vm) + _why(vm) + _open_trades(vm)
+            + _results(vm) + _how(vm) + _footer(vm) + "</div>")
 
 
 def _asset(name: str) -> str:
