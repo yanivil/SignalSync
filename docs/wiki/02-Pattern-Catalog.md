@@ -30,6 +30,8 @@ Entry is the breakout close when it is above the trigger (and within 5 % of it),
 
 ## Cup & Handle (`detect_cup_and_handle`)
 
+**Watch-only since 2026-09-17** (#109): the detector runs and its rows are reported, but a cup breakout is listed on the watchlist for information and never as a confirmed buy signal (`WATCH_ONLY_PATTERNS`, applied when the report is written). Over the eleven point-in-time years cups made +0.03 R per signal on 305 signals with 18 % reaching the target, against +0.23 for the inverse H&S and +0.43 for the Wolfe; two of the first three live losses were cups. The replay keeps measuring the pattern so the decision can be revisited.
+
 **Trend filter.** The cup is a continuation base, so the stock must have advanced into rim A. Spec: `SMA50 > SMA200` at the scan date satisfies the filter on its own; otherwise the rise from the lowest low of the `CUP_PRIOR_LOOKBACK` = 60 bars before A to `high[A]` must be ≥ `CUP_PRIOR_ADVANCE` = 20 % (a rise from the low, not "20 % below the rim"). Legacy required a close above the SMA200 and a ≥ 25 % rise over 120 bars, with no SMA alternative.
 
 **Search.** For each pair of swing highs (A, B) with `20 ≤ B − A ≤ 300` (the inner loop breaks once the width exceeds the maximum, so cost is O(P² · W) worst case, P = swing highs, W = cup width):

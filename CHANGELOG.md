@@ -5,6 +5,18 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed (the cup is watch-only, #109)
+- `WATCH_ONLY_PATTERNS = ("Cup & Handle",)`: a cup breakout is reported on
+  the watchlist with its age and the note "breakout listed for information:
+  watch-only pattern", never as a confirmed buy signal, so the evaluator does
+  not track it, the listing rule does not count it and the page lists it
+  under the stocks being watched with a "broke out N sessions ago:
+  watch-only" cell. Applied by `demote_watch_only` when the report is
+  written, so the detector and the replay keep measuring cups; the `legacy`
+  profile has no watch-only pattern. Rows carry `watch_only`;
+  `meta.watch_only_patterns` lists them. Evidence: +0.03 R per cup signal on
+  305 signals over the eleven point-in-time years, 18 % reaching the target.
+
 ### Added (the page: open trades)
 - A section of its own for the trades still running: bought at (and when),
   stop loss, take profit, last close, gain or loss so far, days held, and a

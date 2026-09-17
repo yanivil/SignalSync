@@ -69,6 +69,7 @@ Read all of it with four caveats. Both years were mostly bull markets (70 % and 
 | `CUP_TRIGGER` handle_high, kept | 250 sessions, run 33985391832 against 33973275310 | none | untested |
 | `WATCH_PROXIMITY` 5 % | the 2026-09-04 report, 10 of 17 rows lost in a day | none | a reporting choice, not a replay question |
 | `MAX_LISTED_DAYS` 6, Wolfe 5 | the eleven yearly point-in-time runs 34323013559 to 34323039560, pooled: the same signals bought on day N against day 1 (late entry, below) | the same runs year by year: days 4-9 worse in 10 of 11 years, day 2 no different in any | adopted 2026-09-15 (#115); it changes no first-seen row the replays score, only which repeat listings the report shows |
+| `WATCH_ONLY_PATTERNS` cup | the eleven yearly point-in-time runs (the table below): cups +0.03 R on 305 signals, 18 % hit, against +0.23 and +0.43 for the other two | the same runs year by year: cups were the weakest pattern in most years and never the best | adopted 2026-09-17 (#109) after two of the first three live losses were cups; applied at report time, so the replay figures, which include cups, are unchanged and the pattern stays measured |
 
 ### Ten years on the index as it was (2026-09-08)
 
@@ -175,6 +176,7 @@ The report header and every backtest row carry the SPY regime (close and SMA50 a
 | `MIN_SCORE` | 60 | minimum quality score reported; a gate, not a ranking (score buckets do not order outcomes in replay, #82) | more marginal setups | only the cleanest geometry |
 | `MAX_BREAKOUT_AGE` | 3 | max bars since the confirming close (Cup); +`PIVOT_ORDER` for H&S and Wolfe | older breakouts reported | only fresh breakouts |
 | `MAX_LISTED_DAYS` | 6, Wolfe 5 | sessions a confirmed row stays listed from its first report (`first_listed`, carried across nights); past it the row is retired (`RETIRED`) and remembered while the scan still produces it (#115); `legacy`: no limit | rows shown longer, inviting entries the replay found worthless | rows retired sooner; 1 would drop day 2, which was as good as day 1 |
+| `WATCH_ONLY_PATTERNS` | `("Cup & Handle",)` | patterns reported for information only: a breakout is listed on the watchlist with its age and a note, never as a confirmed signal (`demote_watch_only`, at report time, so the replay still measures them); `legacy`: none (#109) | more patterns listed but never traded | an empty tuple restores cup signals |
 | `BREAKOUT_AGE_LAG` | Cup 0, H&S 5, Wolfe 5 | extra age tolerated because the last pivot lags | | |
 | `MAX_RUNAWAY` | 0.05 | close more than this above the trigger = chasing, dropped | | |
 | `WATCH_PROXIMITY` | 0.05 | setups whose close is within this of the trigger → watchlist (was 0.03 until 2026-09-05; at 3 % a normal down day cleared most of the list) | longer watchlist | shorter watchlist |

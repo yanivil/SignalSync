@@ -113,6 +113,9 @@ GLOSSARY = (
     ("Fear and greed", "The stock's own reading at the last close, 0 to 100, averaging RSI 14, the MACD histogram's "
                        "percentile over the past year and Bollinger %B. Above 80 the stock is stretched, and such "
                        "breakouts did worst in the replay; below 20 it is washed out. Information, not a rule."),
+    ("Watch-only pattern", "A pattern the scanner detects and lists but never turns into a buy signal, because its "
+                           "breakouts did not pay over ten years of history: the cup and handle, 18 % of whose "
+                           "breakouts reached their target for +0.03 R per signal (#109)."),
     ("R", "One unit of risk: the distance from the buy price to the stop loss. A stop-out is −1 R; a take-profit at "
           "twice that distance is +2 R. It lets signals with different prices be added up."),
     ("Result", "Every signal is counted once, at its first report, bought at the next open. Not bought when that "
@@ -237,6 +240,7 @@ def watch_view(signal: Mapping[str, Any], charts: Optional[Mapping[str, Any]] = 
             "target": signal.get("target"), "reward_risk": signal.get("reward_risk"),
             "fear_greed": signal.get("fear_greed"), "fg_zone": fg_zone(signal.get("fear_greed")),
             "trend": signal.get("trend"), "notes": signal.get("notes"),
+            "watch_only": bool(signal.get("watch_only")), "broke_out": signal.get("bars_since_break"),
             "pivots": _pivots(signal.get("notes") or ""), "chart": (charts or {}).get(signal["ticker"])}
 
 
@@ -321,7 +325,8 @@ def view_model(doc: Mapping[str, Any], evaluation: Optional[Mapping[str, Any]],
                    key=lambda v: -v["score"])
     return {"generated": today.isoformat(),
             "scan": {k: meta.get(k) for k in ("run_date", "last_bar", "scanned", "universe", "errors", "profile",
-                                               "previous_run", "skipped_bar", "lagging_symbols", "min_score")}
+                                               "previous_run", "skipped_bar", "lagging_symbols", "min_score",
+                                               "watch_only_patterns")}
             | {"stale_days": stale_days},
             "market": meta.get("market"), "setups": setups, "watchlist": watch,
             "charts_as_of": (charts or {}).get("as_of"),
@@ -574,11 +579,8 @@ def _why_block(v: Mapping[str, Any]) -> str:
 
 
 def _watching(vm: Mapping[str, Any]) -> str:
-    rows = "".join(
-        f'<tr><td><strong>{_e(w["ticker"])}</strong></td><td>{_e(w["pattern"])}</td>'
-        f'<td class="num">{_num(w["trigger"])}</td><td class="num">{_num(w["last_close"])}</td>'
-        f'<td class="num">{_signed(w["to_trigger_pct"], 1, " %")}</td><td class="num">{_num(w["stop"])}</td>'
-        f'<td class="num">{_num(w["target"])}</td></tr>' for w in vm["watchlist"])
+    rows = "".join(_watch_row(w) for w in vm["watchlist"])
+    watch_only = [p for p in (vm["scan"].get("watch_only_patterns") or []) if p]
     anchors = "".join(
         f'<li><strong>{_e(w["ticker"])}</strong> {_e(w.get("notes"))}'
         + (chart_svg(w["chart"], _levels(w, w["trigger"]), w["pivots"], w["ticker"]) if w.get("chart") else "")
@@ -591,10 +593,28 @@ def _watching(vm: Mapping[str, Any]) -> str:
                 '</ul></details>' if anchors else "")
              if rows else '<p class="note">Nothing is being watched right now.</p>')
     removed = ", ".join(f"{c['ticker']} ({c['plain']})" for c in vm["closed"])
+    only = (f' {_e(" and ".join(watch_only))} is watch-only: over ten years only 18 % of its breakouts reached '
+            f'their target, so its rows are listed here for information and never become a buy signal, even after '
+            f'they break out.' if watch_only else "")
     return (f'<h3 id="watching">Watching, not a signal yet<span class="count">{len(vm["watchlist"])}</span></h3>'
             '<p class="note">These patterns are complete but the stock has not closed above its trigger. Do nothing; '
-            'a stock moves up to section 1 the day it does.</p>' + table
+            f'a stock moves up to section 1 the day it does.{only}</p>' + table
             + (f'<p class="note">Left the page since the previous scan: {_e(removed)}.</p>' if removed else ""))
+
+
+def _watch_row(w: Mapping[str, Any]) -> str:
+    if w.get("watch_only") and w.get("broke_out") is not None:
+        n = int(w["broke_out"])
+        when = "in the last session" if n == 0 else f"{n} session{'s' if n != 1 else ''} ago"
+        needs = f'<td class="num">{_num(w["trigger"])}<div class="sub">broke out {when}: watch-only</div></td>'
+        dist = '<td class="num">–</td>'
+    else:
+        needs = f'<td class="num">{_num(w["trigger"])}</td>'
+        dist = f'<td class="num">{_signed(w["to_trigger_pct"], 1, " %")}</td>'
+    return (f'<tr><td><strong>{_e(w["ticker"])}</strong></td><td>{_e(w["pattern"])}'
+            + ('<div class="sub">watch-only</div>' if w.get("watch_only") else "") + '</td>'
+            + needs + f'<td class="num">{_num(w["last_close"])}</td>' + dist
+            + f'<td class="num">{_num(w["stop"])}</td><td class="num">{_num(w["target"])}</td></tr>')
 
 
 def _why(vm: Mapping[str, Any]) -> str:
