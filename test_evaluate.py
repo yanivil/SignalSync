@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import json
 import os
 import subprocess
@@ -124,6 +125,25 @@ def test_evaluate_uses_bars_after_the_signal_date_and_survives_fetch_errors(sign
 
     rows = ev.evaluate(hist, horizon=60, fetch=fetch)
     assert calls == [("AAA", "2026-03-02"), ("BBB", "2026-03-03")]
+    # Only completed sessions count: before 21:00 UTC the run's own day is out, so a signal reported this
+    # morning is no_data until the next run, and a row without a full bar is dropped.
+    early = dt.datetime(2026, 3, 3, 6, 0, tzinfo=dt.timezone.utc)                # nothing after 2026-03-02 yet
+    assert ev.evaluate(hist, horizon=60, fetch=fetch, now=early)[0]["outcome"] == "no_data"
+    later = dt.datetime(2026, 3, 4, 6, 0, tzinfo=dt.timezone.utc)                # 03-03 complete, 03-04 not yet
+    (aaa_early, _) = ev.evaluate(hist, horizon=60, fetch=fetch, now=later)
+    assert (aaa_early["outcome"], aaa_early["bars"], aaa_early["exit_date"]) == ("open", 1, "2026-03-03")
+    evening = dt.datetime(2026, 3, 4, 21, 0, tzinfo=dt.timezone.utc)             # after the close: 03-04 counts
+    assert ev.evaluate(hist, horizon=60, fetch=fetch, now=evening)[0]["outcome"] == "target"
+    assert ev.session_cutoff(early) == pd.Timestamp("2026-03-02")
+    assert ev.session_cutoff(evening) == pd.Timestamp("2026-03-04")
+
+    def fetch_nan(ticker, start):
+        df = fetch(ticker, start)
+        df.loc[df.index[1], "Close"] = float("nan")                                # 03-03 half-written at Yahoo
+        return df
+
+    (aaa_nan, _) = ev.evaluate(hist, horizon=60, fetch=fetch_nan, now=later)
+    assert aaa_nan["outcome"] == "no_data"                                       # the only complete row is gone
     aaa, bbb = rows
     assert aaa["outcome"] == "target" and aaa["bars"] == 2           # the signal-day bar (Low 50) is excluded
     assert (aaa["fill"], aaa["fill_date"], aaa["exit"], aaa["exit_date"]) == (100.0, "2026-03-03", 120.0, "2026-03-04")

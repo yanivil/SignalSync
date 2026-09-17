@@ -143,7 +143,18 @@ def test_results_in_words_and_the_tally():
         ("WW", "open"), ("CL", "loss"), ("HAL", "open"), ("GAP", "none"), ("WIN", "win"), ("NEW", "pending")]
     assert res["summary"] == {"n": 6, "wins": 1, "losses": 1, "flat": 0, "open": 2, "not_bought": 1, "pending": 1,
                               "avg_pnl_pct": 9.2, "since": "2026-09-01"}     # (20.0 - 1.52) / 2 on the closed ones
-    assert bs.results_view(None) == {"available": False, "rows": [], "summary": None}
+    assert [r["ticker"] for r in res["open"]] == ["WW", "HAL", "NEW"]          # running, or bought at the next open
+    assert [r["ticker"] for r in res["closed"]] == ["CL", "GAP", "WIN"]        # resolved, including not bought
+    assert res["open"][1]["fill_date"] == "2026-09-02" and res["open"][1]["bars"] == 3
+    assert bs.results_view(None) == {"available": False, "rows": [], "open": [], "closed": [], "summary": None}
+    # The bar: stop at the left end, target at the right, the last close and the buy price in between.
+    bar = bs.progress_svg(66.0, 75.9, 70.1, 70.6)
+    assert bar.startswith('<svg class="progress"') and ">66.00<" in bar and ">75.90<" in bar
+    rail = lambda v: f"{8 + (v - 66.0) / 9.9 * 244:.1f}"                        # noqa: E731  position on the 244 px rail
+    assert f'class="p-last" cx="{rail(70.6)}"' in bar and f'class="p-buy" x1="{rail(70.1)}"' in bar
+    assert 'cx="252.0"' in bs.progress_svg(66.0, 75.9, 70.1, 99.0)             # clamped at the target end
+    assert ">74.20<" in bs.progress_svg(66.0, None, 70.1, 71.0)                # no target: stop to twice the risk
+    assert bs.progress_svg(66.0, 75.9, 60.0, 61.0) == ""                       # buy price below the stop: nothing
     t = bs.track_view(_evaluation())
     assert t["curve"] == [0.1, -0.9, -1.06, 0.94] and t["rows"][1]["label"] == "Stopped out at 88.67 on 2026-09-02"
 
@@ -154,9 +165,11 @@ def test_render_page_reads_top_to_bottom_and_escapes():
     assert page.startswith("<!doctype html>") and "<style>" in page and "<script>" in page
     assert "Cup &amp; Handle" in page and "Inverse Head &amp; Shoulders" in page and "S&amp;P 500" in page
     # The three sections in order, the instruction before the first table.
-    now, why, results, how = (page.index(x) for x in ('id="now"', 'id="why"', 'id="results"', 'id="how"'))
-    assert now < why < results < how
-    assert "Today: 3 buy signals · 1 stock watched · past signals: 1 won, 1 lost, 2 still open." in page
+    now, why, open_, results, how = (page.index(x) for x in ('id="now"', 'id="why"', 'id="open"', 'id="results"',
+                                                              'id="how"'))
+    assert now < why < open_ < results < how
+    assert "Today: 3 buy signals · 1 stock watched · 3 open trades · closed trades: 1 won, 1 lost." in page
+    assert 'follow the trade in <a href="#open">section 3</a>' in page
     assert "<strong>How to act.</strong> Buy at the next market open" in page
     assert page.index("How to act.") < page.index('<table class="signals">')
     assert 'href="#why-HAL"' in page and 'id="why-HAL"' in page
@@ -167,8 +180,14 @@ def test_render_page_reads_top_to_bottom_and_escapes():
     assert "Bull trend" in page and "VIX 15.7" in page and "63% of stocks above their 200-day average" in page
     assert "Needs a close above" in page
     assert "Left the page since the previous scan: FIS (closed below its stop)." in page
-    assert "<strong>1 took profit</strong>" in page and "<strong>1 stopped out</strong>" in page
-    assert "2 still open, 1 not bought, 1 pending." in page and 'class="badge badge-pending">Pending' in page
+    assert "3 closed trades since 2026-09-01: <strong>1 took profit</strong>, <strong>1 stopped out</strong>, " \
+           "1 not bought." in page
+    assert 'class="badge badge-pending">Pending' in page and "Still open: last close 36.80 on 2026-09-02" not in page
+    # Open trades: the running ones with the bar, the pending one without.
+    open_section = page[page.index('id="open"'):page.index('id="results"')]
+    assert open_section.count("<tr>") == 4 and open_section.count('<svg class="progress"') == 2
+    assert "<strong>HAL</strong>" in open_section and "at the next open" in open_section
+    assert "Where it stands" in open_section and "Days held" in open_section
     assert "The breakout is the last session; the row is dropped after 8." in page
     assert "Stopped out at 88.67 on 2026-09-02" in page and "Took profit at 120.00 on 2026-09-03" in page
     assert "Not bought: it opened at 108.00, above the buy limit" in page
@@ -194,7 +213,8 @@ def test_build_writes_files_and_handles_an_empty_scan(tmp_path):
     page = (out / "index.html").read_text()
     assert vm["scan"]["stale_days"] == 12 and "12 days old" in page
     assert "No buy signal today. Nothing to do." in page and "Nothing is being watched right now." in page
-    assert "The results are not available in this build" in page and "Today: 0 buy signals · 0 stocks watched." in page
+    assert page.count("The results are not available in this build") == 2
+    assert "Today: 0 buy signals · 0 stocks watched." in page
     assert bs.main(["--signals", str(sig), "--out-dir", str(out), "--today", "2026-09-09"]) == 0
 
 

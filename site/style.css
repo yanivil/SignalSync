@@ -159,3 +159,12 @@ details.how dl.glossary { margin-top: 12px; }
 h3#watching { margin-top: 26px; }
 .badge-pending { background: var(--accent-bg); color: var(--accent); }
 table.results td.date { white-space: nowrap; }
+.progress { width: 260px; max-width: 100%; height: auto; display: block; }
+.progress .rail { stroke: var(--border); stroke-width: 4; stroke-linecap: round; }
+.progress .p-stop { fill: var(--red); }
+.progress .p-target { fill: var(--green); }
+.progress .p-buy { stroke: var(--muted); stroke-width: 2; }
+.progress .p-last { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
+.progress .p-l { fill: var(--muted); font-size: 11px; }
+table.open td { white-space: normal; }
+table.open td .sub { font-size: 12px; color: var(--muted); }

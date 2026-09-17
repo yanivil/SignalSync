@@ -27,6 +27,12 @@ Accounting per signal, on the daily bars strictly after its ``last_date``:
   marked to the last close
 * ``no_data`` -- no bars after ``last_date`` yet
 
+Only completed sessions count: a bar dated on the run's own UTC day is ignored
+before 21:00 UTC (the US close), because Yahoo's chart already carries a partial
+row for the session in progress, and rows without a full OHLC are dropped.  A
+signal reported this morning is therefore ``no_data`` until tomorrow's run,
+when yesterday's open, the fill, is final.
+
 Gaps fill at the open: a stop at the bar's Open when the Open is already
 below the stop, a target at the Open when it gaps above.  R multiple =
 (exit - fill) / (fill - stop): a stop is -1 R, the target is
@@ -40,6 +46,7 @@ a row's first day on the list from its fifth.
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
 import logging
 import os
@@ -188,8 +195,21 @@ def _fetch(ticker: str, start: str) -> pd.DataFrame:
     return df[["Open", "High", "Low", "Close"]]
 
 
-def evaluate(signals: Sequence[dict], horizon: int, fetch=_fetch) -> List[dict]:
-    """Score every signal; ``fetch(ticker, start)`` is injectable for tests.
+def session_cutoff(now: Optional[dt.datetime] = None) -> pd.Timestamp:
+    """The last session whose daily bar is complete at ``now`` (UTC): yesterday before 21:00 UTC, today after.
+
+    The nightly page build runs at about 06:00 UTC, when the US session of the
+    day has not opened, yet Yahoo's chart may already carry a row for it (from
+    after-hours trades); scoring that row would buy at a price nobody could
+    have paid at the open.
+    """
+    now = now or dt.datetime.now(dt.timezone.utc)
+    day = now.date() if now.hour >= 21 else now.date() - dt.timedelta(days=1)
+    return pd.Timestamp(day)
+
+
+def evaluate(signals: Sequence[dict], horizon: int, fetch=_fetch, now: Optional[dt.datetime] = None) -> List[dict]:
+    """Score every signal; ``fetch(ticker, start)`` is injectable for tests, ``now`` (UTC) fixes the session cutoff.
 
     :returns: One dict per signal: the reported levels, ``first_seen``,
         ``listed_days`` / ``last_listed`` (from ``listings``), ``fill`` and
@@ -198,6 +218,7 @@ def evaluate(signals: Sequence[dict], horizon: int, fetch=_fetch) -> List[dict]:
     """
     out: List[dict] = []
     cache: Dict[str, pd.DataFrame] = {}
+    cutoff = session_cutoff(now)
     for s in signals:
         t = s["ticker"]
         if t not in cache:
@@ -207,6 +228,9 @@ def evaluate(signals: Sequence[dict], horizon: int, fetch=_fetch) -> List[dict]:
                 log.warning("%s: fetch failed: %s", t, exc)
                 cache[t] = pd.DataFrame()
         bars = cache[t]
+        if not bars.empty:
+            bars = bars[bars.index <= cutoff].dropna(subset=[c for c in ("Open", "High", "Low", "Close")
+                                                            if c in bars.columns])
         after = bars[bars.index > pd.Timestamp(s["last_date"])] if not bars.empty else bars
         max_buy = s.get("max_buy")
         if max_buy is None:
