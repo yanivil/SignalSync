@@ -5,6 +5,18 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Added (the double bottom, experimental)
+- `detect_double_bottom`: two consecutive swing lows within 3 % of each
+  other, the rally between them at least 10 % and 2 ATR above the higher
+  low (Bulkowski's rise rule, which cuts the false positives on random walks
+  from 43 to 5 in 200), a prior decline or SMA50 below SMA200, a close above
+  the peak as the trigger, the stop under the second low, the target one
+  height above the entry, the H&S's age lag, volume, risk and listing
+  limits. Registered in `PATTERN_DETECTORS` but not in `ACTIVE_PATTERNS`, so
+  the nightly scan does not run it until it passes the replay gate; the
+  backtest gains `--patterns` (and the workflow the `patterns` input) to
+  replay any subset of patterns, including a candidate.
+
 ### Changed (the cup is watch-only, #109)
 - `WATCH_ONLY_PATTERNS = ("Cup & Handle",)`: a cup breakout is reported on
   the watchlist with its age and the note "breakout listed for information:

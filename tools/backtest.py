@@ -497,6 +497,29 @@ def render_ablation(rows: Sequence[dict], days: int, horizon: int) -> str:
     return "\n".join(lines)
 
 
+PATTERN_ALIASES = {"cup": "Cup & Handle", "ihs": "Inverse Head & Shoulders", "wolfe": "Bullish Wolfe Wave",
+                   "db": "Double Bottom"}
+
+
+def parse_patterns(text: Optional[str]) -> Optional[List[Callable]]:
+    """Detector functions for a comma-separated list of pattern names or aliases (cup, ihs, wolfe, db).
+
+    ``None`` (or an empty string) means the scanner's active set, ``scan.DETECTORS``;
+    naming an experimental pattern such as ``db`` is how a candidate is replayed
+    before it joins the nightly scan.
+    """
+    if not text:
+        return None
+    out: List[Callable] = []
+    for item in text.split(","):
+        name = PATTERN_ALIASES.get(item.strip().lower(), item.strip())
+        if name not in scan.PATTERN_DETECTORS:
+            raise ValueError(f"unknown pattern {item.strip()!r}; choose from {sorted(scan.PATTERN_DETECTORS)} "
+                             f"or the aliases {sorted(PATTERN_ALIASES)}")
+        out.append(scan.PATTERN_DETECTORS[name])
+    return out
+
+
 def apply_override(item: str) -> Tuple[str, Any]:
     """Apply one ``KEY=VALUE`` override to ``scan``; the value is parsed as a Python literal, else kept as text."""
     import ast
@@ -980,6 +1003,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="rule profile to replay (default: the scanner's active profile)")
     ap.add_argument("--ablate", action="store_true",
                     help="leave-one-rule-out over the spec profile (one full replay per rule; use a short window)")
+    ap.add_argument("--patterns", metavar="LIST",
+                    help="comma-separated patterns to replay: cup, ihs, wolfe, db or the full names (default: the "
+                         "scanner's active set); the way a candidate pattern is replayed before it joins the scan")
     ap.add_argument("--set", action="append", default=[], metavar="KEY=VALUE",
                     help="override a scan constant for this replay after the profile is applied, e.g. "
                          "--set CUP_TRIGGER=rim_b or --set WW_TIME_SYM_TOL=0.45 (values parsed as Python literals)")
@@ -1022,8 +1048,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         log.warning("market context unavailable: %s", exc)
     market = scan.market_series(data, market_frames.get(scan.MARKET_INDEX), market_frames.get(scan.MARKET_VOL))
     log.info("market context: %s", ", ".join(sorted(market_frames)) or "no index / volatility data (breadth only)")
+    detectors = parse_patterns(args.patterns)
+    if detectors is not None:
+        log.info("patterns: %s", ", ".join(fn.__name__ for fn in detectors))
     replay = {"bars": args.bars, "market": market, "end": args.end,
-              "members": membership.members if membership is not None else None}
+              "members": membership.members if membership is not None else None, "detectors": detectors}
     universe: Optional[Dict[str, Any]] = None
     if membership is not None:
         universe = {"mode": "point-in-time", "symbols": len(symbols), "with_data": len(data),
@@ -1059,6 +1088,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         keep = ("label", "stats", "features", "horizons", "grid", "other", "late")
         with open(args.json, "w", encoding="utf-8") as fh:
             json.dump({"days": args.days, "horizon": args.horizon, "profile": scan.ACTIVE_PROFILE,
+                       "patterns": [fn.__name__ for fn in (detectors or scan.DETECTORS)],
                        "min_score": scan.MIN_SCORE, "bars": args.bars, "split": args.split, "end": args.end,
                        "universe": universe, "market_symbols": sorted(market_frames),
                        "stats": pooled["stats"], "features": pooled["features"], "horizons": pooled["horizons"],

@@ -84,6 +84,22 @@ def make_inverse_hs() -> pd.DataFrame:
     return df
 
 
+def make_double_bottom() -> pd.DataFrame:
+    """Decline 120->84, first low 80, rally to 92, second low 81.5 (a higher low), breakout today on volume.
+
+    The higher second low is what gives the pattern a reward:risk above 1: the stop sits under the second
+    low while the target is one full height (peak minus the lower low) above the entry.
+    """
+    base = np.linspace(112, 120, 160)
+    pre = np.linspace(120, 84, 60)                           # the decline the pattern reverses
+    first = np.concatenate([np.linspace(84, 80, 8), np.linspace(80, 92, 15)])
+    second = np.concatenate([np.linspace(92, 81.5, 15), np.linspace(81.5, 90, 10)])
+    brk = np.array([92.3, 92.6])                             # closes above the 92 peak
+    df = _ohlc_from_path(np.concatenate([base, pre, first, second, brk]), seed=11)
+    df.loc[df.index[-2:], "Volume"] *= 3.0                   # breakout volume (spec: >= 1.3x the 20-bar average)
+    return df
+
+
 def make_bullish_wolfe() -> pd.DataFrame:
     """Falling wedge 1-2-3-4-5 with point 5 undercutting line 1-3, then a close back above."""
     base = np.linspace(95, 105, 230)

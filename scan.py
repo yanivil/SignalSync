@@ -94,6 +94,7 @@ BREAKOUT_AGE_LAG = {
     "Cup & Handle": 0,
     "Inverse Head & Shoulders": PIVOT_ORDER,
     "Bullish Wolfe Wave": PIVOT_ORDER,
+    "Double Bottom": PIVOT_ORDER,        # the second low is a swing low, visible PIVOT_ORDER bars after it prints
 }
 # A trading day only counts as "the" last bar of the scan when at least this
 # share of symbols has a complete OHLC bar on (or after) it.  Why: Yahoo
@@ -160,6 +161,17 @@ IHS_TARGET_AT_HEAD = True                # target height = neckline at the head 
 TREND_VETO_REVERSALS = False             # legacy: reject reversal patterns in a strong down-trend
 
 # Bullish Wolfe Wave
+# Double Bottom (experimental, 2026-09-17): detected for the replay through ``PATTERN_DETECTORS``, not in the
+# nightly scan (``ACTIVE_PATTERNS``) until it passes the replay gate on the tuning page.
+DB_MIN_LEN, DB_MAX_LEN = 15, 150         # bars from the first low to the second
+DB_LOW_TOL = 0.03                        # the two lows within this share of the lower one, either way round
+DB_MIN_DEPTH_ATR = 2.0                   # the rally peak between them at least this many ATR above the higher low ...
+DB_MIN_RISE = 0.10                       # ... and at least this share above it (Bulkowski's 10 % rise between the
+#                                          bottoms): with the ATR rule alone 43 of 200 random walks showed a W, with
+#                                          10 % five do (the inverse H&S: two), see test_patterns
+DB_TIME_SYM = 3.0                        # the peak's position: (P - L1) / (L2 - P) within [1/3, 3]
+DB_PRIOR_DECLINE_OF_HEIGHT = 1.0         # decline into the first low from the 60-bar high >= this x height ...
+DB_TREND_SMA_OR = True                   # ... OR SMA50 < SMA200 satisfies the trend filter on its own
 WW_MIN_LEN, WW_MAX_LEN = 15, 200         # bars from point 1 to point 5
 WW_SWEET_ZONE = True                     # spec: point 5 below line 1-3 but above the line through 3 parallel to 2-4
 WW_MAX_OVERSHOOT_ATR = 2.0               # legacy band: point 5 <= 2 ATR under line 1-3 (also scales the score)
@@ -174,11 +186,13 @@ VOLUME_CONFIRM = {                       # a breakout close needs this volume ra
     "Cup & Handle": 1.4,
     "Inverse Head & Shoulders": 1.3,
     "Bullish Wolfe Wave": None,
+    "Double Bottom": 1.3,
 }
 MAX_RISK_PCT = {                         # reject setups whose stop is further than this below the entry
     "Cup & Handle": 12.0,
     "Inverse Head & Shoulders": 15.0,
     "Bullish Wolfe Wave": 15.0,
+    "Double Bottom": 15.0,
 }
 
 # Reward, chase and patience (all patterns; added 2026-09-06 after an external
@@ -196,7 +210,7 @@ MAX_BUY_RISK_MULT: Optional[float] = 1.5  # Max buy is also capped where the ris
 # shown again as an entry; the breakout age limit still applies on top.  Carried across nights through
 # ``first_listed`` in the previous signals.json (see ``carry_listing``).
 MAX_LISTED_DAYS: Dict[str, Optional[int]] = {"Cup & Handle": 6, "Inverse Head & Shoulders": 6,
-                                             "Bullish Wolfe Wave": 5}
+                                             "Bullish Wolfe Wave": 5, "Double Bottom": 6}
 # Patterns reported for information only: their breakouts are listed on the watchlist, never as a
 # confirmed buy signal (``demote_watch_only``).  The cup: +0.03 R per signal on 305 signals over the
 # eleven point-in-time years with 18 % reaching the target, against +0.23 for the inverse H&S and
@@ -207,7 +221,8 @@ WATCH_ONLY_PATTERNS: Tuple[str, ...] = ("Cup & Handle",)
 RULE_PROFILES: Dict[str, Dict[str, Any]] = {
     "spec": {},                          # the module defaults above
     "tuned": {                           # spec with the four rules the 2026-09-05 ablation showed remove good signals
-        "VOLUME_CONFIRM": {"Cup & Handle": None, "Inverse Head & Shoulders": None, "Bullish Wolfe Wave": None},
+        "VOLUME_CONFIRM": {"Cup & Handle": None, "Inverse Head & Shoulders": None, "Bullish Wolfe Wave": None,
+                           "Double Bottom": None},
         "IHS_SIDE_SYM_TOL": None,        # +-40 % side symmetry removed the best H&S signals (+0.74 R)
         "WW_TIME_SYM_TOL": 0.45,         # replay: 0.30 -> 8 signals/+0.37 R, 0.45 -> 28/+0.13, 0.60 -> 43/+0.02
         "CUP_MAX_RETRACE": 0.618,        # the spec's own "absolute maximum"
@@ -227,10 +242,13 @@ RULE_PROFILES: Dict[str, Dict[str, Any]] = {
         "IHS_TARGET_AT_HEAD": False, "TREND_VETO_REVERSALS": True,
         "WW_SWEET_ZONE": False, "WW_TIME_SYM_TOL": None,
         "VOLUME_AVG_LEN": 50,
-        "VOLUME_CONFIRM": {"Cup & Handle": None, "Inverse Head & Shoulders": None, "Bullish Wolfe Wave": None},
-        "MAX_RISK_PCT": {"Cup & Handle": 15.0, "Inverse Head & Shoulders": 15.0, "Bullish Wolfe Wave": 15.0},
+        "VOLUME_CONFIRM": {"Cup & Handle": None, "Inverse Head & Shoulders": None, "Bullish Wolfe Wave": None,
+                           "Double Bottom": None},
+        "MAX_RISK_PCT": {"Cup & Handle": 15.0, "Inverse Head & Shoulders": 15.0, "Bullish Wolfe Wave": 15.0,
+                         "Double Bottom": 15.0},
         "MIN_REWARD_RISK": None, "MAX_WAIT_BARS": None, "MAX_BUY_RISK_MULT": None,
-        "MAX_LISTED_DAYS": {"Cup & Handle": None, "Inverse Head & Shoulders": None, "Bullish Wolfe Wave": None},
+        "MAX_LISTED_DAYS": {"Cup & Handle": None, "Inverse Head & Shoulders": None, "Bullish Wolfe Wave": None,
+                            "Double Bottom": None},
         "WATCH_ONLY_PATTERNS": (),
     },
 }
@@ -1518,6 +1536,128 @@ def detect_inverse_hs(df: pd.DataFrame, ticker: str) -> List[Signal]:
 
 
 # --------------------------------------------------------------------------- #
+# Detector: Double Bottom (experimental)
+# --------------------------------------------------------------------------- #
+def detect_double_bottom(df: pd.DataFrame, ticker: str) -> List[Signal]:
+    """Detect a Double Bottom (bullish reversal) on daily bars.
+
+    The inverse head and shoulders without the head: two swing lows at about
+    the same level with one rally between them, and a daily close above that
+    rally's peak as the trigger.
+
+    * Two consecutive swing lows L1, L2 with ``DB_MIN_LEN <= L2 - L1 <= DB_MAX_LEN``
+      and ``|low[L1] - low[L2]| <= DB_LOW_TOL x the lower low``, either one the
+      lower: a second low that undercuts the first (the shake-out) is allowed.
+    * The peak P = the highest high strictly between them, at least
+      ``DB_MIN_DEPTH_ATR`` ATR and ``DB_MIN_RISE`` (10 %) above the higher low,
+      and not too close to either low in time (``DB_TIME_SYM``).
+    * A prior decline into L1 of ``DB_PRIOR_DECLINE_OF_HEIGHT`` x height from the
+      60-bar high, or SMA50 < SMA200 (``DB_TREND_SMA_OR``): it must be reversing
+      something.
+    * Confirmation via :func:`evaluate_breakout` with the peak as a constant
+      trigger from ``L2 + 1``, floor ``low[L2]``.  Stop below the second low, the
+      pattern's invalidation (like the H&S right shoulder, not the deeper low);
+      target = entry + (peak - lower low), the pattern's height.
+
+    Experimental: in ``PATTERN_DETECTORS`` but not in ``ACTIVE_PATTERNS``, so
+    the nightly scan does not run it until it passes the replay gate; the
+    backtest selects it with ``--patterns db``.
+
+    :param df: OHLCV DataFrame.
+    :param ticker: Symbol for labelling.
+    :returns: Zero or more Signals.
+
+    Complexity: O(L * (W + n)) for L swing lows.
+    """
+    high, low, close = (df[c].to_numpy(dtype=float) for c in ("High", "Low", "Close"))
+    n = len(close)
+    if n < DB_MIN_LEN + 20:
+        return []
+    desc, uptrend, strong_down = trend_context(df)
+    if TREND_VETO_REVERSALS and strong_down:
+        return []
+    s50, s200 = _sma_pair(df)
+    sma_trend_ok = DB_TREND_SMA_OR and s50 is not None and s200 is not None and s50 < s200
+    a_tr = atr(df).to_numpy(dtype=float)
+    _, piv_l = find_pivots(high, low, order=PIVOT_ORDER)
+    signals: List[Signal] = []
+
+    for i in range(len(piv_l) - 1):
+        l1, l2 = piv_l[i], piv_l[i + 1]
+        width = l2 - l1
+        if not (DB_MIN_LEN <= width <= DB_MAX_LEN):
+            continue
+        l1_v, l2_v = low[l1], low[l2]
+        lower, higher = min(l1_v, l2_v), max(l1_v, l2_v)
+        if abs(l1_v - l2_v) > DB_LOW_TOL * lower:
+            continue
+        # The rally peak strictly between the lows; consecutive swing lows are more than PIVOT_ORDER bars
+        # apart, so the interior is never empty.
+        p = l1 + 1 + int(np.argmax(high[l1 + 1:l2]))
+        p_v = float(high[p])
+        unit = float(a_tr[l2])
+        if unit <= 0 or p_v - higher < DB_MIN_DEPTH_ATR * unit or p_v < higher * (1 + DB_MIN_RISE):
+            continue
+        ratio = (p - l1) / max(l2 - p, 1)
+        if ratio > DB_TIME_SYM or ratio < 1 / DB_TIME_SYM:
+            continue
+        height = p_v - lower
+        look = high[max(0, l1 - 60):l1 + 1]
+        decline_ok = (DB_PRIOR_DECLINE_OF_HEIGHT is not None
+                      and float(look.max()) - l1_v >= DB_PRIOR_DECLINE_OF_HEIGHT * height)
+        if not (sma_trend_ok or decline_ok):
+            continue
+        status, age, trigger = evaluate_breakout(close, lambda _j, level=p_v: level, start=l2 + 1,
+                                                 pattern="Double Bottom", floor=l2_v)
+        if status == "STALE":
+            continue
+        vr = _volume_ratio(df, n - 1 - age) if age is not None else None
+        volume_note = ""
+        if status == "CONFIRMED" and not _volume_confirmed("Double Bottom", vr):
+            status, age, trigger = "WATCHLIST", None, p_v
+            volume_note = f"; breakout without volume ({vr if vr is not None else 'n/a'}x)"
+        entry = float(close[-1]) if status == "CONFIRMED" and close[-1] > trigger else float(trigger)
+        stop = float(l2_v - 0.25 * unit)
+        if stop >= entry:
+            continue
+        risk = (entry - stop) / entry * 100
+        max_risk = MAX_RISK_PCT.get("Double Bottom", 15.0)
+        if risk > max_risk:
+            continue
+        if status == "WATCHLIST" and waited_too_long(l2, age, n):
+            continue  # second low too old for a watchlist row (a breakout would still be reported)
+        target = float(entry + height)
+        rr = reward_risk(entry, stop, target)
+        if not _reward_ok(rr):
+            continue
+        # Quality score (0-100): 50 base
+        #   +15 low symmetry   (0 at the DB_LOW_TOL limit)
+        #   +10 time symmetry  (log-scaled, 0 at the DB_TIME_SYM limit)
+        #   +10 rise           (0 at DB_MIN_RISE, full at twice that)
+        #   +5  close above SMA200
+        #   +5  tight risk     (0 at the MAX_RISK_PCT limit)
+        #   +5  breakout volume >= 1.3x the VOLUME_AVG_LEN-day average
+        score = 50
+        score += 15 * (1 - min(abs(l1_v - l2_v) / (DB_LOW_TOL * lower), 1))
+        score += 10 * (1 - abs(math.log(ratio)) / math.log(DB_TIME_SYM))
+        score += 10 * max(0.0, min((p_v / higher - 1) / DB_MIN_RISE - 1, 1))
+        score += 5 if uptrend else 0
+        score += 5 * (1 - min(risk / max_risk, 1))
+        if vr is not None and vr >= 1.3:
+            score += 5
+        score = int(max(0, min(100, round(score))))
+        if score < MIN_SCORE:
+            continue
+        dates = df.index
+        notes = (f"L1 {dates[l1].date()} @{l1_v:.2f}, peak {dates[p].date()} @{p_v:.2f}, "
+                 f"L2 {dates[l2].date()} @{l2_v:.2f}, trigger {p_v:.2f}{volume_note}")
+        signals.append(Signal(ticker, "Double Bottom", status, round(entry, 2), round(stop, 2), round(risk, 2),
+                              round(target, 2), score, round(float(close[-1]), 2), str(dates[-1].date()), age, vr,
+                              desc, notes, max_buy=max_buy_level(trigger, entry, stop), reward_risk=rr))
+    return _dedupe(signals)
+
+
+# --------------------------------------------------------------------------- #
 # Detector: Bullish Wolfe Wave
 # --------------------------------------------------------------------------- #
 def detect_bullish_wolfe(df: pd.DataFrame, ticker: str) -> List[Signal]:
@@ -1700,7 +1840,15 @@ def _dedupe(signals: List[Signal]) -> List[Signal]:
 # --------------------------------------------------------------------------- #
 # Orchestration & reporting
 # --------------------------------------------------------------------------- #
-DETECTORS = (detect_cup_and_handle, detect_inverse_hs, detect_bullish_wolfe)
+PATTERN_DETECTORS: Dict[str, Callable] = {           # every detector the code has, by the pattern it reports
+    "Cup & Handle": detect_cup_and_handle,
+    "Inverse Head & Shoulders": detect_inverse_hs,
+    "Bullish Wolfe Wave": detect_bullish_wolfe,
+    "Double Bottom": detect_double_bottom,
+}
+ACTIVE_PATTERNS = ("Cup & Handle", "Inverse Head & Shoulders", "Bullish Wolfe Wave")  # what the nightly scan runs;
+#                                        a new pattern joins after it passes the replay gate (docs/wiki/03)
+DETECTORS = tuple(PATTERN_DETECTORS[p] for p in ACTIVE_PATTERNS)
 
 
 def scan_symbol(sym: str, df: pd.DataFrame, detectors: Optional[Sequence[Callable]] = None) -> List[Signal]:
@@ -1913,9 +2061,9 @@ def render_markdown(signals: List[Signal], meta: Mapping[str, Any],
     """
     lines = [f"# S&P 500 pattern scan — {meta['run_date']}", ""]
     ages = meta.get("max_breakout_age_by_pattern") or {
-        p: max_breakout_age(p) for p in BREAKOUT_AGE_LAG}
+        p: max_breakout_age(p) for p in ACTIVE_PATTERNS}
     age_text = ", ".join(f"{p} {a}" for p, a in ages.items())
-    listed = meta.get("max_listed_days") or {p: max_listed_days(p) for p in BREAKOUT_AGE_LAG}
+    listed = meta.get("max_listed_days") or {p: max_listed_days(p) for p in ACTIVE_PATTERNS}
     listed_text = ", ".join(f"{p} session {d}" for p, d in listed.items() if d is not None)
     watch_only = meta.get("watch_only_patterns")
     watch_only = list(WATCH_ONLY_PATTERNS) if watch_only is None else watch_only
@@ -2084,8 +2232,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "profile": ACTIVE_PROFILE, "min_score": MIN_SCORE, "max_breakout_age": MAX_BREAKOUT_AGE,
             "min_reward_risk": MIN_REWARD_RISK, "max_wait_bars": MAX_WAIT_BARS,
             "max_buy_risk_mult": MAX_BUY_RISK_MULT, "market": market,
-            "max_breakout_age_by_pattern": {p: max_breakout_age(p) for p in BREAKOUT_AGE_LAG},
-            "max_listed_days": {p: max_listed_days(p) for p in BREAKOUT_AGE_LAG},
+            "max_breakout_age_by_pattern": {p: max_breakout_age(p) for p in ACTIVE_PATTERNS},
+            "max_listed_days": {p: max_listed_days(p) for p in ACTIVE_PATTERNS},
             "watch_only_patterns": list(WATCH_ONLY_PATTERNS)}
     os.makedirs(args.out_dir, exist_ok=True)
     out_path = os.path.join(args.out_dir, "signals.json")

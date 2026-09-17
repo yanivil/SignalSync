@@ -85,6 +85,27 @@ Entry is the breakout close when it is above the trigger (and within 5 % of it),
 * A sloping neckline gives a trigger that moves every bar; `notes` reports both anchor values and the current neckline.
 * The spec's pivots N1 and N2 are required to be swing highs; we take the highest high of each interior, which is the same bar whenever a swing high exists there and is defined even when the rally is too short to form one.
 
+## Double Bottom (`detect_double_bottom`), experimental
+
+**Status.** In `PATTERN_DETECTORS` but not in `ACTIVE_PATTERNS`: the nightly scan does not run it until it passes the replay gate on the tuning page; the backtest selects it with `--patterns db` (workflow input `patterns`). Added 2026-09-17 as the first candidate after the cup went watch-only, because what pays in this universe is a reversal out of a washed-out base and the W is the inverse head and shoulders without the head.
+
+**Trend filter.** As for the H&S: `SMA50 < SMA200` at the scan date, or a decline into the first low of at least one pattern height from the highest high of the 60 bars before it (`DB_PRIOR_DECLINE_OF_HEIGHT`, `DB_TREND_SMA_OR`).
+
+**Search.** Every pair of consecutive swing lows (L1, L2) with `15 ≤ L2 − L1 ≤ 150` (`DB_MIN_LEN`, `DB_MAX_LEN`):
+
+1. Lows within 3 % of the lower one, either way round (`DB_LOW_TOL`): a second low that undercuts the first, the shake-out, is allowed.
+2. Peak: `P = argmax(high[L1+1..L2−1])`, the rally strictly between the lows (consecutive swing lows are more than 5 bars apart, so the interior is never empty).
+3. Rise: `high[P] ≥ (1 + 0.10) × max(low[L1], low[L2])` (`DB_MIN_RISE`, Bulkowski's 10 % rise between the bottoms) and `high[P] − max(lows) ≥ 2.0 × ATR[L2]` (`DB_MIN_DEPTH_ATR`). The percent rule is what keeps noise out: with the ATR rule alone 43 of 200 random walks show a W, with the 10 % rule five (the H&S: two).
+4. Time symmetry: `(P − L1) / (L2 − P)` within `[1/3, 3]` (`DB_TIME_SYM`).
+5. Prior decline: see the trend filter.
+6. Confirmation via `evaluate_breakout` with the peak as a constant trigger, from `L2 + 1`, floor `low[L2]`: first close above the peak sets the clock, `age ≤ MAX_BREAKOUT_AGE + 5` (the second low is a swing low, visible 5 bars after it prints); volume as for the H&S (≥ 1.3× under `spec`, none under `tuned`).
+
+**Levels.** `stop = low[L2] − 0.25 × ATR[L2]`, under the second low, the pattern's invalidation, like the H&S right shoulder and not the deeper low; `target = entry + (high[P] − min(lows))`, the pattern's height. A consequence worth knowing: with equal lows the reward is one height and the risk slightly more, so the reward:risk sits just under 1 and the `tuned` profile's `MIN_REWARD_RISK` of 1.0 drops it; the W's that pass are the ones with a higher second low. The replay measures both forms, the second with `MIN_REWARD_RISK=None`.
+
+**Score.** 50 + 15 × (1 − |L1 − L2| / (0.03 × lower low)) + 10 × (1 − |ln ratio| / ln 3) + 10 × min(rise / 0.10 − 1, 1) + 5 if close > SMA200 + 5 × (1 − risk / 15) + 5 if volume ratio ≥ 1.3.
+
+**Overlap.** Many bases match both this and the inverse H&S; the replay counts how often a double-bottom signal is the same base as an H&S signal, because a pattern that only duplicates the best one adds concurrent risk, not signals.
+
 ## Bullish Wolfe Wave (`detect_bullish_wolfe`)
 
 **Search.** Every triple of consecutive swing lows (1, 3, 5) with `15 ≤ p5 − p1 ≤ 200` and point 5 within the last 25 bars:

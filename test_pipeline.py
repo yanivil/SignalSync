@@ -142,7 +142,7 @@ def test_end_to_end_mini_universe(tmp_path, universe_csv, fake_yfinance, mini_un
     # Detection: the three setups fire, the two controls stay silent.
     by_ticker = {s["ticker"]: s for s in signals}
     assert set(by_ticker) == {"CUP", "IHS", "WW"}
-    assert {by_ticker[t]["pattern"] for t in by_ticker} == set(scan.BREAKOUT_AGE_LAG)
+    assert {by_ticker[t]["pattern"] for t in by_ticker} == set(scan.ACTIVE_PATTERNS)
 
     # Schema and integrity of every signal.
     fields = [f.name for f in dataclasses.fields(scan.Signal)]
@@ -192,7 +192,8 @@ def test_end_to_end_mini_universe(tmp_path, universe_csv, fake_yfinance, mini_un
         if s["target"] is not None:                                            # R:R = (target-entry)/(entry-stop)
             assert s["reward_risk"] == pytest.approx((s["target"] - s["entry"]) / (s["entry"] - s["stop"]), abs=0.01)
     assert "## Closed since the last report" in report and data["closed"] == []   # first run: nothing to close
-    assert data["retired"] == [] and meta["max_listed_days"] == scan.MAX_LISTED_DAYS
+    assert data["retired"] == []
+    assert meta["max_listed_days"] == {p: scan.max_listed_days(p) for p in scan.ACTIVE_PATTERNS}
     # The cup is watch-only: its breakout is listed on the watchlist with its age and a note, never as a signal.
     cup = by_ticker["CUP"]
     assert meta["watch_only_patterns"] == ["Cup & Handle"] and cup["watch_only"] and cup["status"] == "WATCHLIST"

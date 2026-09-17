@@ -26,7 +26,7 @@ import pytest
 
 import scan
 from test_scan import (END, _close_print, _ohlc_from_path, make_bullish_wolfe,  # noqa: F401
-                       make_cup_and_handle, make_inverse_hs)
+                       make_cup_and_handle, make_double_bottom, make_inverse_hs)
 
 
 @pytest.fixture(autouse=True)
@@ -54,6 +54,11 @@ def ihs_df() -> pd.DataFrame:
 @pytest.fixture
 def wolfe_df() -> pd.DataFrame:
     return make_bullish_wolfe()
+
+
+@pytest.fixture
+def db_df() -> pd.DataFrame:
+    return make_double_bottom()
 
 
 def make_flat(n: int = 400, price: float = 50.0) -> pd.DataFrame:

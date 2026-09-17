@@ -164,6 +164,7 @@ The report header and every backtest row carry the SPY regime (close and SMA50 a
 | `--min-score` | 60 | overrides `MIN_SCORE` for the run and is echoed in `meta.min_score` |
 | `--max-age` | 3 | overrides `MAX_BREAKOUT_AGE`; the effective per-pattern limits are in `meta.max_breakout_age_by_pattern` |
 | `--profile` | `spec` | rule profile, `spec`, `tuned` or `legacy`; echoed in `meta.profile` |
+| (backtest) `--patterns` | the active set | comma-separated patterns to replay, `cup`, `ihs`, `wolfe`, `db` or the full names; the way a candidate such as the double bottom is replayed before it joins the scan |
 | `--out-dir` | `output` | destination for `signals.json` and `report.md` |
 | `-v` | off | DEBUG logging, including per-symbol last-bar detail |
 
@@ -245,6 +246,20 @@ Not configurable: the handle low must stay in the upper half of the cup.
 | `IHS_PRIOR_DECLINE` | off | 0.10 | required decline into LS as a share of the 60-bar high | |
 | `IHS_TREND_SMA_OR` | `True` | `False` | SMA50 < SMA200 satisfies the trend filter on its own | |
 | `IHS_TARGET_AT_HEAD` | `True` | `False` | measured move uses the neckline at the head bar (spec) rather than at the break bar | identical for a flat neckline |
+
+## Double Bottom (experimental)
+
+Not in the nightly scan (`ACTIVE_PATTERNS`); replayed with `--patterns db`. Its constants have no `legacy` value.
+
+| Constant | Default | Meaning | Tuning note |
+|---|---|---|---|
+| `DB_MIN_LEN` / `DB_MAX_LEN` | 15 / 150 | bars from the first low to the second | |
+| `DB_LOW_TOL` | 0.03 | the two lows within this share of the lower one, either way round | |
+| `DB_MIN_RISE` | 0.10 | the peak between the lows at least this share above the higher low (Bulkowski) | the rule that keeps noise out: 43 of 200 random walks fire without it, 5 with it |
+| `DB_MIN_DEPTH_ATR` | 2.0 | the peak also at least this many ATR above the higher low | rarely binding once the 10 % rule holds |
+| `DB_TIME_SYM` | 3.0 | the peak's position between the lows, `(P − L1) / (L2 − P)` within `[1/3, 3]` | |
+| `DB_PRIOR_DECLINE_OF_HEIGHT` / `DB_TREND_SMA_OR` | 1.0 / `True` | a decline of one height into the first low, or SMA50 < SMA200 | as for the H&S |
+| `VOLUME_CONFIRM`, `MAX_RISK_PCT`, `BREAKOUT_AGE_LAG`, `MAX_LISTED_DAYS` | 1.3 (tuned none), 15, 5, 6 | as for the inverse H&S | |
 
 ## Bullish Wolfe Wave
 

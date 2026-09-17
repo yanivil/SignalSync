@@ -263,6 +263,38 @@ def test_ihs_neckline_ignores_wicks_on_the_anchor_bars(ihs_df):
     assert (s.entry, s.stop, s.target) == (base.entry, base.stop, base.target)
 
 
+def test_double_bottom_levels_follow_documented_formulas(db_df):
+    (s,) = scan.detect_double_bottom(db_df, "DB")
+    m = re.fullmatch(r"L1 (\S+) @([\d.]+), peak (\S+) @([\d.]+), L2 (\S+) @([\d.]+), trigger ([\d.]+)", s.notes)
+    assert m, s.notes
+    l1, p, l2 = _loc(db_df, m[1]), _loc(db_df, m[3]), _loc(db_df, m[5])
+    high, low, close = (db_df[c].to_numpy() for c in ("High", "Low", "Close"))
+    n = len(close)
+    l1_v, l2_v, p_v = low[l1], low[l2], high[p]
+    assert (float(m[2]), float(m[4]), float(m[6])) == tuple(round(v, 2) for v in (l1_v, p_v, l2_v))
+    assert l1 < p < l2 and scan.DB_MIN_LEN <= l2 - l1 <= scan.DB_MAX_LEN
+    assert p == l1 + 1 + int(np.argmax(high[l1 + 1:l2]))                  # the peak strictly between the lows
+    assert abs(l1_v - l2_v) <= scan.DB_LOW_TOL * min(l1_v, l2_v)
+    unit = scan.atr(db_df).to_numpy()[l2]
+    assert p_v - max(l1_v, l2_v) >= scan.DB_MIN_DEPTH_ATR * unit and p_v >= max(l1_v, l2_v) * (1 + scan.DB_MIN_RISE)
+    ratio = (p - l1) / (l2 - p)
+    assert 1 / scan.DB_TIME_SYM <= ratio <= scan.DB_TIME_SYM
+    height = p_v - min(l1_v, l2_v)
+    look = high[max(0, l1 - 60):l1 + 1]
+    s50, s200 = scan._sma_pair(db_df)
+    assert s50 < s200 or look.max() - l1_v >= scan.DB_PRIOR_DECLINE_OF_HEIGHT * height
+    assert float(m[7]) == round(p_v, 2)
+    first_break = next(j for j in range(l2 + 1, n) if close[j] > p_v)
+    assert s.bars_since_break == n - 1 - first_break and s.status == "CONFIRMED"
+    assert s.entry == round(close[-1], 2) and close[-1] > p_v
+    assert s.stop == round(l2_v - 0.25 * unit, 2)                          # under the second low, not the deeper one
+    assert s.target == round(s.entry + height, 2) and s.target > s.entry
+    assert s.risk_pct == pytest.approx((s.entry - s.stop) / s.entry * 100, abs=0.02) and s.risk_pct <= 15
+    assert s.reward_risk == pytest.approx((s.target - s.entry) / (s.entry - s.stop), abs=0.01) and s.reward_risk >= 1
+    assert s.max_buy == scan.max_buy_level(p_v, s.entry, s.stop) and s.volume_ratio >= 1.3
+    assert scan.MIN_SCORE <= s.score <= 100 and s.trend
+
+
 def test_ihs_levels_follow_documented_formulas(ihs_df):
     (s,) = scan.detect_inverse_hs(ihs_df, "IHS")
     m = re.fullmatch(r"LS (\S+) @([\d.]+), head (\S+) @([\d.]+), RS (\S+) @([\d.]+), "
@@ -488,6 +520,50 @@ def test_strong_downtrend_veto_is_a_legacy_rule():
     assert scan.detect_inverse_hs(df, "IHS")                     # spec profile: allowed
     scan.apply_profile("legacy")
     assert scan.detect_inverse_hs(df, "IHS") == []               # legacy profile: vetoed
+
+
+def db_variant(l2_low=81.5, peak=92.0, width=15, base=None, pre=None) -> pd.DataFrame:
+    base = np.linspace(112, 120, 160) if base is None else base
+    pre = np.linspace(120, 84, 60) if pre is None else pre
+    first = np.concatenate([np.linspace(84, 80, 8), np.linspace(80, peak, width)])
+    second = np.concatenate([np.linspace(peak, l2_low, width), np.linspace(l2_low, 90, 10)])
+    brk = np.array([peak + 0.3, peak + 0.6])
+    df = _ohlc_from_path(np.concatenate([base, pre, first, second, brk]), seed=11)
+    df.loc[df.index[-2:], "Volume"] *= 3.0
+    return df
+
+
+@pytest.mark.parametrize("label, kwargs", [
+    ("lows more than 3 % apart", dict(l2_low=86.0)),
+    ("rally between the lows under 10 % (and under 2 ATR)", dict(peak=83.0)),
+    ("lows fewer than 15 bars apart", dict(width=4)),
+    ("nothing to reverse: no prior decline and SMA50 above SMA200",
+     dict(base=np.linspace(60, 84, 160), pre=np.full(60, 84.0))),
+])
+def test_double_bottom_single_rule_violations_are_rejected(label, kwargs):
+    assert scan.detect_double_bottom(db_variant(**kwargs), "DB") == [], label
+    assert scan.detect_double_bottom(db_variant(), "DB"), "the unmodified variant must fire"
+
+
+def test_double_bottom_is_experimental_and_isolated(db_df, ihs_df, cup_df, wolfe_df):
+    assert scan.detect_double_bottom not in scan.DETECTORS                  # not in the nightly scan yet
+    assert scan.PATTERN_DETECTORS["Double Bottom"] is scan.detect_double_bottom
+    assert set(scan.ACTIVE_PATTERNS) == set(scan.BREAKOUT_AGE_LAG) - {"Double Bottom"}
+    assert scan.scan_symbol("DB", db_df) == []                                 # the active detectors ignore it
+    assert [s.pattern for s in scan.scan_symbol("DB", db_df, detectors=(scan.detect_double_bottom,))] == \
+        ["Double Bottom"]
+    for name, df in (("IHS", ihs_df), ("CUP", cup_df), ("WW", wolfe_df)):
+        assert scan.detect_double_bottom(df, name) == [], name                # the other fixtures are not W's
+    assert scan.detect_inverse_hs(db_df, "DB") == [] and scan.detect_cup_and_handle(db_df, "DB") == []
+
+
+def test_double_bottom_controls_are_silent_and_the_random_walk_rate_is_low(flat_df):
+    assert scan.detect_double_bottom(flat_df, "FLAT") == []
+    assert scan.detect_double_bottom(_ohlc_from_path(np.linspace(50, 150, 400), noise=0.0), "LINE") == []
+    # Two lows within 3 % with a bump between them are common in noise: with the ATR depth rule alone 43 of
+    # 200 random walks showed a W.  Bulkowski's 10 % rise between the bottoms brings it to 5 (the inverse H&S: 2).
+    fired = sum(bool(scan.detect_double_bottom(make_random_walk(seed), "NOISE")) for seed in range(200))
+    assert fired <= 6, fired
 
 
 def wolfe_variant(points=None, rebound=None) -> pd.DataFrame:
