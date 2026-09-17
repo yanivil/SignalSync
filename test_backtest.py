@@ -509,3 +509,21 @@ def test_render_late_entry_section_and_json(mini_universe, monkeypatch, tmp_path
     doc = json.loads(out.read_text())
     assert [t["listed_day"] for t in doc["late"]] == [1, 2, 3, 4] and len(doc["repeats"]) == 3
     assert "Late entry" in capsys.readouterr().out
+
+
+def test_parse_patterns_selects_detectors_by_name_or_alias(mini_universe, monkeypatch, tmp_path):
+    assert bt.parse_patterns(None) is None and bt.parse_patterns("") is None
+    assert bt.parse_patterns("db, ihs") == [scan.detect_double_bottom, scan.detect_inverse_hs]
+    assert bt.parse_patterns("Cup & Handle") == [scan.detect_cup_and_handle]
+    with pytest.raises(ValueError, match="unknown pattern 'flag'"):
+        bt.parse_patterns("flag")
+    # The replay runs only the named detectors and records them.
+    monkeypatch.setattr(scan, "load_sp500_symbols", lambda csv=None: list(mini_universe))
+    monkeypatch.setattr(scan, "download_history", lambda symbols, period="2y": {k: v for k, v in mini_universe.items()
+                                                                                if k in symbols})
+    out = tmp_path / "bt.json"
+    assert bt.main(["--days", "5", "--horizon", "10", "--patterns", "cup", "--json", str(out)]) == 0
+    doc = json.loads(out.read_text())
+    assert doc["patterns"] == ["detect_cup_and_handle"] and {r["pattern"] for r in doc["rows"]} == {"Cup & Handle"}
+    assert bt.main(["--days", "5", "--horizon", "10", "--json", str(out)]) == 0
+    assert json.loads(out.read_text())["patterns"] == [fn.__name__ for fn in scan.DETECTORS]

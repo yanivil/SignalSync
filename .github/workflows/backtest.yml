@@ -60,6 +60,10 @@ on:
         description: "true = stop / target variants and the other profile's pass (doubles the runtime)"
         required: false
         default: "true"
+      patterns:
+        description: "comma-separated patterns to replay (cup, ihs, wolfe, db); empty = the scanner's active set"
+        required: false
+        default: ""
   push:
     paths:
       - tools/backtest.py
@@ -97,6 +101,7 @@ jobs:
           END: ${{ github.event.inputs.end || '' }}
           ASOF: ${{ github.event.inputs.asof || 'false' }}
           GRID: ${{ github.event.inputs.grid || 'true' }}
+          PATTERNS: ${{ github.event.inputs.patterns || '' }}
         run: |
           if [ "$ABLATE" = "true" ]; then MODE=(--ablate); elif [ "$GRID" = "true" ]; then MODE=(--grid); else MODE=(); fi
           cmd=(python tools/backtest.py --days "$DAYS" --horizon "$HORIZON" --min-score "$MIN_SCORE"
@@ -105,6 +110,7 @@ jobs:
           if [ -n "$SPLIT" ]; then cmd+=(--split "$SPLIT"); fi
           if [ -n "$END" ]; then cmd+=(--end "$END"); fi
           if [ "$ASOF" = "true" ]; then cmd+=(--constituents-asof); fi
+          if [ -n "$PATTERNS" ]; then cmd+=(--patterns "$PATTERNS"); fi
           for kv in $OVERRIDES; do cmd+=(--set "$kv"); done
           "${cmd[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Keep the JSON (rows, later listings, tables) so several runs can be pooled exactly
