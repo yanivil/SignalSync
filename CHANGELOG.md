@@ -5,6 +5,18 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Changed (the double bottom is active, #126)
+- `ACTIVE_PATTERNS` gains the Double Bottom: the nightly scan runs four
+  detectors. Evidence, the eleven yearly point-in-time runs with all four
+  patterns: 215 signals under the tuned rules, 58 % reaching the target,
+  +0.13 R per signal, interval [+0.00, +0.26], positive in 7 of 11 years,
+  3 % overlap with the inverse H&S; 752 signals at +0.10 R [+0.01, +0.18],
+  9 of 11 years, with the reward floor off. Thin but incremental; review
+  after 30 live signals. The page explains the pattern and quotes its
+  figure; the test universe gains a double bottom; the random-walk
+  false-positive bound of the scan moves from 5 % to 8 % (the fourth
+  detector fires on about 4 % of random walks, the other three on 2 %).
+
 ### Added (the double bottom, experimental)
 - `detect_double_bottom`: two consecutive swing lows within 3 % of each
   other, the rally between them at least 10 % and 2 ATR above the higher

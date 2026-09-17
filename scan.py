@@ -161,8 +161,10 @@ IHS_TARGET_AT_HEAD = True                # target height = neckline at the head 
 TREND_VETO_REVERSALS = False             # legacy: reject reversal patterns in a strong down-trend
 
 # Bullish Wolfe Wave
-# Double Bottom (experimental, 2026-09-17): detected for the replay through ``PATTERN_DETECTORS``, not in the
-# nightly scan (``ACTIVE_PATTERNS``) until it passes the replay gate on the tuning page.
+# Double Bottom (active since 2026-09-17, #126): 215 signals over the eleven point-in-time years under the tuned
+# rules, 58 % reaching the target, +0.13 R per signal, positive in 7 of 11 years, 3 % overlap with the inverse
+# H&S; the reward:risk floor keeps the form with a higher second low.  Thin but incremental; review after 30 live
+# signals (docs/wiki/03).
 DB_MIN_LEN, DB_MAX_LEN = 15, 150         # bars from the first low to the second
 DB_LOW_TOL = 0.03                        # the two lows within this share of the lower one, either way round
 DB_MIN_DEPTH_ATR = 2.0                   # the rally peak between them at least this many ATR above the higher low ...
@@ -1559,9 +1561,10 @@ def detect_double_bottom(df: pd.DataFrame, ticker: str) -> List[Signal]:
       pattern's invalidation (like the H&S right shoulder, not the deeper low);
       target = entry + (peak - lower low), the pattern's height.
 
-    Experimental: in ``PATTERN_DETECTORS`` but not in ``ACTIVE_PATTERNS``, so
-    the nightly scan does not run it until it passes the replay gate; the
-    backtest selects it with ``--patterns db``.
+    Active since 2026-09-17 after the eleven-year replay (#126): +0.13 R per
+    signal on 215 under the tuned rules, positive in 7 of 11 years, almost no
+    overlap with the inverse H&S; the backtest selects it alone with
+    ``--patterns db``.
 
     :param df: OHLCV DataFrame.
     :param ticker: Symbol for labelling.
@@ -1846,8 +1849,8 @@ PATTERN_DETECTORS: Dict[str, Callable] = {           # every detector the code h
     "Bullish Wolfe Wave": detect_bullish_wolfe,
     "Double Bottom": detect_double_bottom,
 }
-ACTIVE_PATTERNS = ("Cup & Handle", "Inverse Head & Shoulders", "Bullish Wolfe Wave")  # what the nightly scan runs;
-#                                        a new pattern joins after it passes the replay gate (docs/wiki/03)
+ACTIVE_PATTERNS = ("Cup & Handle", "Inverse Head & Shoulders", "Bullish Wolfe Wave",   # what the nightly scan runs;
+                   "Double Bottom")     # a pattern joins after it passes the replay gate (docs/wiki/03)
 DETECTORS = tuple(PATTERN_DETECTORS[p] for p in ACTIVE_PATTERNS)
 
 
@@ -2032,7 +2035,7 @@ def close_out(previous: Sequence[Mapping[str, Any]], current: Sequence[Signal],
     return out
 
 
-_ANCHOR_RE = re.compile(r"(RS|handle low|5) (\d{4}-\d{2}-\d{2})")
+_ANCHOR_RE = re.compile(r"(RS|handle low|5|L2) (\d{4}-\d{2}-\d{2})")   # each pattern's last anchor in its notes
 
 
 def _drop_reason(p: Mapping[str, Any], df: pd.DataFrame) -> str:
@@ -2044,7 +2047,7 @@ def _drop_reason(p: Mapping[str, Any], df: pd.DataFrame) -> str:
         return f"reward:risk {rr} below the minimum {MIN_REWARD_RISK}"
     m = _ANCHOR_RE.search(p.get("notes") or "")
     if MAX_WAIT_BARS is not None and p.get("status") == "WATCHLIST" and m:
-        label = {"RS": "right shoulder", "handle low": "handle low", "5": "point 5"}[m[1]]
+        label = {"RS": "right shoulder", "handle low": "handle low", "5": "point 5", "L2": "second low"}[m[1]]
         waited = int((df.index > pd.Timestamp(m[2])).sum())
         if waited > MAX_WAIT_BARS:
             return f"no breakout within {MAX_WAIT_BARS} bars of the {label} on {m[2]} ({waited} bars)"

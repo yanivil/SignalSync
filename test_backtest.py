@@ -31,7 +31,7 @@ def test_walk_forward_finds_the_cup_on_its_breakout_day_without_look_ahead(mini_
     assert r["outcome"] in ("open", "stop", "target") and r["bars"] == 1   # one bar after the fill exists
     for row in rows:
         assert row["last_date"] == row["scan_day"]               # nothing dated after its scan day
-    assert {r["ticker"] for r in rows} <= {"CUP", "IHS", "WW"}   # controls never fire
+    assert {r["ticker"] for r in rows} <= {"CUP", "IHS", "WW", "DB"}   # controls never fire
 
 
 def test_walk_forward_marks_gaps_and_no_data(mini_universe):
@@ -193,7 +193,7 @@ def test_walk_forward_members_and_end(mini_universe):
 
     def members(d):
         calls.append(d)
-        return {"CUP", "IHS", "WW"}
+        return {"CUP", "IHS", "WW", "DB"}
 
     full = bt.walk_forward(mini_universe, days=5, horizon=10, members=members)
     assert len(calls) == 5 and calls == sessions[-5:]                      # one membership lookup per scan day

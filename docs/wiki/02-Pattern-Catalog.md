@@ -85,9 +85,9 @@ Entry is the breakout close when it is above the trigger (and within 5 % of it),
 * A sloping neckline gives a trigger that moves every bar; `notes` reports both anchor values and the current neckline.
 * The spec's pivots N1 and N2 are required to be swing highs; we take the highest high of each interior, which is the same bar whenever a swing high exists there and is defined even when the rally is too short to form one.
 
-## Double Bottom (`detect_double_bottom`), experimental
+## Double Bottom (`detect_double_bottom`)
 
-**Status.** In `PATTERN_DETECTORS` but not in `ACTIVE_PATTERNS`: the nightly scan does not run it until it passes the replay gate on the tuning page; the backtest selects it with `--patterns db` (workflow input `patterns`). Added 2026-09-17 as the first candidate after the cup went watch-only, because what pays in this universe is a reversal out of a washed-out base and the W is the inverse head and shoulders without the head.
+**Status.** Active since 2026-09-17 (#126): added as the first candidate after the cup went watch-only, because what pays in this universe is a reversal out of a washed-out base and the W is the inverse head and shoulders without the head; replayed over the eleven point-in-time years before it joined the scan (the tuning page has the tables: +0.13 R per signal on 215 under the tuned rules, 58 % reaching the target, positive in 7 of 11 years, 3 % overlap with the H&S). The backtest replays it alone with `--patterns db` (workflow input `patterns`).
 
 **Trend filter.** As for the H&S: `SMA50 < SMA200` at the scan date, or a decline into the first low of at least one pattern height from the highest high of the 60 bars before it (`DB_PRIOR_DECLINE_OF_HEIGHT`, `DB_TREND_SMA_OR`).
 

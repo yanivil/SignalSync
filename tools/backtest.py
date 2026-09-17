@@ -269,8 +269,8 @@ def row_features(hist: pd.DataFrame, s: scan.Signal, atr_last: float) -> Dict[st
     * ``dist_sma200_atr``, ``stop_atr``, ``target_atr``: close minus SMA200,
       entry minus stop and target minus entry, each in units of the last ATR.
     * ``wait_bars``: bars from the pattern's last anchor (handle low, right
-      shoulder, point 5, read from ``notes`` like ``scan._drop_reason`` does) to
-      the breakout bar.
+      shoulder, point 5, second low, read from ``notes`` like ``scan._drop_reason``
+      does) to the breakout bar.
     * ``depth_atr``: the pattern's height in ATR -- cup bottom to right rim,
       the shallower shoulder to the head, Wolfe point 1 to point 5.
     * ``break_close_pos``: where the breakout bar closed within its own range
@@ -337,6 +337,9 @@ def row_features(hist: pd.DataFrame, s: scan.Signal, atr_last: float) -> Dict[st
     elif s.pattern == "Bullish Wolfe Wave":
         m1, m5 = re.search(r"^1 \S+ @([\d.]+)", notes), re.search(r", 5 \S+ @([\d.]+);", notes)
         depth = float(m1[1]) - float(m5[1]) if m1 and m5 else None
+    elif s.pattern == "Double Bottom":
+        m = re.search(r"L1 \S+ @([\d.]+), peak \S+ @([\d.]+), L2 \S+ @([\d.]+)", notes)
+        depth = float(m[2]) - min(float(m[1]), float(m[3])) if m else None
     out["depth_atr"] = in_atr(depth)
     # The breakout bar: close position, prior-high clearance, volume z-score.
     if b is not None and b >= 1:

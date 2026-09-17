@@ -545,11 +545,11 @@ def test_double_bottom_single_rule_violations_are_rejected(label, kwargs):
     assert scan.detect_double_bottom(db_variant(), "DB"), "the unmodified variant must fire"
 
 
-def test_double_bottom_is_experimental_and_isolated(db_df, ihs_df, cup_df, wolfe_df):
-    assert scan.detect_double_bottom not in scan.DETECTORS                  # not in the nightly scan yet
+def test_double_bottom_is_active_and_isolated(db_df, ihs_df, cup_df, wolfe_df):
+    assert scan.detect_double_bottom in scan.DETECTORS                      # in the nightly scan since 2026-09-17
     assert scan.PATTERN_DETECTORS["Double Bottom"] is scan.detect_double_bottom
-    assert set(scan.ACTIVE_PATTERNS) == set(scan.BREAKOUT_AGE_LAG) - {"Double Bottom"}
-    assert scan.scan_symbol("DB", db_df) == []                                 # the active detectors ignore it
+    assert set(scan.ACTIVE_PATTERNS) == set(scan.BREAKOUT_AGE_LAG) == set(scan.MAX_LISTED_DAYS)
+    assert [s.pattern for s in scan.scan_symbol("DB", db_df)] == ["Double Bottom"]   # and nothing else fires on it
     assert [s.pattern for s in scan.scan_symbol("DB", db_df, detectors=(scan.detect_double_bottom,))] == \
         ["Double Bottom"]
     for name, df in (("IHS", ihs_df), ("CUP", cup_df), ("WW", wolfe_df)):
