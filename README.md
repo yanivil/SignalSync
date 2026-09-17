@@ -10,7 +10,7 @@
 
 It is a heuristic screener, not trading advice. Every hit should be checked on a chart before acting.
 
-**The page:** [yanivil.github.io/SignalSync](https://yanivil.github.io/SignalSync/), rebuilt after every scan: today's setups with the buy zone, stop and target and a plan graded by the row's day on the list, the watchlist, and the live track record of every signal the scan has committed, scored with the backtest's accounting.
+**The page:** [yanivil.github.io/SignalSync](https://yanivil.github.io/SignalSync/), rebuilt after every scan, in three parts: the buy signals now with the buy limit, stop loss and take profit and one instruction on how to act; why each stock was triggered, with its chart; and every past signal with its result in price terms, scored with the backtest's accounting.
 
 | Pattern | Type | Confirmation trigger | Stop-loss | Reference target |
 |---|---|---|---|---|
