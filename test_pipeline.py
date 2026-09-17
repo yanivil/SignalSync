@@ -112,7 +112,7 @@ def test_load_symbols_without_any_source_raises_and_warns_about_missing_csv(monk
 @pytest.fixture
 def universe_csv(tmp_path):
     p = tmp_path / "universe.csv"
-    p.write_text("Symbol,Security\nCUP,Cup Co\nIHS,Shoulders Inc\nWW,Wolfe Ltd\n"
+    p.write_text("Symbol,Security\nCUP,Cup Co\nIHS,Shoulders Inc\nWW,Wolfe Ltd\nDB,Double Co\n"
                  "NOISE,Random Walk plc\nFLAT,Flatline SA\nGONE,Delisted Corp\n")
     return str(p)
 
@@ -132,16 +132,16 @@ def test_end_to_end_mini_universe(tmp_path, universe_csv, fake_yfinance, mini_un
     meta, signals = data["meta"], data["signals"]
 
     # Universe -> ingest: six listed, one delisted, one throttled once and recovered.
-    assert (meta["universe"], meta["scanned"], meta["errors"]) == (6, 5, 1)
+    assert (meta["universe"], meta["scanned"], meta["errors"]) == (7, 6, 1)
     assert yf.history_calls("WW") == 2 and yf.history_calls("GONE") == 1 and yf.sleeps == [5]
     assert meta["last_bar"] == END and meta["skipped_bar"] is None
-    assert meta["last_bar_symbols"] == 5 and meta["lagging_symbols"] == 0
+    assert meta["last_bar_symbols"] == 6 and meta["lagging_symbols"] == 0
     assert meta["filled_close_symbols"] == 0
     assert meta["min_score"] == scan.MIN_SCORE and meta["max_breakout_age"] == scan.MAX_BREAKOUT_AGE
 
     # Detection: the three setups fire, the two controls stay silent.
     by_ticker = {s["ticker"]: s for s in signals}
-    assert set(by_ticker) == {"CUP", "IHS", "WW"}
+    assert set(by_ticker) == {"CUP", "IHS", "WW", "DB"}
     assert {by_ticker[t]["pattern"] for t in by_ticker} == set(scan.ACTIVE_PATTERNS)
 
     # Schema and integrity of every signal.
@@ -164,7 +164,7 @@ def test_end_to_end_mini_universe(tmp_path, universe_csv, fake_yfinance, mini_un
 
     # Report formatting.
     assert report.startswith("# S&P 500 pattern scan — ")
-    assert "Scanned 5 of 6 symbols" in report and f"last bar {END}" in report
+    assert "Scanned 6 of 7 symbols" in report and f"last bar {END}" in report
     assert "Data errors: 1" in report
     n_conf = sum(s["status"] == "CONFIRMED" for s in signals)
     n_watch = len(signals) - n_conf
@@ -205,8 +205,8 @@ def test_end_to_end_mini_universe(tmp_path, universe_csv, fake_yfinance, mini_un
     # No index or volatility frames in this fake: the context degrades to breadth alone, never to a failure.
     m = meta["market"]
     assert m["regime"] is None and m["vix"] is None and m["index_close"] is None
-    assert m["breadth_symbols"] == 5 and 0 <= m["breadth"] <= 1 and m["as_of"] == END
-    assert f"Market: {m['breadth']:.0%} of 5 symbols above their SMA200." in report
+    assert m["breadth_symbols"] == 6 and 0 <= m["breadth"] <= 1 and m["as_of"] == END
+    assert f"Market: {m['breadth']:.0%} of 6 symbols above their SMA200." in report
     for s in signals:
         assert f"| {s['ticker']} | {s['pattern']} | {s['entry']} | {s['max_buy']} | {s['stop']} |" in report
     assert f"{scan.MAX_RUNAWAY:.0%} above the trigger" in report   # footer states the real rule
@@ -420,7 +420,7 @@ def test_market_series_and_context(mini_universe):
     m = scan.market_context(series, END)
     # Breadth: every symbol against its own positional 200-bar SMA on the last bar.
     above = [float(df["Close"].iloc[-1]) > float(df["Close"].iloc[-200:].mean()) for df in mini_universe.values()]
-    assert m["breadth_symbols"] == 5 and m["breadth"] == round(sum(above) / 5, 4)
+    assert m["breadth_symbols"] == 6 and m["breadth"] == round(sum(above) / 6, 4)
     idx = frames[scan.MARKET_INDEX]["Close"]
     assert m["regime"] == "bull" and m["index_sma50_vs_sma200_pct"] > 0
     assert m["index_close"] == round(float(idx.iloc[-1]), 2)
@@ -460,9 +460,9 @@ def test_end_to_end_reports_market_context(tmp_path, universe_csv, fake_yfinance
     assert rc == 0
     meta = data["meta"]
     m = meta["market"]
-    assert m["regime"] == "bull" and m["vix"] == 17.0 and m["breadth_symbols"] == 5 and m["as_of"] == END
+    assert m["regime"] == "bull" and m["vix"] == 17.0 and m["breadth_symbols"] == 6 and m["as_of"] == END
     assert yf.history_calls(scan.MARKET_INDEX) == 1 and yf.history_calls(scan.MARKET_VOL) == 1
-    assert (meta["universe"], meta["scanned"], meta["errors"]) == (6, 5, 1)   # context symbols are not members
+    assert (meta["universe"], meta["scanned"], meta["errors"]) == (7, 6, 1)   # context symbols are not members
     assert scan.market_line(m) in report and "(bull); VIX 17.0;" in report
 
 

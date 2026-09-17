@@ -82,9 +82,9 @@ def flat_df() -> pd.DataFrame:
 
 @pytest.fixture
 def mini_universe() -> Dict[str, pd.DataFrame]:
-    """Five tickers with history: three textbook setups plus two negative controls."""
+    """Six tickers with history: four textbook setups plus two negative controls."""
     return {"CUP": make_cup_and_handle(), "IHS": make_inverse_hs(), "WW": make_bullish_wolfe(),
-            "NOISE": make_random_walk(0), "FLAT": make_flat()}
+            "DB": make_double_bottom(), "NOISE": make_random_walk(0), "FLAT": make_flat()}
 
 
 # --------------------------------------------------------------------------- #

@@ -70,6 +70,7 @@ Read all of it with four caveats. Both years were mostly bull markets (70 % and 
 | `WATCH_PROXIMITY` 5 % | the 2026-09-04 report, 10 of 17 rows lost in a day | none | a reporting choice, not a replay question |
 | `MAX_LISTED_DAYS` 6, Wolfe 5 | the eleven yearly point-in-time runs 34323013559 to 34323039560, pooled: the same signals bought on day N against day 1 (late entry, below) | the same runs year by year: days 4-9 worse in 10 of 11 years, day 2 no different in any | adopted 2026-09-15 (#115); it changes no first-seen row the replays score, only which repeat listings the report shows |
 | `WATCH_ONLY_PATTERNS` cup | the eleven yearly point-in-time runs (the table below): cups +0.03 R on 305 signals, 18 % hit, against +0.23 and +0.43 for the other two | the same runs year by year: cups were the weakest pattern in most years and never the best | adopted 2026-09-17 (#109) after two of the first three live losses were cups; applied at report time, so the replay figures, which include cups, are unchanged and the pattern stays measured |
+| Double Bottom in `ACTIVE_PATTERNS` | the eleven yearly point-in-time runs 35260820348 to 35260846765 (tuned, all four patterns): 215 signals, +0.13 R, interval [+0.00, +0.26] | the same runs year by year, 7 of 11 positive; the set with the reward floor off (35260849601 to 35260875301): 752 signals at +0.10 R, interval [+0.01, +0.18], 9 of 11 years | adopted 2026-09-17 (#126), the thinnest edge adopted so far; review after 30 live signals |
 
 ### Ten years on the index as it was (2026-09-08)
 
@@ -147,6 +148,23 @@ Day by day the later entries run +0.28, +0.22, +0.18, +0.20, +0.27, +0.12, +0.05
 What this settles: a row on its second day is as good as a fresh one; from the third day the same signal pays about 0.1 R less than it did on day 1, in ten of eleven years, and stays positive on average through day 6 only because survivors are a better population; from day 7 the replay shows no edge (+0.12, +0.05, −0.00, intervals spanning zero), for a Wolfe from day 6. No constant changes: the age window is a first-report question (#98). The day on the list belongs in the report and on the site next to the age, with the plain entry line reserved for days 1-2, a late note from day 3 and no entry line from day 7 (Wolfe from day 6); the rule decision was the owner's and is recorded below.
 
 **Adopted 2026-09-15 as `MAX_LISTED_DAYS`** (6 sessions, a Wolfe 5): the scanner carries each structure's `first_listed` session across nights (keyed on ticker, pattern and stop, like the replay), counts `listed_day` from the bars, and retires a confirmed row past the limit, once, as `RETIRED` in the close-out list, then remembers it in the file's `retired` list while the detector still produces the structure so it neither returns as new nor sits on the watchlist. The breakout age limit still applies on top, which is why the limit binds only for an inverse H&S first seen at age 2 or younger and a Wolfe at age 3 or younger; a cup never reaches it. The `legacy` profile has no limit. The evidence is the table above: the rule changes no first-seen row the replays score, so the yearly figures stand, and the repeat listings it removes are exactly those the pooled and the year-by-year comparison found worthless.
+
+### The double bottom, tested (2026-09-17)
+
+The first candidate pattern since the cup went watch-only: two consecutive swing lows within 3 % of each other, a rally of at least 10 % between them, a close above that rally's peak as the trigger, the stop under the second low and one pattern height as the target (the [catalog](02-Pattern-Catalog.md) has the rules). Replayed over the eleven point-in-time years with all four patterns in the same runs, so the other three reproduce their known figures and the inverse H&S rows are there for the overlap count (#126; runs 35260820348 to 35260846765 under the tuned rules, 35260849601 to 35260875301 with `MIN_REWARD_RISK=None`).
+
+| Rule set | Slice | Signals | Hit rate | Mean R | Median R | 95 % CI, month blocks | Years positive |
+|---|---|---|---|---|---|---|---|
+| tuned | double bottom | 215 | 58 % | +0.13 | +0.13 | [+0.00, +0.26] | 7 of 11 |
+| tuned | double bottom, no H&S on the same ticker within 15 days | 208 | 58 % | +0.13 | +0.12 | [+0.00, +0.25] | 8 of 11 |
+| tuned | inverse H&S in the same runs | 1095 | 39 % | +0.22 | −0.59 | [+0.07, +0.37] | |
+| reward floor off | double bottom, all forms | 752 | 59 % | +0.10 | +0.27 | [+0.01, +0.18] | 9 of 11 |
+| reward floor off | second low higher than the first | 424 | 60 % | +0.13 | +0.30 | [+0.04, +0.22] | |
+| reward floor off | second low equal or lower | 328 | 58 % | +0.05 | +0.18 | [−0.06, +0.17] | |
+
+Per year under the tuned rules (traded / hit / mean R): 2016 21 / 67 % / +0.31, 2017 12 / 78 % / +0.51, 2018 16 / 36 % / −0.25, 2019 14 / 50 % / −0.05, 2020 20 / 80 % / +0.36, 2021 12 / 88 % / +0.39, 2022 28 / 48 % / −0.04, 2023 28 / 40 % / −0.01, 2024 14 / 62 % / +0.24, 2025 28 / 55 % / +0.15, 2026 to 09-04 22 / 54 % / +0.10. Only 7 of the 215 signals sit within 15 calendar days of an inverse H&S signal on the same ticker: the two patterns find different bases.
+
+What this settles: a real but thin edge. The double bottom wins often and small, because the target is one pattern height and the stop sits just under the second low, so per signal it earns about half of what the inverse H&S does and a third of the Wolfe; its bad years are the bear years, as for the H&S. With equal lows the reward is one height against a slightly larger risk, so the tuned profile's reward:risk floor keeps only the form with a higher second low, which is also the better half without the floor. Against the gate it passes narrowly: positive, incremental, positive in most years, the interval clearing zero in the larger set and touching it in the tuned set, where 215 signals is what makes it wide. **Adopted 2026-09-17** into `ACTIVE_PATTERNS` under the tuned rules, about 20 signals a year, with a review after the first 30 live signals. The random-walk false-positive rate of the scan rises from about 2 % of series to 6 % with the fourth detector (its 10 % rise rule is what holds it there; without it, 43 of 200 random walks show a W).
 
 ### Market context (2026-09-08)
 
@@ -247,9 +265,9 @@ Not configurable: the handle low must stay in the upper half of the cup.
 | `IHS_TREND_SMA_OR` | `True` | `False` | SMA50 < SMA200 satisfies the trend filter on its own | |
 | `IHS_TARGET_AT_HEAD` | `True` | `False` | measured move uses the neckline at the head bar (spec) rather than at the break bar | identical for a flat neckline |
 
-## Double Bottom (experimental)
+## Double Bottom
 
-Not in the nightly scan (`ACTIVE_PATTERNS`); replayed with `--patterns db`. Its constants have no `legacy` value.
+Active since 2026-09-17 (the section "The double bottom, tested" above); replayed alone with `--patterns db`. Its constants have no `legacy` value.
 
 | Constant | Default | Meaning | Tuning note |
 |---|---|---|---|

@@ -6,7 +6,7 @@
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![discussions](https://img.shields.io/badge/discussions-join-blue)](https://github.com/yanivil/SignalSync/discussions)
 
-**SignalSync scans every S&P 500 constituent on daily bars for three bullish chart patterns and reports only confirmed, risk-defined setups with an entry, a structural stop and a reference target.**
+**SignalSync scans every S&P 500 constituent on daily bars for four bullish chart patterns and reports only confirmed, risk-defined setups with an entry, a structural stop and a reference target.**
 
 It is a heuristic screener, not trading advice. Every hit should be checked on a chart before acting.
 
@@ -17,7 +17,7 @@ It is a heuristic screener, not trading advice. Every hit should be checked on a
 | Cup & Handle | continuation | daily close above the handle high on ≥ 1.4× average volume | handle low − 0.25 ATR | entry + (right rim − cup bottom) |
 | Inverse Head & Shoulders | reversal | daily close above the neckline on ≥ 1.3× average volume | right-shoulder low − 0.25 ATR | entry + (neckline at the head − head) |
 | Bullish Wolfe Wave | reversal | daily close back above the 1-3 line after point 5 | point-5 low − 0.25 ATR | line 1-4 at the ETA |
-| Double Bottom (experimental, not scanned until it passes the replay) | reversal | daily close above the peak between two lows within 3 % of each other, the rally between them ≥ 10 % | second low − 0.25 ATR | entry + (peak − lower low) |
+| Double Bottom | reversal | daily close above the peak between two lows within 3 % of each other, the rally between them ≥ 10 % | second low − 0.25 ATR | entry + (peak − lower low) |
 
 Four rules shape every detector: **no forced patterns** (strict geometry plus a 0–100 quality score, minimum 60), **respect the wider trend** (SMA50/SMA200 filters), **enter only after confirmation** (close-based triggers with volume, `CONFIRMED` vs `WATCHLIST`, no chasing beyond 5 %), and **always define risk** (setups with a stop more than 12 % away for cups, 15 % for the others, are rejected). Two more rules came from the eleven-year replay: a confirmed row is retired after its sixth session on the list (a Wolfe after its fifth), because entries later than that showed no edge; and the Cup & Handle is watch-only, listed but never a buy signal, because its breakouts made +0.03 R per signal with 18 % reaching the target. The rules follow the engine specification adopted on 2026-09-05; the previous rule set is kept as the `legacy` profile (`--profile legacy`) so the two can be replayed side by side.
 
@@ -40,7 +40,7 @@ flowchart LR
     L & M --> N[GitHub Actions commit<br/>→ pages workflow<br/>yanivil.github.io/SignalSync]
 ```
 
-The whole scanner is one module, [`scan.py`](scan.py): constants at the top, then data loading, indicators, the three detectors, and reporting. See the wiki for the full walk-through.
+The whole scanner is one module, [`scan.py`](scan.py): constants at the top, then data loading, indicators, the four detectors, and reporting. See the wiki for the full walk-through.
 
 ## Quickstart
 

@@ -81,6 +81,10 @@ PATTERN_EXPLAINED = {
     "Bullish Wolfe Wave": "Five swings inside a narrowing, falling channel, the fifth briefly undershooting the "
                           "channel's lower line. A daily close back above the line through points 1 and 3 is the "
                           "trigger; the target is where the line through points 1 and 4 will be.",
+    "Double Bottom": "Two lows at about the same level with a rally of at least 10 % between them: the second test "
+                     "of the low held. A daily close above that rally's peak is the trigger. The stop sits under the "
+                     "second low, so the reward is about one pattern height for a similar risk: more wins, smaller "
+                     "ones.",
 }
 # The tuning page's figures the page quotes next to the live numbers (docs/wiki/03-Configuration-and-Tuning.md).
 REPLAY_REFERENCE: Dict[str, Any] = {
@@ -90,7 +94,8 @@ REPLAY_REFERENCE: Dict[str, Any] = {
                 "note": "positive in ten of eleven years; drawdowns of 36 to 41 R inside four of them"},
     "patterns": {"Inverse Head & Shoulders": {"trades": 1097, "hit": 0.39, "mean_r": 0.23},
                  "Cup & Handle": {"trades": 305, "hit": 0.18, "mean_r": 0.03},
-                 "Bullish Wolfe Wave": {"trades": 230, "hit": 0.36, "mean_r": 0.43}},
+                 "Bullish Wolfe Wave": {"trades": 230, "hit": 0.36, "mean_r": 0.43},
+                 "Double Bottom": {"trades": 215, "hit": 0.58, "mean_r": 0.13}},
     "late_entry": [{"day": "1", "trades": 1632, "mean_r": 0.22, "vs_day1": None},
                    {"day": "2", "trades": 1111, "mean_r": 0.28, "vs_day1": -0.01},
                    {"day": "3", "trades": 952, "mean_r": 0.22, "vs_day1": -0.09},
