@@ -21,7 +21,16 @@ All notable changes to this project are documented here. Format follows
   structure inside the window up to the entry) and says so in the report. Runs on any
   yfinance interval; Yahoo serves hourly bars for the last 730 days only, which the
   report states when a longer span was asked for. `test_backtest_wolfe_spec.py`
-  covers the rules on deterministic hourly fixtures.
+  covers the rules on deterministic hourly fixtures. First runs
+  (2026-09-18, run 35362213916), 503 symbols: on hourly bars over the last
+  729 days, 3443 trades, TP1 1956 times in 3430 closed, a 57.0 % win rate at
+  +0.03 R per trade; on daily bars over three years, 428 trades, TP1 229
+  times in 420 closed, 54.5 % at +0.09 R. The win rate comes from a target
+  nearer than the stop: 2100 of the 3443 hourly trades had a projected
+  reward:risk below 1.0 and won 67.8 % of the time for +0.02 R. None of the
+  seven review factors separates outcomes on both windows, and the market
+  regime, the VIX and the higher-timeframe trend reverse sign between them.
+  Nothing in the scanner changes; the tuning page has the tables.
 
 ### Changed (the double bottom is active, #126)
 - `ACTIVE_PATTERNS` gains the Double Bottom: the nightly scan runs four

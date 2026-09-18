@@ -182,6 +182,42 @@ gh workflow run backtest-wolfe-spec.yml -f overrides="--stop-atr 0.25 --max-hold
 
 The noise floor of these rules is higher than the scanner's: on 40 geometric random walks of 1,500 hourly bars (`test_backtest_wolfe_spec.py::test_random_walks_rarely_trigger`, which prints the figure) they take 2.3 trades per 1,000 bars, against the scanner's Wolfe detector firing on about 1 % of 500-bar daily series; three-bar swings make many more structures, and the specification has no rhythm, sweet-zone or quality-score gate. Read the results with the same caveats as every replay here: today's constituents only (survivorship bias), one regime per window, and the factor tables are one exploratory pass, so a factor earns a rule only if its buckets separate outcomes on both halves of a split, and a bucket of fewer than about 30 trades decides nothing. The results of the first runs are recorded below once they exist.
 
+**The first runs (2026-09-18, run 35362213916).** Both intervals over the S&P 500 as it is today, hourly bars clamped to the last 729 days (2024-09-19 on) and daily bars over the full three years (2023-09-18 on), 503 symbols each.
+
+| Interval | Window | Structures | Traded | TP1 | SL | Time exit | Win rate | Mean R | Total R |
+|---|---|---|---|---|---|---|---|---|---|
+| 1h | 2024-09-19 to 2026-09-18 | 6225 | 3443 | 1956 | 1450 | 24 | 57.0 % | +0.03 | +104.20 |
+| 1d | 2023-09-18 to 2026-09-18 | 1051 | 428 | 229 | 125 | 66 | 54.5 % | +0.09 | +38.83 |
+
+Win rate is TP1 over closed trades (a time exit is closed; the 13 hourly and 8 daily trades still open when the data ends are not). The funnel on hourly bars: 6225 structures passed the geometry, 4788 swept the 1-3 line, 3687 reclaimed it in time (1002 made a lower low first, 99 never closed back above), 3465 left room for a trade and 22 fell to a position already open.
+
+**What the win rate hides.** A majority of entries sit closer to the point-4 high than to the stop, so the strategy wins often and wins less than it risks. Hourly, 2100 of 3443 trades had a projected reward:risk below 1.0; they won 67.8 % of the time for +0.02 R each. The buckets run the other way on every step:
+
+| Projected R:R | 1h trades | 1h win rate | 1h mean R | 1d trades | 1d win rate | 1d mean R |
+|---|---|---|---|---|---|---|
+| < 1.0 R | 2100 | 67.8 % | +0.02 | 277 | 64.6 % | +0.02 |
+| 1.0-1.5 R | 661 | 46.0 % | +0.03 | 78 | 37.7 % | +0.14 |
+| 1.5-2.0 R | 324 | 39.8 % | +0.04 | 39 | 43.2 % | +0.48 |
+| > 2.0 R | 358 | 29.9 % | +0.08 | 34 | 21.9 % | +0.14 |
+
+This answers the specification's own question, the one it asked the log to settle: strong impulse candles with a low initial R:R do win more often, and the higher win rate does not pay for the smaller reward. Expectancy is flat to slightly positive everywhere, which is what a near-zero-edge rule looks like once the target is placed inside the noise.
+
+**None of the seven factors earns a rule.** Under this repository's protocol a factor has to separate outcomes on both halves of a split; here two independent windows are available, and the two strongest-looking factors reverse between them:
+
+| Factor | 1h | 1d |
+|---|---|---|
+| Market regime, SPY above its SMA 50 | 56.5 % / +0.02 against 58.9 % / +0.07 below | 60.5 % / +0.15 against 41.1 % / −0.03 below |
+| VIX at or below 15 | 46.6 % / −0.22, and above 25: 65.3 % / +0.24 | 63.6 % / +0.20, and above 25: 34.6 % / −0.10 |
+| RSI divergence (P5 above P3) | 57.1 % / +0.00 against 57.0 % / +0.04 without | 60.2 % / +0.04 against 53.9 % / +0.12 without |
+| Higher-timeframe EMA 50, close above | 60.9 % / +0.06 against 54.6 % / +0.02 below | 50.9 % / −0.04 against 53.4 % / +0.12 below |
+| Nearby support within 0.5 ATR | 56.4 % / +0.00 against 57.8 % / +0.06 without | 54.1 % / +0.06 against 55.0 % / +0.14 without |
+
+The regime and volatility readings flip sign between the two windows, so neither is a filter. RSI divergence, the factor the review ranked second, is inert on the hourly set: 57.1 % against 57.0 %. Higher-timeframe trend flips too. Nearby support is mildly negative on both, and volume is the only one pointing the same way twice, weakly (hourly, 1.3-2.0x: 62.2 % and +0.15 R on 413 trades; daily, 1.0-1.3x: 65.6 % and +0.26 R on 97), which is the same "a feature, not a gate" verdict the volume z-score got in the second review above. Per year the hourly set ran −0.02, +0.06 and +0.02 R over 2024, 2025 and 2026; the daily set +0.08, +0.23, −0.10 and +0.18 over 2023 to 2026.
+
+**The selectivity question.** The hourly replay took 3443 trades over about 1.75 million bars, 1.97 per 1,000 bars. The offline random-walk check in `test_backtest_wolfe_spec.py` takes 2.27 per 1,000 bars on synthetic geometric noise. The two are not measured on the same generating process, so this is not proof, but the rule fires on real prices no more often than on a random walk, which is what the flat expectancy above would predict. The scanner's own Wolfe detector, with five-bar pivots, the sweet zone, the rhythm rule and the quality score, fires on about 1 % of 500-bar random series.
+
+**Read as an answer to "is this our approach?": no, and the replay does not argue for adopting it.** Three years of the index at a flat +0.03 to +0.09 R per trade, with every proposed confirmation factor either inert or reversing between windows, does not clear the gate any rule change in this repository has to pass. What the harness is good for now is the same question asked one rule at a time: `--stop-atr`, `--max-hold-bars` and `--max-reclaim-bars` each change one thing, and the point-4 target against the scanner's EPA is the obvious next comparison.
+
 ### Market context (2026-09-08)
 
 The report header and every backtest row carry the SPY regime (close and SMA50 against the SMA200), the VIX and the breadth of the universe, and the backtest summaries add a per-regime slice with VIX and breadth among the feature buckets. Over the ten years on the point-in-time index (the section above), signals scanned in a SPY bear regime ran +0.59 R on 226 against +0.16 on 1190 in bull regimes, positive in five of the six years with bear sessions, and signals scanned at a VIX above 25 ran +0.50 R in eight of eight years; a VIX below 15, negative in the two-year window, ran +0.21 R pooled. Nothing gates on the context; #101 tracks how the report should present it.
