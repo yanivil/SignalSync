@@ -1,6 +1,6 @@
 {
   "meta": {
-    "run_date": "2026-09-19 05:54",
+    "run_date": "2026-09-20 06:17",
     "universe": 503,
     "scanned": 503,
     "errors": 0,
@@ -46,7 +46,7 @@
     "watch_only_patterns": [
       "Cup & Handle"
     ],
-    "previous_run": "2026-09-18 05:56",
+    "previous_run": "2026-09-19 05:54",
     "previous_profile": "tuned"
   },
   "signals": [
@@ -161,18 +161,6 @@
       "watch_only": false
     }
   ],
-  "closed": [
-    {
-      "ticker": "EBAY",
-      "pattern": "Double Bottom",
-      "was": "WATCHLIST",
-      "since": "2026-09-17",
-      "entry": 117.77,
-      "stop": 105.39,
-      "target": 130.98,
-      "outcome": "FADED",
-      "detail": "close 111.84 more than 5% below entry 117.77"
-    }
-  ],
+  "closed": [],
   "retired": []
 }
