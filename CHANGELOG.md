@@ -5,6 +5,33 @@ All notable changes to this project are documented here. Format follows
 
 ## [Unreleased]
 
+### Added (the 1H Wolfe specification, replayed on its own terms)
+- `tools/backtest_wolfe_spec.py` (the `backtest-wolfe-spec` workflow): a replay of the
+  external 1H Bullish Wolfe Wave specification as written, separate from the scanner
+  because it differs on the timeframe, the swing depth (3 bars), the window (25
+  sessions), the stop (0.5 ATR under point 5), the target (the point-4 high), the exit
+  (stop, target or a time exit after 12 sessions) and the absence of a reward:risk
+  filter. Every trade is logged with the specification's schema plus the seven review
+  factors (volume ratio, RSI divergence between points 3 and 5, candle body ratio,
+  projected reward:risk, higher-timeframe EMA trend, nearby support, SPY regime and
+  VIX); the report gives the funnel from structures to trades, the win rate (TP1 hits
+  over closed trades), the outcome per bucket of each factor and per year. Where the
+  specification is silent the tool reads it conservatively (no anticipated entry: the
+  reclaim counts from the bar that confirms point 5; a reclaim window of 25 bars; the
+  structure inside the window up to the entry) and says so in the report. Runs on any
+  yfinance interval; Yahoo serves hourly bars for the last 730 days only, which the
+  report states when a longer span was asked for. `test_backtest_wolfe_spec.py`
+  covers the rules on deterministic hourly fixtures. First runs
+  (2026-09-18, run 35362213916), 503 symbols: on hourly bars over the last
+  729 days, 3443 trades, TP1 1956 times in 3430 closed, a 57.0 % win rate at
+  +0.03 R per trade; on daily bars over three years, 428 trades, TP1 229
+  times in 420 closed, 54.5 % at +0.09 R. The win rate comes from a target
+  nearer than the stop: 2100 of the 3443 hourly trades had a projected
+  reward:risk below 1.0 and won 67.8 % of the time for +0.02 R. None of the
+  seven review factors separates outcomes on both windows, and the market
+  regime, the VIX and the higher-timeframe trend reverse sign between them.
+  Nothing in the scanner changes; the tuning page has the tables.
+
 ### Changed (the double bottom is active, #126)
 - `ACTIVE_PATTERNS` gains the Double Bottom: the nightly scan runs four
   detectors. Evidence, the eleven yearly point-in-time runs with all four
