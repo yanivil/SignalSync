@@ -1,6 +1,6 @@
 {
   "meta": {
-    "run_date": "2026-09-26 06:11",
+    "run_date": "2026-09-27 06:37",
     "universe": 503,
     "scanned": 503,
     "errors": 0,
@@ -13,7 +13,7 @@
     "last_bar_histogram": {
       "2026-09-25": 503
     },
-    "filled_close_symbols": 1,
+    "filled_close_symbols": 0,
     "profile": "tuned",
     "min_score": 60,
     "max_breakout_age": 3,
@@ -46,7 +46,7 @@
     "watch_only_patterns": [
       "Cup & Handle"
     ],
-    "previous_run": "2026-09-25 06:11",
+    "previous_run": "2026-09-26 06:11",
     "previous_profile": "tuned"
   },
   "signals": [
@@ -161,40 +161,6 @@
       "watch_only": false
     }
   ],
-  "closed": [
-    {
-      "ticker": "GILD",
-      "pattern": "Cup & Handle",
-      "was": "WATCHLIST",
-      "since": "2026-09-24",
-      "entry": 150.63,
-      "stop": 141.89,
-      "target": 182.41,
-      "outcome": "DROPPED",
-      "detail": "pattern no longer qualifies"
-    },
-    {
-      "ticker": "CVX",
-      "pattern": "Cup & Handle",
-      "was": "WATCHLIST",
-      "since": "2026-09-24",
-      "entry": 215.28,
-      "stop": 202.31,
-      "target": 269.71,
-      "outcome": "FADED",
-      "detail": "close 204.45 more than 5% below entry 215.28"
-    },
-    {
-      "ticker": "ECHO",
-      "pattern": "Double Bottom",
-      "was": "WATCHLIST",
-      "since": "2026-09-24",
-      "entry": 94.95,
-      "stop": 83.5,
-      "target": 107.42,
-      "outcome": "FADED",
-      "detail": "close 90.11 more than 5% below entry 94.95"
-    }
-  ],
+  "closed": [],
   "retired": []
 }
