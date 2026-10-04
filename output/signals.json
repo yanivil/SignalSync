@@ -1,6 +1,6 @@
 {
   "meta": {
-    "run_date": "2026-10-03 06:34",
+    "run_date": "2026-10-04 06:50",
     "universe": 503,
     "scanned": 503,
     "errors": 0,
@@ -46,7 +46,7 @@
     "watch_only_patterns": [
       "Cup & Handle"
     ],
-    "previous_run": "2026-10-02 07:01",
+    "previous_run": "2026-10-03 06:34",
     "previous_profile": "tuned"
   },
   "signals": [
@@ -205,40 +205,6 @@
       "watch_only": false
     }
   ],
-  "closed": [
-    {
-      "ticker": "FCX",
-      "pattern": "Cup & Handle",
-      "was": "WATCHLIST",
-      "since": "2026-10-01",
-      "entry": 70.83,
-      "stop": 64.9,
-      "target": 86.19,
-      "outcome": "DROPPED",
-      "detail": "pattern no longer qualifies"
-    },
-    {
-      "ticker": "HAS",
-      "pattern": "Cup & Handle",
-      "was": "WATCHLIST",
-      "since": "2026-10-01",
-      "entry": 94.64,
-      "stop": 87.66,
-      "target": 116.29,
-      "outcome": "FADED",
-      "detail": "close 89.54 more than 5% below entry 94.64"
-    },
-    {
-      "ticker": "ABT",
-      "pattern": "Double Bottom",
-      "was": "WATCHLIST",
-      "since": "2026-10-01",
-      "entry": 97.44,
-      "stop": 86.99,
-      "target": 108.44,
-      "outcome": "DROPPED",
-      "detail": "pattern no longer qualifies"
-    }
-  ],
+  "closed": [],
   "retired": []
 }
