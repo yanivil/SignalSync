@@ -1,6 +1,6 @@
 {
   "meta": {
-    "run_date": "2026-10-04 06:50",
+    "run_date": "2026-10-05 07:03",
     "universe": 503,
     "scanned": 503,
     "errors": 0,
@@ -46,7 +46,7 @@
     "watch_only_patterns": [
       "Cup & Handle"
     ],
-    "previous_run": "2026-10-03 06:34",
+    "previous_run": "2026-10-04 06:50",
     "previous_profile": "tuned"
   },
   "signals": [
