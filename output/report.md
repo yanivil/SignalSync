@@ -1,4 +1,4 @@
-# S&P 500 pattern scan — 2026-10-10 07:07
+# S&P 500 pattern scan — 2026-10-11 07:13
 
 Scanned 501 of 503 symbols (daily bars, last bar 2026-10-09). Min quality score 60. Breakouts older than the per-pattern limit are dropped (bars: Cup & Handle 3, Inverse Head & Shoulders 8, Bullish Wolfe Wave 8, Double Bottom 8; H&S and Wolfe get 5 extra bars because their last pivot is only visible 5 bars after it prints). Rows with reward:risk below 1.0 are dropped. Watchlist rows whose pattern completed more than 60 bars ago are dropped (a breakout is reported whenever it comes). A confirmed row is retired after its Cup & Handle session 6, Inverse Head & Shoulders session 6, Bullish Wolfe Wave session 5, Double Bottom session 6 on the list: entries later than that showed no edge in replay. Cup & Handle is watch-only: breakouts are listed on the watchlist for information, never as a buy signal (ten-year replay +0.03 R for the cup).
 Data errors: 2
@@ -23,7 +23,7 @@ Market: SPY 8.2 % above its SMA200, SMA50 > SMA200 (bull); VIX 14.8; 50% of 499 
 | CVX | Cup & Handle | 215.28 | 223.12 | 199.61 | 7.28 | 269.71 | 3.47 | 68 | - | - | - | 63.4 | close above SMA200, SMA50 > SMA200, SMA200 rising/flat | left rim 2026-03-30 @210.92, bottom 2026-07-01 @163.35 (depth 23%), right rim 2026-09-15 @217.78, handle low 2026-09-22 @200.78 (depth 7.8%), trigger 215.28 |
 | ECHO | Double Bottom | 94.95 | 99.7 | 83.5 | 12.06 | 107.42 | 1.09 | 62 | - | - | - | 60.6 | close below SMA200, SMA50 < SMA200, SMA200 rising/flat | L1 2026-07-29 @82.48, peak 2026-08-17 @94.95, L2 2026-08-26 @84.26, trigger 94.95 |
 
-## Closed since the last report (2026-10-09 07:24): 0
+## Closed since the last report (2026-10-10 07:07): 0
 
 _none_
 
