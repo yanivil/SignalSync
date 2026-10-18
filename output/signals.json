@@ -1,6 +1,6 @@
 {
   "meta": {
-    "run_date": "2026-10-17 05:37",
+    "run_date": "2026-10-18 05:55",
     "universe": 503,
     "scanned": 501,
     "errors": 2,
@@ -46,7 +46,7 @@
     "watch_only_patterns": [
       "Cup & Handle"
     ],
-    "previous_run": "2026-10-16 05:53",
+    "previous_run": "2026-10-17 05:37",
     "previous_profile": "tuned"
   },
   "signals": [
@@ -161,51 +161,6 @@
       "watch_only": true
     }
   ],
-  "closed": [
-    {
-      "ticker": "CME",
-      "pattern": "Double Bottom",
-      "was": "CONFIRMED",
-      "since": "2026-10-15",
-      "entry": 289.46,
-      "stop": 257.43,
-      "target": 322.38,
-      "outcome": "DROPPED",
-      "detail": "pattern no longer qualifies"
-    },
-    {
-      "ticker": "VTR",
-      "pattern": "Bullish Wolfe Wave",
-      "was": "CONFIRMED",
-      "since": "2026-10-15",
-      "entry": 84.86,
-      "stop": 79.43,
-      "target": 100.01,
-      "outcome": "DROPPED",
-      "detail": "pattern no longer qualifies"
-    },
-    {
-      "ticker": "ORCL",
-      "pattern": "Bullish Wolfe Wave",
-      "was": "WATCHLIST",
-      "since": "2026-10-15",
-      "entry": 136.81,
-      "stop": 129.29,
-      "target": 162.77,
-      "outcome": "FAILED",
-      "detail": "close 128.23 on 2026-10-16 at or below stop 129.29"
-    },
-    {
-      "ticker": "ZBRA",
-      "pattern": "Cup & Handle",
-      "was": "WATCHLIST",
-      "since": "2026-10-15",
-      "entry": 389.72,
-      "stop": 363.34,
-      "target": 444.12,
-      "outcome": "FADED",
-      "detail": "close 369.01 more than 5% below entry 389.72"
-    }
-  ],
+  "closed": [],
   "retired": []
 }
