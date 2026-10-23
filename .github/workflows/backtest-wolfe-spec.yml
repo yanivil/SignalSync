@@ -1,0 +1,83 @@
+# Manual: replay the 1H Bullish Wolfe Wave specification (tools/backtest_wolfe_spec.py) on
+# the runner's open internet, on hourly bars (Yahoo serves the last 730 days at most) and on
+# daily bars (any span), and report the win rate: TP1 hits over closed trades, the funnel
+# from structures to trades, and every review factor's buckets.  The Markdown reports land
+# in the job summary; the JSON rows and the reports are kept as artifacts.
+#   gh workflow run backtest-wolfe-spec.yml                                   # 1h and 1d, three years
+#   gh workflow run backtest-wolfe-spec.yml -f intervals=1d -f years=5
+#   gh workflow run backtest-wolfe-spec.yml -f tickers=AAPL,MSFT,NVDA -f intervals=1h
+#   gh workflow run backtest-wolfe-spec.yml -f overrides="--stop-atr 0.25 --max-hold-bars 40"
+# Also runs on pushes that touch its own files (first registration / smoke test).
+name: backtest-wolfe-spec
+
+on:
+  workflow_dispatch:
+    inputs:
+      intervals:
+        description: "comma-separated yfinance intervals to replay, one report each"
+        required: false
+        default: "1h,1d"
+      years:
+        description: "years of history (intraday intervals are limited to the last 730 days by Yahoo)"
+        required: false
+        default: "3"
+      tickers:
+        description: "comma-separated symbols instead of the S&P 500"
+        required: false
+        default: ""
+      limit:
+        description: "replay only the first N symbols (smoke test); empty = all"
+        required: false
+        default: ""
+      overrides:
+        description: "extra tools/backtest_wolfe_spec.py flags, e.g. --stop-atr 0.25 --max-hold-bars 40"
+        required: false
+        default: ""
+  push:
+    paths:
+      - tools/backtest_wolfe_spec.py
+      - .github/workflows/backtest-wolfe-spec.yml
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    # One chart request per symbol and interval; the replay itself is seconds.  The full index on
+    # hourly plus daily bars takes about ten minutes.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies (hash-checked)
+        run: pip install --require-hashes -r requirements.txt
+      - name: Replay
+        env:
+          INTERVALS: ${{ github.event.inputs.intervals || '1h,1d' }}
+          YEARS: ${{ github.event.inputs.years || '3' }}
+          TICKERS: ${{ github.event.inputs.tickers || '' }}
+          LIMIT: ${{ github.event.inputs.limit || '' }}
+          OVERRIDES: ${{ github.event.inputs.overrides || '' }}
+        run: |
+          for interval in ${INTERVALS//,/ }; do
+            cmd=(python tools/backtest_wolfe_spec.py --interval "$interval" --years "$YEARS"
+                 --json "wolfe-spec-$interval.json" --md "wolfe-spec-$interval.md")
+            if [ -n "$TICKERS" ]; then cmd+=(--tickers "$TICKERS"); fi
+            if [ -n "$LIMIT" ]; then cmd+=(--limit "$LIMIT"); fi
+            # shellcheck disable=SC2206
+            cmd+=($OVERRIDES)
+            "${cmd[@]}" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+          done
+      - name: Keep the rows and the reports so several runs can be pooled exactly
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: wolfe-spec-${{ github.run_id }}
+          path: |
+            wolfe-spec-*.json
+            wolfe-spec-*.md
+          if-no-files-found: ignore

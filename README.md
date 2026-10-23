@@ -134,6 +134,7 @@ test_patterns.py                     primitive precision, formula verification, 
 test_pipeline.py                     retry policy, universe loading, end-to-end mini universe
 test_evaluate.py                     outcome classification and the git signal log
 test_backtest.py                     walk-forward replay: no look-ahead, first-seen signals, fills, breakdowns
+test_backtest_wolfe_spec.py          the 1H Wolfe specification replay: swings, geometry, trigger, exits, the seven factors, report
 test_build_site.py                   the web page: grades by day on the list, levels, track record, HTML
 test_site_charts.py                  the bars behind the page's charts, cut at the scan's bar
 test_universe_history.py             point-in-time membership from a git history
@@ -141,6 +142,7 @@ conftest.py                          shared fixtures and the offline yfinance st
 tools/debug_last_bar.py              per-symbol last-bar diagnostics (also a manual GitHub workflow)
 tools/evaluate_signals.py            replay past CONFIRMED signals against later prices (manual workflow)
 tools/backtest.py                    walk-forward replay of the scanner over the last N sessions (manual workflow)
+tools/backtest_wolfe_spec.py         replay of an external 1H Bullish Wolfe Wave specification with the review's seven factors logged (manual workflow)
 tools/universe_history.py            index membership as of any past date, from the constituent dataset's git history
 tools/build_site.py                  builds the web page from signals.json and the live track record
 tools/site_charts.py                 fetches the recent bars behind the page's charts (pages workflow)
@@ -164,6 +166,7 @@ docs/wiki/                           documentation, mirrored into the GitHub wik
 * Cup bases must be explained at least as well by a parabola as by a two-legged V; the rule is calibrated on reference shapes, not on market data (see the pattern catalog).
 * The spec profile requires breakout volume (1.4× for cups, 1.3× for H&S) and caps a cup at half its preceding advance, so it confirms far fewer setups than the legacy rules; breakouts without volume appear on the watchlist marked as such.
 * Signal quality is measured by replay, not proven live. `tools/backtest.py` (the `backtest` workflow) runs the scanner walk-forward over past sessions and `tools/evaluate_signals.py` scores the signals the nightly job actually committed. Every rule value was chosen on the year to 2026-09-04. Replayed on the index as it was in each year from 2016 to 2026 (`--constituents-asof`, which removes most of the survivorship bias; symbols that no longer trade still have no Yahoo history), the tuned profile made +0.23 R per trade, positive in ten of eleven years, with drawdowns of 36 to 41 R inside four of those years against an expected yearly gain near 35 R; the Cup & Handle detector was zero-expectancy over the same years. The [tuning page](docs/wiki/03-Configuration-and-Tuning.md) has the tables and the check every further change must pass.
+* An external 1H Bullish Wolfe Wave specification (three-bar swings, a 25-session window, a stop half an ATR under point 5, the point-4 high as the only target, a time exit after 12 sessions, no reward:risk filter) is not the scanner's Wolfe detector; `tools/backtest_wolfe_spec.py` (the `backtest-wolfe-spec` workflow) replays it as written, on hourly bars (Yahoo serves the last 730 days) and on daily bars, logging its schema plus the seven review factors, and reports the win rate. The [tuning page](docs/wiki/03-Configuration-and-Tuning.md) has the rules as implemented and the results.
 * The quality score is a gate, not a ranking: its buckets do not order outcomes in replay.
 * Yahoo Finance data is unofficial. Symbols with fewer than 60 bars are skipped and counted in `meta.errors`.
 * There is no persistent price cache: every run re-downloads two years of history for the whole universe.
